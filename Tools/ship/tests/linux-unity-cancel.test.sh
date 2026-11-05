@@ -13,10 +13,11 @@ git_init
 mkdir -p "$UNITY_ROOT/Editor/Data/PlaybackEngines/AndroidPlayer/"{SDK,NDK}
 lc="$UNITY_ROOT/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"
 mkdir -p "$(dirname "$lc")"
-# exec preserves the async shell's ignored INT disposition; don't reset it.
+# Model a client ignoring INT explicitly: shell/setsid startup can reset inherited ignores.
 cat > "$lc" <<'EOF'
 #!/bin/bash
 [ "$1" = --activate-ulf ] || exit 0
+trap '' INT
 if [ "${STUB_STUBBORN:-0}" = 1 ]; then trap '' TERM; fi
 echo $$ > "$FAKE_TMP/client.pid"
 if [ "${STUB_FORK:-0}" = 1 ]; then
@@ -81,8 +82,8 @@ def until(condition, seconds=60):
 def gone(pid):
     return not Path(f'/proc/{pid}').exists()
 
-# INT must work for a client retaining inherited dispositions. TERM must also
-# escalate for a stubborn client, and wrapper-only APK TERM must not build.
+# INT must work for a client ignoring it. TERM must also escalate for a
+# stubborn client, and wrapper-only APK TERM must not build.
 cases = [('activate', signal.SIGINT, False),
                                 ('activate', signal.SIGINT, True),
                                 ('activate', signal.SIGTERM, True),
@@ -108,10 +109,14 @@ for command, sig, stubborn, fork in cases:
             client = int((root / 'client.pid').read_text())
             if fork:
                 worker = int((root / 'worker.pid').read_text())
-            # Confirm this regression actually exercises inherited ignored INT.
+            else:
+                # client.ready precedes exec. Wait for the final executable so
+                # /proc cannot sample Bash's transient exec-time signal setup.
+                until(lambda: Path(f'/proc/{client}/exe').resolve() == Path('/bin/sleep').resolve())
+            # Confirm the client really ignores INT before cancelling the wrapper.
             ignored = next(line.split()[1] for line in Path(f'/proc/{client}/status').read_text().splitlines()
                            if line.startswith('SigIgn:'))
-            assert int(ignored, 16) & (1 << (signal.SIGINT - 1))
+            assert int(ignored, 16) & (1 << (signal.SIGINT - 1)), (command, sig, stubborn, fork, ignored)
             cancelled_at = time.monotonic()
             runner.send_signal(sig)
             try:

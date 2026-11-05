@@ -64,7 +64,7 @@ qr_backup() {
   [ -e "$dir" ] && dir="$dir-$$"
   # Backups may contain credentials; never expose them through default directory permissions.
   (umask 077; mkdir "$dir") || qr_die "cannot create private backup $dir"
-  : > "$dir/SHA256SUMS"
+  : > "$dir/SHA256SUMS" || qr_die "backup: cannot create checksum manifest"
   for f in $QR_DATA_FILES; do
     want="$(qr_device_sha "$f")"
     case "$want" in
@@ -74,9 +74,15 @@ qr_backup() {
     qr_adb exec-out cat "$QR_DATA_DIR/$f" > "$dir/$f" 2>/dev/null || qr_die "backup: adb exec-out cat $f failed"
     got="$(qr_sha256 "$dir/$f")"
     [ "$got" = "$want" ] || qr_die "backup: $dir/$f does not match the device (local $got, device $want)"
-    printf '%s  %s\n' "$got" "$f" >> "$dir/SHA256SUMS"
-    qr_log "backup: $f verified ($got)"
+    printf '%s  %s\n' "$got" "$f" >> "$dir/SHA256SUMS" || qr_die "backup: cannot record checksum for $f"
+    qr_log "backup: $f copied and matched device hash ($got)"
   done
+  # Recheck after every payload and manifest write, before installation can use this backup.
+  while read -r want f; do
+    got="$(qr_sha256 "$dir/$f")" || qr_die "backup: cannot hash completed backup file $f"
+    [ "$got" = "$want" ] || qr_die "backup: completed backup checksum mismatch for $f"
+  done < "$dir/SHA256SUMS"
+  qr_log "backup: completed backup verified"
   printf '%s\n' "$dir"
 }
 
