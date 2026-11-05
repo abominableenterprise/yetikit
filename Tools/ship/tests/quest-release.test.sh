@@ -490,17 +490,18 @@ check "rollback installs -r -d the previous APK (lower versionCode) with the sam
 echo noise >> "$root/rel-$short-test/Assets/Mats/A.mat"; echo noise >> "$root/rel-$short-test/Assets/Mats/B.asset"
 echo real >> "$root/rel-$short-build/Assets/Scripts/C.cs"
 run cleanup
-check "cleanup removes a worktree with only .mat/.asset noise" '[ ! -d "$root/rel-$short-test" ]'
+check "cleanup preserves material and asset edits without guessing noise" '[ "$rc" != 0 ] && [ -d "$root/rel-$short-test" ]'
 check "cleanup keeps a worktree with a changed .cs file and says why" \
-  '[ "$rc" != 0 ] && [ -d "$root/rel-$short-build" ] && out_has "keeping $root/rel-$short-build: real changes: Assets/Scripts/C.cs"'
+  '[ "$rc" != 0 ] && [ -d "$root/rel-$short-build" ] && out_has "keeping $root/rel-$short-build: local changes"'
 check "cleanup never touches the warm worktree" '[ -f "$root/mac-pass/Library/Bee/cache" ]'
+git -C "$repo" worktree remove --force "$root/rel-$short-test"
 git -C "$repo" worktree remove --force "$root/rel-$short-build"
-# An index rename has two paths in porcelain -z: destination .asset is noise, source .cs is not.
+# A staged rename is local work regardless of either path's extension.
 run prepare
 mkdir -p "$root/rel-$short-test/Assets/Scripts"
 git -C "$root/rel-$short-test" mv Assets/Scripts/C.cs Assets/Scripts/C.asset
 run cleanup
-check "cleanup preserves staged source-to-asset renames" '[ "$rc" != 0 ] && [ -f "$root/rel-$short-test/Assets/Scripts/C.asset" ] && out_has "Assets/Scripts/C.cs"'
+check "cleanup preserves staged source-to-asset renames" '[ "$rc" != 0 ] && [ -f "$root/rel-$short-test/Assets/Scripts/C.asset" ] && out_has "local changes"'
 git -C "$repo" worktree remove --force "$root/rel-$short-test"
 [ -d "$root/rel-$short-build" ] && git -C "$repo" worktree remove --force "$root/rel-$short-build"
 
