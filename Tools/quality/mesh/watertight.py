@@ -2,7 +2,7 @@
 # Outside-ray voting alone can miss reversed faces on open meshes: a ray entering a hole may see an inward face
 # front first. close_holes() repairs the topology before orienting the resulting closed pieces:
 #  1. Weld UV-seam splits by position, keeping UVs and normals per corner.
-#  2. Split edges shared by three or more faces and drop pieces under SHARD faces. Re-weld only within each kept
+#  2. Split edges shared by three or more faces and drop affected pieces under SHARD faces. Re-weld only within each kept
 #     piece so separated sheets stay apart. Drop fins (faces with two or more open edges), then fill every open
 #     boundary loop with triangulated faces and no new vertices. Each fill corner takes its vertex's UV from a rim
 #     face. If a fill face would span a texture seam, use the rim UV closest to the loop's median colour instead.
@@ -113,6 +113,7 @@ def close_holes(obj, image=None):
     shards = 0
     over_edges = [e for e in bm.edges if len(e.link_faces) > 2]
     if over_edges:
+        affected = {f for e in over_edges for f in e.link_faces}
         bmesh.ops.split_edges(bm, edges=over_edges)
         seen, kept = set(), []
         for f in list(bm.faces):
@@ -127,7 +128,7 @@ def close_holes(obj, image=None):
                                 piece.add(g)
                                 stack.append(g)
             seen |= piece
-            if len(piece) < SHARD:
+            if piece & affected and len(piece) < SHARD:
                 bmesh.ops.delete(bm, geom=list(piece), context="FACES_ONLY")
                 shards += len(piece)
             else:

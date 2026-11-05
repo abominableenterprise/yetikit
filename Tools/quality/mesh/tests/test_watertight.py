@@ -117,6 +117,18 @@ class CloseHolesBlenderTest(unittest.TestCase):
         self.assertEqual((over_after, open_after, shards), (0, 0, 0), "split apart, nothing dropped, nothing reopened")
         self.assertEqual(tris_after, tris_before)
 
+    def test_small_independent_closed_part_survives_an_unrelated_split(self):
+        script = TWO_SHELLS.replace('me = bpy.data.meshes.new("shells")',
+                                    'bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((4, 0, 0)))\n'
+                                    'me = bpy.data.meshes.new("shells")')
+        r, line = run_blender(script)
+        self.assertEqual(r.returncode, 0, r.stdout[-2000:] + r.stderr[-2000:])
+        self.assertIsNotNone(line, r.stdout[-2000:] + r.stderr[-2000:])
+        over_before, over_after, open_after, shards, tris_before, tris_after = map(int, line.split()[1:])
+        self.assertEqual((over_before, over_after, open_after), (3, 0, 0))
+        self.assertEqual(tris_before, 228, "two subdivided shells plus a separate six-face cube")
+        self.assertEqual((shards, tris_after), (0, tris_before), "the unrelated small closed part must survive")
+
     def test_a_turned_face_keeps_its_outward_corner_normals(self):
         r, line = run_blender(INWARD_FACE)
         self.assertIsNotNone(line, r.stdout[-2000:] + r.stderr[-2000:])

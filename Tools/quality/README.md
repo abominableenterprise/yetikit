@@ -74,9 +74,15 @@ per-asset exceptions and review their reasons alongside model changes.
 
 ## Changed-file CI
 
-From the consumer repository root, after fetching the base branch:
+Run these recipes with **Bash** from the consumer repository root. The checkout
+must include `origin/main` and enough history on both branches to find their
+merge base. In GitHub Actions, use `actions/checkout` with `fetch-depth: 0`
+(the default shallow checkout is insufficient), then fetch the base branch if
+needed. `pipefail` makes selection errors fail the step rather than silently
+passing an empty file list to the checker.
 
 ```sh
+set -o pipefail
 git diff --name-only origin/main... -- '*.glb' '*.fbx' | xargs python3 Tools/quality/mesh/check_meshes.py
 ```
 
@@ -84,6 +90,7 @@ For names containing whitespace, deleted assets, and deterministic CI Blender
 availability, use the null-delimited variant:
 
 ```sh
+set -o pipefail
 git diff --name-only --diff-filter=ACMR -z origin/main... -- '*.glb' '*.gltf' '*.fbx' | xargs -0 -r python3 Tools/quality/mesh/check_meshes.py --require-blender --config yetikit-quality.json --json mesh-report.json
 ```
 
