@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Run shell tests in bounded parallel slots; positional filters match basenames.
 # Default: select changes since origin/main; --changed [base] changes the base.
-# --all explicitly runs unchanged tests. --fast omits # test-all: slow files.
+# --all explicitly runs unchanged tests. Slow tests require their own change or
+# a changed script basename explicitly named in # test-all: slow [script ...].
+# --fast omits all slow-tagged files.
 set -euo pipefail
 export LC_ALL=C
 ci_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -24,12 +26,25 @@ while (($#)); do
       ;;
     --help|-h)
       echo 'Usage: test-all.sh [--fast] [--changed [base] | --all] [basename-filter ...]'
+      echo '  --changed skips slow tests unless their own file or a script named in their slow tag changes.'
       exit 0 ;;
     --*) echo "ERROR: unknown option: $1" >&2; exit 1 ;;
     *) filters+=("$1") ;;
   esac
   shift
 done
+
+is_slow() { grep -qE '^# test-all: slow([[:space:]]|$)' "$1"; }
+slow_references_script() {
+  # Explicit basenames only: incidental comments and helper references must not
+  # opt a slow fixture into --changed, including changes to test-all.sh itself.
+  awk -v script="$2" '
+    $1 == "#" && $2 == "test-all:" && $3 == "slow" {
+      for (i = 4; i <= NF; i++) if ($i == script) found = 1
+    }
+    END {exit !found}
+  ' "$1"
+}
 
 selected=()
 if ((${#filters[@]})); then
@@ -68,7 +83,14 @@ if ((changed)); then
           if [ "$path" = "Tools/ship/tests/${test##*/}" ]; then affected+=("$test"); break; fi
           ;;
         Tools/ship/*|.github/workflows/ship.yml)
-          affected+=("$test"); break
+          # Keep broad tooling/workflow coverage for quick tests. Slow fixtures
+          # opt in only to named shell/Python scripts, including lib/ helpers.
+          if ! is_slow "$test"; then affected+=("$test"); break; fi
+          case "$path" in
+            Tools/ship/*.sh|Tools/ship/*.py)
+              if slow_references_script "$test" "${path##*/}"; then affected+=("$test"); break; fi
+              ;;
+          esac
           ;;
       esac
     done <<< "$changed_paths
@@ -79,7 +101,7 @@ fi
 if ((fast)); then
   quick=()
   for test in ${selected[@]+"${selected[@]}"}; do
-    if ! grep -q '^# test-all: slow[[:space:]]*$' "$test"; then quick+=("$test"); fi
+    if ! is_slow "$test"; then quick+=("$test"); fi
   done
   selected=( ${quick[@]+"${quick[@]}"} )
 fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-all: slow
+# test-all: slow linux-unity.sh
 # Tests the editor time limits of `linux-unity.sh test`: the Gfx pass (test editmode's second pass, a -testCategory
 # naming Gfx, test pr's Gfx pass) runs under UNITY_GFX_TIMEOUT (3600 s), the pure pass under UNITY_TIMEOUT (1800 s),
 # a caller's UNITY_TIMEOUT sets both, and killed editors get duration-aware diagnostics (including APK_TIMEOUT).

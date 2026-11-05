@@ -17,11 +17,12 @@
 #      including Unity's rational m_Count representation when noise.fixedTimestepCount is configured.
 #   4. noise.specularMaterialPath, when configured, only _SPECULAR_COLOR keyword noise.
 #   5. scene.lightmapDir/Lightmap-*.exr.meta only when solely platformSettings changed (bake noise).
+#   6. noise.fontAssetPaths: opt-in static font serialization backstop (never deletion).
 # Scene cleanup skips noise.protectedRegex (Assets/Scenes/ by default). Files dirty before the run and --keep
 # paths are never touched. Additional configured prop, atlas, material and TimeManager paths are checked narrowly.
 # --before <file>: the files dirty before the build (one per line, as linux-unity.sh writes to build/noise-before.txt
 # when its own revert failed, including the pre-run lightmap dirty list); they are kept.
-# --run: revert an `open`/`test` run's noise instead (revert_run_noise), without scene bake cleanup.
+# --run: revert an editor command's noise instead (revert_run_noise), without scene bake cleanup.
 # Every git call goes through noise_git: while another git command holds .git/index.lock it retries (NOISE_GIT_TRIES,
 # default 10, NOISE_GIT_DELAY seconds apart, default 1.5), then fails with exit 75 ($NOISE_LOCK_RC). It never removes
 # the lock. Prints every file it reverts or keeps. --keep paths are resolved from the caller's directory (./x,
@@ -54,6 +55,14 @@ NOISE_ATLAS="$(ship_config_get '.noise.atlasPath // ""')"
 NOISE_TIME_MANAGER="$(ship_config_get '.noise.timeManagerPath // "ProjectSettings/TimeManager.asset"')"
 NOISE_TIMESTEP_COUNT="$(ship_config_get '.noise.fixedTimestepCount // ""')"
 NOISE_SPECULAR_MATERIAL="$(ship_config_get '.noise.specularMaterialPath // ""')"
+mapfile -t NOISE_FONT_PATHS < <(ship_config_get '.noise.fontAssetPaths[]?')
+noise_font_path() {
+  local font
+  for font in ${NOISE_FONT_PATHS[@]+"${NOISE_FONT_PATHS[@]}"}; do
+    [ "$1" != "$font" ] || return 0
+  done
+  return 1
+}
 NOISE_PROPS_DIR="$(ship_config_get '.noise.propsDir // "Assets/Art/Props"')"
 NOISE_PROPS_DIR="${NOISE_PROPS_DIR%/}"
 NOISE_REPACK_RE="$(ship_config_get '.noise.repackRegex // "a^"')"
@@ -248,6 +257,7 @@ noise_revert_editor() {
   local -a paths=(Assets/Art "$NOISE_TIME_MANAGER" "$NOISE_PROPS_DIR")
   [ -z "$NOISE_ATLAS" ] || paths+=("$NOISE_ATLAS")
   [ -z "$NOISE_SPECULAR_MATERIAL" ] || paths+=("$NOISE_SPECULAR_MATERIAL")
+  for f in ${NOISE_FONT_PATHS[@]+"${NOISE_FONT_PATHS[@]}"}; do paths+=(":(literal)$f"); done
   changed="$(noise_git diff --name-only HEAD -- "${paths[@]}")" || return
   [ -n "$changed" ] || { noise_log "no changes under Assets/Art or configured noise paths"; return 0; }
   if ! mb="$(noise_merge_base)"; then
@@ -263,6 +273,9 @@ noise_revert_editor() {
     if [[ "$f" =~ $NOISE_PROTECTED_RE ]]; then continue
     elif noise_kept "$f"; then noise_log "keeping $f (--keep)"; continue
     elif grep -qxF -- "$f" <<< "$before"; then noise_log "keeping $f (changed before the build)"; continue
+    elif noise_font_path "$f"; then
+      [ -f "$f" ] || { noise_log "keeping $f (deleted)"; continue; }
+      reason="static font serialization"
     elif [ "$f" = "$NOISE_TIME_MANAGER" ]; then
       if noise_fixed_timestep_only "$f"; then reason="only Fixed Timestep formatting"
       else noise_log "keeping $f (a real change)"; continue; fi
@@ -281,7 +294,7 @@ noise_revert_editor() {
     else continue
     fi
     noise_log "reverting $f ($reason)"
-    noise_git checkout -q -- "$f" || return
+    noise_git checkout -q -- ":(literal)$f" || return
   done <<< "$changed"
 }
 
@@ -326,17 +339,23 @@ noise_float_format_only() {
 # The editor noise of an `open` or `test` run, anywhere in the repository: tracked *.mat files whose diff only touches
 # `_ZTest` lines, *.prefab files whose diff only re-formats floats, and the narrowly checked Fixed Timestep
 # formatting in ProjectSettings/TimeManager.asset (including the configured rational form), plus
-# _SPECULAR_COLOR-only keyword noise in noise.specularMaterialPath (when configured). $1: dirty files before the run
+# _SPECULAR_COLOR-only keyword noise in noise.specularMaterialPath and static serialization in noise.fontAssetPaths
+# (when configured, never deletion). $1: dirty files before the run
 # (noise_dirty_files); remaining args: --keep paths. Files dirty before the run and kept paths are never touched.
 revert_run_noise() { noise_lock_checked noise_revert_run "$@"; }
 noise_revert_run() {
   local before="$1" f reason list; shift
   NOISE_KEEP=("$@")
-  list="$(noise_git diff --name-only HEAD -- '*.mat' '*.prefab' "$NOISE_TIME_MANAGER")" || return
+  local -a paths=('*.mat' '*.prefab' "$NOISE_TIME_MANAGER")
+  for f in ${NOISE_FONT_PATHS[@]+"${NOISE_FONT_PATHS[@]}"}; do paths+=(":(literal)$f"); done
+  list="$(noise_git diff --name-only HEAD -- "${paths[@]}")" || return
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if noise_kept "$f"; then noise_log "keeping $f (--keep)"; continue
     elif grep -qxF -- "$f" <<< "$before"; then noise_log "keeping $f (changed before the run)"; continue
+    elif noise_font_path "$f"; then
+      [ -f "$f" ] || { noise_log "keeping $f (deleted)"; continue; }
+      reason="static font serialization"
     elif noise_specular_only "$f"; then reason="only _SPECULAR_COLOR keyword"
     elif [[ "$f" == *.mat ]] && noise_ztest_lines_only "$f"; then reason="only _ZTest lines"
     elif [[ "$f" == *.prefab ]] && noise_float_format_only "$f"; then reason="only float formatting"
@@ -344,7 +363,7 @@ noise_revert_run() {
     else noise_log "keeping $f (a real change)"; continue
     fi
     noise_log "reverting $f ($reason)"
-    noise_git checkout -q -- "$f" || return
+    noise_git checkout -q -- ":(literal)$f" || return
   done <<< "$list"
 }
 
