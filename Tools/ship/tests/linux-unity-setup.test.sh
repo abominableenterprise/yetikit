@@ -4,7 +4,13 @@
 # Run: bash Tools/ship/tests/linux-unity-setup.test.sh
 set -euo pipefail
 script="$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh"
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+tmp="$(mktemp -d)"; setup_pids=()
+cleanup() {
+  touch "$tmp/extract-release"
+  for pid in "${setup_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
 fails=0
 . "$(dirname "$0")/lib/fixture.sh"
 ship_fixture "$tmp"
@@ -15,11 +21,18 @@ img="$tmp/img"; lc="opt/unity/Editor/Data/Resources/Licensing/Client"
 mkdir -p "$img/$lc" "$tmp/bin"
 printf '#!/bin/sh\n# Unity 6000.6.6f1\n' > "$img/opt/unity/Editor/Unity"; cp "$img/opt/unity/Editor/Unity" "$img/$lc/Unity.Licensing.Client"
 chmod +x "$img/opt/unity/Editor/Unity" "$img/$lc/Unity.Licensing.Client"
-# FAKE_CUT=1: stream only Editor/Unity, then fail like a dropped connection. FAKE_SLOW=1: wait a second first.
+# FAKE_CUT=1 drops the stream; FAKE_EXTRACT_GATE synchronizes concurrent extracts.
 cat > "$tmp/bin/crane" <<EOF
-#!/bin/sh
+#!/bin/bash
 echo crane >> "$tmp/download-calls"
-[ "\${FAKE_SLOW:-0}" = 1 ] && sleep 1
+if [ -n "\${FAKE_EXTRACT_GATE:-}" ]; then
+  touch "\$FAKE_EXTRACT_GATE"
+  deadline=\$((SECONDS + 90))
+  while [ ! -e "$tmp/extract-release" ]; do
+    [ "\$SECONDS" -lt "\$deadline" ] || exit 1
+    /bin/sleep 0.02
+  done
+fi
 if [ "\${FAKE_CUT:-0}" = 1 ]; then tar -c -C "$img" opt/unity/Editor/Unity; exit 1; fi
 tar -c -C "$img" opt/unity
 EOF
@@ -94,9 +107,16 @@ check "nothing is extracted for a root of unknown emptiness" '! ls -d "$tmp/lock
 # another stage beside them (here the old shared .unity-extract.tmp) is left alone.
 mkdir -p "$tmp/sib/.unity-extract.tmp"; echo theirs > "$tmp/sib/.unity-extract.tmp/f"
 ra=0; rb=0
-PATH="$tmp/bin:$PATH" PROJECT="$tmp" UNITY_ROOT="$tmp/sib/a" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/logs-a" UNITY_USERNAME=u UNITY_PASSWORD=p FAKE_SLOW=1 bash "$script" setup >"$tmp/out-a" 2>&1 & pa=$!
-PATH="$tmp/bin:$PATH" PROJECT="$tmp" UNITY_ROOT="$tmp/sib/b" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/logs-b" UNITY_USERNAME=u UNITY_PASSWORD=p FAKE_SLOW=1 bash "$script" setup >"$tmp/out-b" 2>&1 & pb=$!
+PATH="$tmp/bin:$PATH" PROJECT="$tmp" UNITY_ROOT="$tmp/sib/a" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/logs-a" UNITY_USERNAME=u UNITY_PASSWORD=p FAKE_EXTRACT_GATE="$tmp/extract-a" timeout -k 5 120 bash "$script" setup >"$tmp/out-a" 2>&1 & pa=$!
+setup_pids+=("$pa")
+PATH="$tmp/bin:$PATH" PROJECT="$tmp" UNITY_ROOT="$tmp/sib/b" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/logs-b" UNITY_USERNAME=u UNITY_PASSWORD=p FAKE_EXTRACT_GATE="$tmp/extract-b" timeout -k 5 120 bash "$script" setup >"$tmp/out-b" 2>&1 & pb=$!
+setup_pids+=("$pb")
+ship_wait_until test -e "$tmp/extract-a"
+ship_wait_until test -e "$tmp/extract-b"
+check "both extracts are gated with distinct staging directories" '[ "$(find "$tmp/sib" -maxdepth 1 -name ".unity-extract.*" ! -name ".unity-extract.tmp" | wc -l)" = 2 ] && kill -0 "$pa" && kill -0 "$pb"'
+touch "$tmp/extract-release"
 wait "$pa" || ra=$?; wait "$pb" || rb=$?
+setup_pids=()
 check "two concurrent setups of sibling roots both succeed" '[ "$ra" = 0 ] && [ "$rb" = 0 ]'
 check "both sibling roots are complete" \
   '[ -x "$tmp/sib/a/Editor/Unity" ] && [ -f "$tmp/sib/a/.install-complete" ] && [ -x "$tmp/sib/b/Editor/Unity" ] && [ -f "$tmp/sib/b/.install-complete" ]'

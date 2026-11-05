@@ -55,7 +55,8 @@ for answer in acquire fail wait; do
   rm -rf "$ULF.idle"; rm -f "$ULF" "$OUT_DIR/unity-seat.held"
   : > "$tmp/events"
   rc=0
-  GAP_ANSWER="$answer" timeout -k 1 10 bash "$tmp/run-gap" > "$tmp/log" 2>&1 || rc=$?
+  GAP_ANSWER="$answer" timeout -k 5 90 bash "$tmp/run-gap" > "$tmp/log" 2>&1 || rc=$?
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then printf 'seat-gap %s timed out (exit %s)\n' "$answer" "$rc" >&2; fi
   check "$answer: watcher releases the previous seat in the unlocked gap" \
     'grep -qx release "$tmp/events" && grep -q "already holds a Unity seat" "$tmp/log" && [ "$(find "$tmp" -maxdepth 1 -name "ulf.invalid-*" | wc -l)" -ge 1 ]'
   check "$answer: licensing never starts without a seat" \

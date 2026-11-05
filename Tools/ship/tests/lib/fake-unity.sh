@@ -17,6 +17,14 @@ cat > "$tmp/unity/Editor/Unity" <<'EOF'
 # Unity 6000.6.6f1
 echo "$*" >> "$FAKE_TMP/runs"
 echo $$ > "$FAKE_TMP/unity.pid"
+if [ -n "${FAKE_EDITOR_GATE:-}" ]; then
+  : > "$FAKE_EDITOR_GATE.ready"
+  deadline=$((SECONDS + 90))
+  while [ ! -e "$FAKE_EDITOR_GATE.release" ]; do
+    [ "$SECONDS" -lt "$deadline" ] || exit 1
+    /bin/sleep 0.02
+  done
+fi
 [ -z "${FAKE_SLEEP:-}" ] || sleep "$FAKE_SLEEP"
 res="" filter="" tests=0 proj="" logf=""
 while [ $# -gt 0 ]; do
@@ -60,7 +68,7 @@ export FAKE_TMP="$tmp" PATH="$tmp/bin:$PATH" PROJECT="$proj" UNITY_ROOT="$tmp/un
   PIDFILE_FALLBACK="$tmp/fallback.pid" SHM_DIR="$tmp/shm" TASK_CACHE=no-task-cache NOISE_BASE=HEAD UNITY_USERNAME=u UNITY_PASSWORD=p
 # Never reach the real hub (a task VM exports these): the seat lease is tested with a fake curl.
 unset THEROBOTS_HUB_URL THEROBOTS_TASK_ID THEROBOTS_TASK_TOKEN
-unset FAKE_FAILS FAKE_SUITE_FAILS FAKE_RETRY_FAILS FAKE_MUTATE FAKE_NO_XML FAKE_SLEEP FAKE_XVFB FAKE_UNITY_RC EDITMODE_GFX KNOWN_FLAKES PIDFILE APK_SWAPFILE
+unset FAKE_FAILS FAKE_SUITE_FAILS FAKE_RETRY_FAILS FAKE_MUTATE FAKE_NO_XML FAKE_SLEEP FAKE_EDITOR_GATE FAKE_XVFB FAKE_UNITY_RC EDITMODE_GFX KNOWN_FLAKES PIDFILE APK_SWAPFILE
 
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # A temp git repo in $proj, everything committed on main (origin/main points at it).

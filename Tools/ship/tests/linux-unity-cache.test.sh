@@ -56,13 +56,13 @@ check "no task-cache: cache-restore is a no-op that succeeds" \
   'TASK_CACHE=no-such-task-cache PROJECT="$proj" bash "$script" cache-restore 2>/dev/null && [ ! -e "$tmp/calls" ]'
 
 # A restore slower than TASK_CACHE_TIMEOUT is abandoned: logged, partial Library/ and download dir removed, exit 0.
-printf '#!/bin/sh\nmkdir -p Library/partial .task-cache.x; sleep 30\n' > "$tmp/bin/slow-task-cache"
+printf '#!/bin/sh\nmkdir -p Library/partial .task-cache.x\nexec /bin/sleep 300\n' > "$tmp/bin/slow-task-cache"
 chmod +x "$tmp/bin/slow-task-cache"
-start=$SECONDS
-check "a slow restore times out and succeeds (cold import)" \
-  'PATH="$tmp/bin:$PATH" TASK_CACHE=slow-task-cache TASK_CACHE_TIMEOUT=1 PROJECT="$proj" bash "$script" cache-restore 2>"$tmp/err"'
+# Completion is bounded far below the blocked downloader's lifetime; startup
+# scheduling is not part of the production one-second timeout contract.
+check "a slow restore times out and succeeds (cold import) without waiting for the download" \
+  'PATH="$tmp/bin:$PATH" TASK_CACHE=slow-task-cache TASK_CACHE_TIMEOUT=1 PROJECT="$proj" timeout -k 5 60 bash "$script" cache-restore 2>"$tmp/err"'
 check "the timeout is logged" 'grep -qxF "[linux-unity] cache restore timed out; cold import" "$tmp/err"'
-check "the timeout does not wait for the slow download" '[ $((SECONDS - start)) -lt 15 ]'
 check "a timed-out restore leaves no partial Library/ or download dir" \
   '[ ! -e "$proj/Library" ] && ! ls -d "$proj"/.task-cache.* >/dev/null 2>&1'
 printf '#!/bin/sh\nexit 3\n' > "$tmp/bin/miss-task-cache"; chmod +x "$tmp/bin/miss-task-cache"

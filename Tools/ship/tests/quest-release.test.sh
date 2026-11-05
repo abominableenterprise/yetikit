@@ -153,7 +153,11 @@ adb() {
   esac
 }
 
-run() { rc=0; ( qr_main "$@" ) > "$tmp/out" 2> "$tmp/err" || rc=$?; }
+# Repeated sourced calls share $$, unlike separate CLI invocations. Give each one
+# a distinct synthetic second so three fast backups cannot collide on timestamp + $$.
+QR_TEST_TICK=0
+qr_timestamp() { printf '20990101-%06d\n' "$QR_TEST_TICK"; }
+run() { QR_TEST_TICK=$((QR_TEST_TICK + 1)); rc=0; ( qr_main "$@" ) > "$tmp/out" 2> "$tmp/err" || rc=$?; }
 out_has() { grep -q -- "$1" "$tmp/out" "$tmp/err"; }
 reset_logs() { rm -f "$tmp/states" "$tmp/unity.log" "$tmp/adb.log" "$tmp/installed" "$tmp/py.log" "$tmp/adb-no-serial" "$tmp/unity-env.log" "$tmp/notes-env.log" "$tmp/keytool.log" "$tmp/unity-lock.log"; }
 
@@ -164,6 +168,8 @@ for file in "$(dirname "$script")/tests/quest-release.test.sh" "$(dirname "$scri
 done
 
 # --- prepare -------------------------------------------------------------------------------------------------------------------
+# Exercise the unset caller case explicitly, even under run.sh's noninteractive environment.
+unset GIT_TERMINAL_PROMPT GIT_SSH_COMMAND
 FAKE_FREE_GB=12 run prepare
 check "prepare refuses under 25 GB free and creates no worktree" \
   '[ "$rc" != 0 ] && out_has "only 12 GB free" && [ ! -d "$root/rel-$short-test" ] && ! [ -f "$tmp/git.log" ]'

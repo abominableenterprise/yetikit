@@ -13,8 +13,8 @@ bystander=""
 # The bystander's sleep is its child: kill both, so no stray process keeps the caller's pipe open.
 trap '[ -z "$bystander" ] || kill $(ps -o pid= --ppid "$bystander") "$bystander" 2>/dev/null || true; rm -rf "$tmp"' EXIT
 alive() { kill -0 "$1" 2>/dev/null && [ "$(cut -d' ' -f3 "/proc/$1/stat" 2>/dev/null)" != Z ]; }
-# Wait up to 10 s for a file to appear.
-wait_for() { local i; for i in $(seq 100); do [ -s "$1" ] && return 0; sleep 0.1; done; return 1; }
+# Wait for observed readiness with scheduling headroom.
+wait_for() { ship_wait_until test -s "$1"; }
 
 # An unrelated "Unity" process (same name as the editor, not started by the script): stop must leave it alone.
 cp "$tmp/unity/Editor/Unity" "$tmp/Unity"
@@ -103,7 +103,7 @@ for i in \$(seq 500); do sleep 300 & echo \$! >> "$tmp/forked"; sleep 0.02; done
 EOF
 chmod +x "$tmp/bin/fork-cache"; rm -rf "$proj/Library" "$tmp/forked" "$tmp/stubborn.pid"
 TASK_CACHE=fork-cache bash "$script" open >/dev/null 2>&1 & runner=$!
-wait_for "$tmp/stubborn.pid"; sleep 0.3
+wait_for "$tmp/stubborn.pid"; wait_for "$tmp/forked"
 bash "$script" stop 2>"$tmp/err"; wait "$runner" 2>/dev/null || true
 survivors=""; for p in $(cat "$tmp/forked") "$(cat "$tmp/stubborn.pid")"; do alive "$p" && survivors="$survivors $p"; done
 [ -z "$survivors" ] || kill -9 $survivors 2>/dev/null || true
@@ -140,7 +140,8 @@ echo "${run_id/:/ }" > "$OUT_DIR/linux-unity.pid"
 LINUX_UNITY_RUN="$run_id" sleep 300 & mark1=$!
 LINUX_UNITY_RUN="$run_id" sleep 300 & mark2=$!
 sleep 300 & stale=$!; sleep 300 & unmarked=$!
-for i in $(seq 50); do grep -qzx "LINUX_UNITY_RUN=$run_id" "/proc/$mark2/environ" 2>/dev/null && break; sleep 0.1; done
+ship_wait_until grep -qzx "LINUX_UNITY_RUN=$run_id" "/proc/$mark1/environ"
+ship_wait_until grep -qzx "LINUX_UNITY_RUN=$run_id" "/proc/$mark2/environ"
 STALE="$stale:1" UNMARKED="$unmarked:$(proc_start "$unmarked")" bash -c '
   . "$1"; eval "real_$(declare -f marked)"
   # In the format the script lists (bare pids before the fix, so this fails on the old script).
