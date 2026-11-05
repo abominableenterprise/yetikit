@@ -104,7 +104,14 @@ qr_wait() {
     # invocation to follow. Keep its start and run folder too (prepare may fill in the folder while it holds the lock).
     if [ -z "$wpid" ]; then
       case "$QR_LOCK_PID" in
-        ''|*[!0-9]*) ;;
+        ''|*[!0-9]*)
+          # A short-lived invocation can finish before our first poll, without ever preparing a run folder.
+          # Its published identity, not historical current.env, selects the required terminal result.
+          if [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$QR_LOGS/current-invocation" ]; then
+            wpid="$(cat "$QR_LOGS/current-invocation")"
+            case "$wpid" in ''|*[!0-9]*) qr_wait_say "invalid invocation identity"; return 1 ;; esac
+            seen=1; run=""; start="$(qr_wait_mtime "$QR_LOGS/current-invocation")"
+          fi ;;
         *) wpid="$QR_LOCK_PID"; seen=1; run=""
            start="$(qr_wait_mtime "$(qr_lock_dir)/pid")"
            [ -n "$start" ] || start="$(qr_wait_mtime "$(qr_lock_dir)")" ;;

@@ -123,9 +123,11 @@ qr_main() {
   [ $# -gt 0 ] && shift
   case "$cmd" in ''|-h|--help|help) qr_usage; return 0 ;; esac
   qr_config || return 1
-  case "$cmd" in doctor|all|install|rollback|launch) qr_select_device || return 1 ;; esac
   # doctor is read-only: no logs folder, run folder, lock or summary.
-  if [ "$cmd" = doctor ]; then ( qr_doctor "$@" ) || rc=$?; return "$rc"; fi
+  if [ "$cmd" = doctor ]; then
+    qr_select_device || return 1
+    ( qr_doctor "$@" ) || rc=$?; return "$rc"
+  fi
   # wait is read-only too: it only watches the current run.
   if [ "$cmd" = wait ]; then ( qr_wait "$@" ) || rc=$?; return "$rc"; fi
   mkdir -p "$QR_LOGS" 2>/dev/null
@@ -137,6 +139,11 @@ qr_main() {
       trap 'qr_cancel "$cmd" INT' INT
       trap 'qr_cancel "$cmd" TERM' TERM
       case "$cmd" in all|prepare) ;; *) qr_load_state; qr_lock_note_run ;; esac ;;
+  esac
+  # Publish invocation identity and install traps before discovery: an early failure must replace old success.
+  case "$cmd" in
+    all|install|rollback|launch)
+      qr_select_device || { qr_lock_result "$cmd" 1; return 1; } ;;
   esac
   # verify's apksigner and the keystore preflight need Java: find it before any prepare, gate or build work.
   case "$cmd" in all|build|verify) qr_java_setup || { qr_lock_result "$cmd" 1; return 1; } ;; esac

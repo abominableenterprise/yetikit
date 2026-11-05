@@ -44,7 +44,9 @@ qr_lock_acquire() {
   for _ in 1 2; do
     if mkdir "$d" 2>/dev/null; then
       if ! { printf '%s\n' "$$" > "$d/pid" &&
-             printf '%s\n' "${QR_RUN_DIR:-pending}" > "$d/run_dir"; }; then
+             printf '%s\n' "${QR_RUN_DIR:-pending}" > "$d/run_dir" &&
+             printf '%s\n' "$$" > "$QR_LOGS/current-invocation.$$" &&
+             mv -f "$QR_LOGS/current-invocation.$$" "$QR_LOGS/current-invocation"; }; then
         qr_log "error: cannot write lock metadata in $d"
         rm -rf "$d"
         return 1

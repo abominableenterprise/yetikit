@@ -310,7 +310,10 @@ For detached operations, use `nohup … all > /tmp/quest-release.out 2>&1 &`, th
 `wait 28` within the caller's command timeout. `wait` takes no lock and writes
 nothing: exit 0 means the watched invocation succeeded and installed (or a
 standalone gate passed), 1 means failure/missing terminal result, and 124 means
-the bounded wait expired. It prints progress once a minute.
+the bounded wait expired. It prints progress once a minute. Mutating commands
+publish their invocation identity before device discovery; `wait` requires that
+invocation's terminal result even when discovery fails before preparing a new
+run folder, rather than accepting an earlier release's successful summary.
 
 ### Safety
 
