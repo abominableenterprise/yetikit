@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "unityVersion": "6000.6.6f1",
+  "build": {
+    "devMethod": "ExampleGame.Editor.GameBuild.DevelopmentApk",
+    "releaseMethod": "ExampleGame.Editor.GameBuild.ReleaseApk",
+    "apkPath": "Builds/Android/ExampleGame.apk"
+  }
+}
