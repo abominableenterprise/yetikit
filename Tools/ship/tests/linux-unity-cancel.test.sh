@@ -13,7 +13,8 @@ git_init
 mkdir -p "$UNITY_ROOT/Editor/Data/PlaybackEngines/AndroidPlayer/"{SDK,NDK}
 lc="$UNITY_ROOT/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"
 mkdir -p "$(dirname "$lc")"
-# Model a client ignoring INT explicitly: shell/setsid startup can reset inherited ignores.
+# Establish ignored INT explicitly, independent of the runner's async launch shape.
+# exec preserves this disposition, so cancellation still has to translate it to TERM.
 cat > "$lc" <<'EOF'
 #!/bin/bash
 [ "$1" = --activate-ulf ] || exit 0

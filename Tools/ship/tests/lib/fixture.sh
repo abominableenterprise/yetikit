@@ -2,6 +2,14 @@
 # Synthetic consumer projects vendor the shell tools before invoking them.
 SHIP_TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHIP_SOURCE_DIR="$(cd "$SHIP_TESTS_DIR/.." && pwd)"
+# Poll actual readiness, never assume a loaded worker reaches a stage after a delay.
+ship_wait_until() {
+  local deadline=$((SECONDS + 60))
+  until "$@"; do
+    [ "$SECONDS" -lt "$deadline" ] || { printf 'fixture timed out waiting for: %s\n' "$*" >&2; return 1; }
+    /bin/sleep 0.02
+  done
+}
 ship_fixture() {
   local project="$1" variant="${2:-scene}" file
   mkdir -p "$project/Tools/ship" "$project/.ship-test-bin"

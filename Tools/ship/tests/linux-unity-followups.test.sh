@@ -23,6 +23,10 @@ if [ "$1" = -x ] && [ "${!#}" != 9 ]; then
   fi
   /usr/bin/flock -n "${!#}" && exit 0
   : > "$FAKE_TMP/contended"
+  # A separate phase marker prevents activation contention satisfying return readiness.
+  if grep -q 'UNITY_RETURN_ON_EXIT=1: returning' "$FAKE_TMP/followups.log"; then
+    : > "$FAKE_TMP/return-contended"
+  fi
 fi
 exec /usr/bin/flock "$@"
 EOF
@@ -51,7 +55,6 @@ launcher = ['perl', '-e',
 # Synchronize on contention/return markers and allow bounded scheduling headroom.
 READINESS_TIMEOUT_SECONDS = 60
 COMPLETION_TIMEOUT_SECONDS = 30
-LOCK_BLOCKED_OBSERVATION_SECONDS = .2
 
 def diagnostic(stage, started, bound):
     return (f'{stage}: elapsed {time.monotonic() - started:.2f} s '
@@ -140,6 +143,7 @@ original_ulf = ulf.read_bytes()
 for sig in [signal.SIGTERM, signal.SIGINT, signal.SIGHUP]:
     (root / 'contended').unlink(missing_ok=True)
     (root / 'licensing-calls').unlink(missing_ok=True)
+    (root / 'return-contended').unlink(missing_ok=True)
     with Path(str(ulf) + '.lock').open('a') as lock, (root / 'followups.log').open('w') as log:
         fcntl.flock(lock, fcntl.LOCK_EX)
         runner = subprocess.Popen(launcher + [script, 'activate'],
@@ -150,12 +154,9 @@ for sig in [signal.SIGTERM, signal.SIGINT, signal.SIGHUP]:
             until(lambda: 'UNITY_RETURN_ON_EXIT=1: returning' in
                   (root / 'followups.log').read_text(), runner,
                   f'{sig.name} exit-return started while holder remains locked')
-            # exit-return has started, but cannot reach licensing while locked.
-            try:
-                runner.wait(timeout=LOCK_BLOCKED_OBSERVATION_SECONDS)
-                raise AssertionError('exit-return bypassed the held activation lock')
-            except subprocess.TimeoutExpired:
-                pass
+            # Prove exit-return has attempted this held lock before releasing it.
+            ready(root / 'return-contended', runner)
+            assert runner.poll() is None, 'exit-return bypassed the held activation lock'
             assert ulf.read_bytes() == original_ulf
             assert not (root / 'licensing-calls').exists()
             fcntl.flock(lock, fcntl.LOCK_UN)
