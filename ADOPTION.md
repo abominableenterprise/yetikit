@@ -1,6 +1,8 @@
 # Day-0 adoption playbook
 
-Status: planned. No adoption commands or release tags are available yet.
+**Day 0:** install the [YetiKit skills](skills/README.md); copy [templates/game](templates/game/).
+
+Runtime/tooling status: planned. No adoption commands or release tags are available yet.
 Adopt in order: **Ship → core → quality → hands → interaction → playtest → lab → app.***.
 Within app.*, start with analytics, telemetry and menus; add paid services only
 when needed. A non-XR consumer skips hands, interaction and XR tooling.
