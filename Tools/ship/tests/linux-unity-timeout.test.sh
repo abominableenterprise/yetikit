@@ -64,12 +64,12 @@ run bash "$script" open
 check "open keeps UNITY_TIMEOUT's 1800 s" '[ "$(cat "$tmp/limits")" = "1800 " ]'
 
 # --- an editor killed by the timeout ----------------------------------------------------------------------------------------
-run FAKE_SLEEP=5 UNITY_GFX_TIMEOUT=1 bash "$script" test editmode -testCategory Gfx
-check "a Gfx editor sleeping past a 1 s timeout is killed: the run fails" '[ "$rc" != 0 ]'
+run FAKE_EDITOR_GATE="$tmp/timeout-editor" UNITY_GFX_TIMEOUT=1 bash "$script" test editmode -testCategory Gfx
+check "a Gfx editor blocked at its gate past a 1 s timeout is killed: the run fails" '[ "$rc" != 0 ]'
 check "it prints the killed line naming UNITY_GFX_TIMEOUT" \
   'grep -qF "[linux-unity] editmode: killed at the 1 s timeout; no results. Re-run with UNITY_GFX_TIMEOUT=2" "$tmp/err"'
 check "and no results" 'grep -q "no results in .*editmode.xml" "$tmp/err"'
-run FAKE_SLEEP=5 UNITY_TIMEOUT=1 EDITMODE_GFX=0 bash "$script" test editmode
+run FAKE_EDITOR_GATE="$tmp/timeout-editor" UNITY_TIMEOUT=1 EDITMODE_GFX=0 bash "$script" test editmode
 check "a killed pure pass names UNITY_TIMEOUT" \
   '[ "$rc" != 0 ] && grep -qF "editmode: killed at the 1 s timeout; no results. Re-run with UNITY_TIMEOUT=2" "$tmp/err"'
 run FAKE_UNITY_RC=137 bash "$script" open
@@ -126,7 +126,7 @@ for var in UNITY_TIMEOUT UNITY_GFX_TIMEOUT APK_TIMEOUT; do
     APK_TIMEOUT) args=(apk); duration=1s; doubled=2 ;;
   esac
   seconds="${duration%s}"
-  run FAKE_SLEEP=5 "$var=$duration" bash "$script" "${args[@]}"
+  run FAKE_EDITOR_GATE="$tmp/timeout-editor" "$var=$duration" bash "$script" "${args[@]}"
   check "$var=$duration: fake editor times out with a numeric rerun, no arithmetic error" \
     '[ "$rc" != 0 ] && grep -qF "killed at the $seconds s timeout; no results. Re-run with $var=$doubled" "$tmp/err" && ! grep -qE "integer expression|syntax error|invalid arithmetic" "$tmp/err"'
   run FAKE_UNITY_RC=137 "$var=0" bash "$script" "${args[@]}"

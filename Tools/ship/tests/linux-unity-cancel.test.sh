@@ -13,10 +13,12 @@ git_init
 mkdir -p "$UNITY_ROOT/Editor/Data/PlaybackEngines/AndroidPlayer/"{SDK,NDK}
 lc="$UNITY_ROOT/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"
 mkdir -p "$(dirname "$lc")"
-# exec preserves the async shell's ignored INT disposition; don't reset it.
+# Establish ignored INT explicitly, independent of the runner's async launch shape.
+# exec preserves this disposition, so cancellation still has to translate it to TERM.
 cat > "$lc" <<'EOF'
 #!/bin/bash
 [ "$1" = --activate-ulf ] || exit 0
+trap '' INT
 if [ "${STUB_STUBBORN:-0}" = 1 ]; then trap '' TERM; fi
 echo $$ > "$FAKE_TMP/client.pid"
 if [ "${STUB_FORK:-0}" = 1 ]; then
@@ -111,7 +113,7 @@ for command, sig, stubborn, fork in cases:
             # Confirm this regression actually exercises inherited ignored INT.
             ignored = next(line.split()[1] for line in Path(f'/proc/{client}/status').read_text().splitlines()
                            if line.startswith('SigIgn:'))
-            assert int(ignored, 16) & (1 << (signal.SIGINT - 1))
+            assert int(ignored, 16) & (1 << (signal.SIGINT - 1)), 'fixture client must ignore SIGINT'
             cancelled_at = time.monotonic()
             runner.send_signal(sig)
             try:

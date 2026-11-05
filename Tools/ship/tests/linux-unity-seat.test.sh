@@ -285,20 +285,18 @@ rm -f "$state"
 # Gate the first client AND its failure cleanup; wait for observed flock contention
 # instead of assuming that a sleeping second command has reached the lock.
 wait_file() {
-  local i
-  for ((i=0; i<250; i++)); do [ ! -f "$1" ] || return 0; /bin/sleep 0.02; done
-  return 1
+  ship_wait_until test -e "$1"
 }
 shared_home="$tmp/shared-home"; mkdir -p "$shared_home"
 first_out="$tmp/first-out"; second_out="$tmp/second-out"
 reset 200; rm -f "$ULF" "$state" "$tmp/lc-blocked" "$tmp/lc-unblock" \
   "$tmp/release-blocked" "$tmp/release-unblock" "$tmp/lock-waiting"
-timeout -k 1 20 env HOME="$shared_home" OUT_DIR="$first_out" UNITY_USERNAME=u UNITY_PASSWORD=p \
+timeout -k 5 180 env HOME="$shared_home" OUT_DIR="$first_out" UNITY_USERNAME=u UNITY_PASSWORD=p \
   "${hub[@]}" FAKE_LC_BLOCK=1 FAKE_RELEASE_BLOCK=1 bash "$script" activate > "$tmp/first-log" 2>&1 & first=$!
 concurrent=("$first")
 started=0; wait_file "$tmp/lc-blocked" && started=1
 check "distinct OUT_DIR activations: first client reaches its gate" '[ "$started" = 1 ]'
-timeout -k 1 20 env HOME="$shared_home" OUT_DIR="$second_out" UNITY_USERNAME=u UNITY_PASSWORD=p \
+timeout -k 5 180 env HOME="$shared_home" OUT_DIR="$second_out" UNITY_USERNAME=u UNITY_PASSWORD=p \
   "${hub[@]}" FAKE_LOCK_WAIT="$tmp/lock-waiting" bash "$script" activate > "$tmp/second-log" 2>&1 & second=$!
 concurrent+=("$second")
 blocked=0; wait_file "$tmp/lock-waiting" && blocked=1
@@ -320,12 +318,12 @@ rm -f "$ULF" "$second_out/unity-seat.held"
 # Return starts while activation has not yet written the shared ULF; it must wait
 # and then return that licence, not report "already returned" and leave it active.
 reset 200; rm -f "$tmp/lc-blocked" "$tmp/lc-unblock" "$tmp/lock-waiting"
-timeout -k 1 20 env HOME="$shared_home" OUT_DIR="$first_out" UNITY_USERNAME=u UNITY_PASSWORD=p \
+timeout -k 5 180 env HOME="$shared_home" OUT_DIR="$first_out" UNITY_USERNAME=u UNITY_PASSWORD=p \
   FAKE_LC_BLOCK=1 FAKE_LC_BLOCK_FAIL=0 bash "$script" activate > "$tmp/first-log" 2>&1 & first=$!
 concurrent=("$first")
 started=0; wait_file "$tmp/lc-blocked" && started=1
 check "distinct OUT_DIR activation/return: activation reaches its gate" '[ "$started" = 1 ]'
-timeout -k 1 20 env HOME="$shared_home" OUT_DIR="$second_out" UNITY_USERNAME=u UNITY_PASSWORD=p \
+timeout -k 5 180 env HOME="$shared_home" OUT_DIR="$second_out" UNITY_USERNAME=u UNITY_PASSWORD=p \
   FAKE_LOCK_WAIT="$tmp/lock-waiting" bash "$script" return > "$tmp/second-log" 2>&1 & second=$!
 concurrent+=("$second")
 blocked=0; wait_file "$tmp/lock-waiting" && blocked=1
@@ -375,14 +373,14 @@ check "UNITY_RETURN_ON_EXIT=1: the exit return releases the seat (once)" \
 
 # --- TERM during the activation: the trap runs ------------------------------------------------------------------------
 reset 200; rm -f "$ULF" "$state"
-printf '#!/bin/sh\necho "$1" >> "%s/lc-calls"\n[ "$1" != --activate-ulf ] || { echo $$ > "%s/lc-started"; exec /bin/sleep 30; }\n' "$tmp" "$tmp" > "$lcdir/Unity.Licensing.Client"
+printf '#!/bin/sh\necho "$1" >> "%s/lc-calls"\n[ "$1" != --activate-ulf ] || { echo $$ > "%s/lc-started"; exec /bin/sleep 300; }\n' "$tmp" "$tmp" > "$lcdir/Unity.Licensing.Client"
 env UNITY_USERNAME=u UNITY_PASSWORD=p "${hub[@]}" bash "$script" activate > "$tmp/log" 2>&1 & runner=$!
-for _ in $(seq 100); do [ -s "$tmp/lc-started" ] && break; /bin/sleep 0.1; done
+ship_wait_until test -s "$tmp/lc-started"
 kill -TERM "$runner"
-# The old foreground pipeline deferred TERM until the 30-second client completed.
-for _ in $(seq 100); do kill -0 "$runner" 2>/dev/null || break; /bin/sleep 0.02; done
+# Completion is bounded well below the client's 300 s lifetime, not a 2 s scheduler race.
+runner_exited() { ! kill -0 "$runner" 2>/dev/null; }
 prompt=1
-if kill -0 "$runner" 2>/dev/null; then prompt=0; kill "$(cat "$tmp/lc-started")" 2>/dev/null || true; fi
+if ! ship_wait_until runner_exited; then prompt=0; kill "$(cat "$tmp/lc-started")" 2>/dev/null || true; fi
 rc=0; wait "$runner" 2>/dev/null || rc=$?
 check "wrapper-only TERM stops and reaps the client before releasing the seat" \
   '[ "$prompt" = 1 ] && [ "$rc" = 143 ] && ! kill -0 "$(cat "$tmp/lc-started")" 2>/dev/null && [ "$(calls release)" = 1 ] && [ ! -f "$state" ] && no_token'
@@ -396,8 +394,10 @@ echo $$ > "$FAKE_TMP/lc-started"
 while :; do /bin/sleep 0.02; done
 EOF
 env UNITY_USERNAME=u UNITY_PASSWORD=p "${hub[@]}" bash "$script" activate > "$tmp/log" 2>&1 & runner=$!
-for _ in $(seq 100); do [ -s "$tmp/lc-started" ] && break; /bin/sleep 0.02; done
-kill -TERM "$runner"; rc=0; wait "$runner" 2>/dev/null || rc=$?
+ship_wait_until test -s "$tmp/lc-started"
+kill -TERM "$runner"
+if ! ship_wait_until runner_exited; then kill -KILL "$runner" "$(cat "$tmp/lc-started")" 2>/dev/null || true; fi
+rc=0; wait "$runner" 2>/dev/null || rc=$?
 check "TERM waits for a client that finishes activation; the valid licence keeps its seat" \
   '[ "$rc" = 143 ] && [ -f "$tmp/lc-finished" ] && ! kill -0 "$(cat "$tmp/lc-started")" 2>/dev/null && [ "$(calls release)" = 0 ] && [ -f "$state" ] && [ -z "$(env UNITY_USERNAME=u UNITY_PASSWORD=p bash -c '\''. "$1"; ulf_problem'\'' _ "$script")" ]'
 
