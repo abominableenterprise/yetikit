@@ -2,8 +2,8 @@
 
 ## Project overview
 
-YetiKit is a public MIT Unity kit for Quest VR and mobile games. This skeleton
-contains planned packages and documentation, not game code or a Unity host.
+YetiKit is a public MIT Unity kit for Quest VR and mobile games. It contains
+shared packages, documentation and a minimal Unity test Host, not game code.
 
 ## Public-repo rules
 
@@ -17,7 +17,7 @@ contains planned packages and documentation, not game code or a Unity host.
 
 - Packages: `Packages/com.abominable.yetikit.<module>/{Runtime,Editor,Tests}`.
 - Shell tooling: `Tools/ship/`; mesh checks: `Tools/art/`.
-- `Host/` will be one Unity test project using local package references, added later.
+- `Host/` is the Unity test project using local package references.
 - One asmdef per module, `autoReferenced: false`; no kit asmdef ever references a game.
 - Moved scripts keep their original `.cs.meta` GUID; change only the namespace
   to `YetiKit.<Module>`. Do not generate replacement GUIDs during extraction.
@@ -25,7 +25,7 @@ contains planned packages and documentation, not game code or a Unity host.
 - Keep it thin: no reflection magic, no speculative extensibility.
 - Pin every kit package at one tag. Fix upstream, never edit vendored or package
   code in a game; bump with `kit-bump.sh` when that tool is available.
-- No `.meta` files in this skeleton; Unity will generate new-folder metadata later.
+- Commit Unity-generated folder/asmdef metadata and preserve extracted script metadata.
 
 ## Review and merge
 

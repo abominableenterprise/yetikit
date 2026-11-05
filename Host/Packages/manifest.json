@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "com.abominable.yetikit.core": "file:../../Packages/com.abominable.yetikit.core",
+    "com.unity.test-framework": "1.8.0",
+    "com.unity.modules.imgui": "1.0.0",
+    "com.unity.modules.jsonserialize": "1.0.0"
+  },
+  "testables": [
+    "com.abominable.yetikit.core"
+  ]
+}
