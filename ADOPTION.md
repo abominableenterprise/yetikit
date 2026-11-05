@@ -18,7 +18,7 @@ planned
 ## core
 planned
 ## quality
-planned
+Run the [mesh quality checks](Tools/quality/README.md) on changed GLB/glTF/FBX assets in CI before importing or shipping art.
 ## hands
 planned
 ## interaction

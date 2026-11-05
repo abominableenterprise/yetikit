@@ -1,0 +1,2 @@
+# Tiny synthetic test assets must be available in ordinary clones and CI.
+*.glb -filter -diff -merge -text
