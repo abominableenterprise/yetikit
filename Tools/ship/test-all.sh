@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run shell tests in bounded parallel slots; positional filters match basenames.
-# --changed [base] selects changed tests and references to changed Tools/ship scripts
-# (merge-base with origin/main by default). --fast omits # test-all: slow files.
+# Default: select changes since origin/main; --changed [base] changes the base.
+# --all explicitly runs unchanged tests. --fast omits # test-all: slow files.
 set -euo pipefail
 export LC_ALL=C
 ci_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -12,17 +12,18 @@ if ((${#tests[@]} == 0)); then
   exit 1
 fi
 
-fast=0; changed=0; base=origin/main
+fast=0; changed=1; base=origin/main
 filters=()
 while (($#)); do
   case "$1" in
     --fast) fast=1 ;;
+    --all) changed=0 ;;
     --changed)
       changed=1
       if (($# > 1)) && [[ "$2" != --* ]]; then base=$2; shift; fi
       ;;
     --help|-h)
-      echo 'Usage: test-all.sh [--fast] [--changed [base]] [basename-filter ...]'
+      echo 'Usage: test-all.sh [--fast] [--changed [base] | --all] [basename-filter ...]'
       exit 0 ;;
     --*) echo "ERROR: unknown option: $1" >&2; exit 1 ;;
     *) filters+=("$1") ;;
@@ -57,8 +58,8 @@ if ((changed)); then
   merge_base="$(git -C "$repo" merge-base "$base" HEAD)" || {
     echo "ERROR: cannot find merge-base with $base" >&2; exit 1;
   }
-  changed_paths="$(git -C "$repo" diff --name-only "$merge_base" -- Tools/ship/)" || exit 1
-  untracked="$(git -C "$repo" ls-files --others --exclude-standard -- Tools/ship/)" || exit 1
+  changed_paths="$(git -C "$repo" diff --name-only "$merge_base" -- Tools/ship/ .github/workflows/ship.yml)" || exit 1
+  untracked="$(git -C "$repo" ls-files --others --exclude-standard -- Tools/ship/ .github/workflows/ship.yml)" || exit 1
   affected=()
   for test in ${selected[@]+"${selected[@]}"}; do
     while IFS= read -r path; do
@@ -66,8 +67,8 @@ if ((changed)); then
         Tools/ship/tests/*.test.sh)
           if [ "$path" = "Tools/ship/tests/${test##*/}" ]; then affected+=("$test"); break; fi
           ;;
-        Tools/ship/*.sh|Tools/ship/*.py)
-          if grep -qF -- "${path##*/}" "$test"; then affected+=("$test"); break; fi
+        Tools/ship/*|.github/workflows/ship.yml)
+          affected+=("$test"); break
           ;;
       esac
     done <<< "$changed_paths
@@ -188,7 +189,7 @@ launch() {
       unset "$name"
     done
     unset USERNAME PASSWORD PIDFILE LINUX_UNITY_RUN RETURN_ATTEMPTED EXIT_RC ACTIVATION_FD \
-      TASK_CACHE TASK_CACHE_TIMEOUT KNOWN_FLAKES SCENE_AREAS APK_SWAPFILE
+      TASK_CACHE TASK_CACHE_TIMEOUT KNOWN_FLAKES SCENE_AREAS APK_SWAPFILE YETIKIT_CONFIG
     export HOME="$sandbox/home" PROJECT="$sandbox/project" OUT_DIR="$sandbox/out" \
       UNITY_ROOT="$sandbox/unity" ULF="$sandbox/licence" SHM_DIR="$sandbox/shm" \
       BIN_DIR="$sandbox/bin" APK_SWAP_DIR="$sandbox/swap" PIDFILE_FALLBACK="$sandbox/fallback.pid" \

@@ -119,8 +119,14 @@ fi
 if [[ "${WATCHER_CASE:-all}" = all || "${WATCHER_CASE:-}" = orphan ]]; then
 # A fake orphan with the dead wrapper marker must keep its activity record until it is gone.
 printf licence > "$ULF"
-LINUX_UNITY_RUN=99999999:123 /bin/sleep 300 & orphan=$!
-printf '123\n' > "$IDLE_ACTIVE/99999999"
+# Keep the dead-wrapper marker unique to this fixture: /proc scans are global,
+# so simultaneous suite runs must not discover each other's synthetic orphans.
+orphan_run="99999999:$$"
+LINUX_UNITY_RUN="$orphan_run" /bin/sleep 300 & orphan=$!
+# $! proves fork, not exec: /proc/environ can still belong to the parent
+# shell. A zero-grace watcher must see the actual run marker before polling.
+ship_wait_until same_proc "$orphan:$(proc_start "$orphan")" "$orphan_run"
+printf '%s\n' "$$" > "$IDLE_ACTIVE/99999999"
 (
   tick=0
   sleep() {
@@ -151,8 +157,9 @@ kill "$orphan"; wait "$orphan" 2>/dev/null || true; orphan=''
 # when a parent forks after glob expansion and exits before identity validation).
 # The next scan uses real /proc and must still have the run identity to find it.
 printf licence > "$ULF"
-LINUX_UNITY_RUN=99999999:456 /bin/sleep 300 & orphan=$!
-printf '456\n' > "$IDLE_ACTIVE/99999999"
+LINUX_UNITY_RUN="$orphan_run" /bin/sleep 300 & orphan=$!
+ship_wait_until same_proc "$orphan:$(proc_start "$orphan")" "$orphan_run"
+printf '%s\n' "$$" > "$IDLE_ACTIVE/99999999"
 (
   UNITY_IDLE_RETURN_MINUTES=1; tick=0; epoch="$(date +%s)"
   eval "$(declare -f marked | sed '1s/marked/real_marked/')"
@@ -175,6 +182,7 @@ kill "$orphan" 2>/dev/null || true; wait "$orphan" 2>/dev/null || true; orphan='
 printf licence > "$ULF"
 printf '0\n' > "$IDLE_ACTIVE/$$"
 LINUX_UNITY_RUN=$$:0 /bin/sleep 300 & orphan=$!
+ship_wait_until same_proc "$orphan:$(proc_start "$orphan")" "$$:0"
 idle_begin
 check 'new run does not overwrite displaced PID identity' \
   '[ "$(cat "$IDLE_ACTIVE/$$")" = 0 ] && [ -f "$IDLE_ACTIVE/$$:$(proc_start "$$")" ]'

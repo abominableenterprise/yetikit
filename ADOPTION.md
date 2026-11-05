@@ -29,7 +29,15 @@ VERSION receipt and consumer manifest together. See [vendoring usage and rules](
 for offline sources, CI checks and the debugging-only `file:` override.
 
 ## Ship
-See [Ship tooling](Tools/ship/README.md).
+See [Ship tooling](Tools/ship/README.md). Before setup on a fresh Linux VM,
+install Go and use the pinned crane install command:
+
+```sh
+GOBIN="$HOME/bin" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+```
+
+Setup also accepts a preinstalled crane on PATH or a configured archive; see
+[Ship requirements](Tools/ship/README.md#vendor-into-a-game).
 ## core
 planned
 ## quality
