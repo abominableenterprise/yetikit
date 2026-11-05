@@ -51,6 +51,7 @@ set_aside_ulf() {
 licensing_close_locks() {
   [ -z "${ACQUISITION_FD:-}" ] || exec {ACQUISITION_FD}>&-
   [ -z "${ACTIVATION_FD:-}" ] || exec {ACTIVATION_FD}>&-
+  [ -z "${UNITY_CLEANUP_FD:-}" ] || exec {UNITY_CLEANUP_FD}>&-
 }
 
 # A wrapper-only signal must not leave a client activating after seat cleanup.

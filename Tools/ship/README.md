@@ -275,6 +275,10 @@ Tools/yetikit/quest-release.sh summary
 Tools/yetikit/quest-release.sh wait 28
 ```
 
+`cleanup` removes only clean worktrees, without forcing Git removal. Any local
+change (even a material/settings re-save) is preserved for manual inspection;
+file extensions alone never prove disposable noise.
+
 `all` fetches origin and resolves a commit, creates separate detached test/build
 worktrees with independent cloned Libraries, runs gate/build in parallel, then
 verifies, installs, launches and cleans up. A failed gate never installs; the
