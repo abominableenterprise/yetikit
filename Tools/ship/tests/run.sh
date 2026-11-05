@@ -24,7 +24,7 @@ for test in "$tests"/*.test.sh; do
   mkdir -p "$tmp/$name/home" "$tmp/$name/shm"
   printf '\n=== %s ===\n' "$name"
   if (
-    for variable in ${!UNITY_@} ${!THEROBOTS_@} ${!FAKE_@} ${!APK_@} ${!NOISE_@} ${!IDLE_@} ${!SEAT_@}; do unset "$variable"; done
+    for variable in ${!UNITY_@} ${!THEROBOTS_@} ${!FAKE_@} ${!APK_@} ${!NOISE_@} ${!IDLE_@} ${!SEAT_@} ${!QUEST_@} ${!QR_@}; do unset "$variable"; done
     unset PROJECT YETIKIT_CONFIG USERNAME PASSWORD ULF OUT_DIR PIDFILE PIDFILE_FALLBACK BIN_DIR \
       KNOWN_FLAKES SCENE_AREAS EDITMODE_GFX TASK_CACHE MEMINFO TEST_PR_GFX_MAX \
       FOLLOWUPS_TEST_SCRIPT SHARED_IDLE_TEST_SCRIPT PIDFILE_TEST_SCRIPT WATCHER_CASE \
