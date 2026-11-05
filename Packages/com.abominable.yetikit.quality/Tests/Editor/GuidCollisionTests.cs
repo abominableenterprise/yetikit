@@ -82,6 +82,7 @@ namespace YetiKit.Quality.Tests
             var sensitive = Path.Combine(folder, "Sensitive");
             var insensitive = Path.Combine(folder, "Insensitive");
             WriteMeta(sensitive, "Asset.meta");
+            RequireCaseSensitiveFiles(sensitive);
             WriteMeta(sensitive, "asset.meta");
             WriteMeta(insensitive, "Asset.meta");
             WriteMeta(insensitive, "asset.meta");
@@ -92,23 +93,44 @@ namespace YetiKit.Quality.Tests
             Assert.That(result[0].paths.Length, Is.EqualTo(3), "Only the insensitive root aliases its case variants.");
         }
 
-        [Test] public void FilesystemProbeDistinguishesCaseVariantsAndLinkAliases()
+        [Test] public void FilesystemProbeUsesContentsNotParentSpelling()
         {
-            var upper = Path.Combine(folder, "Probe");
-            var flipped = Path.Combine(folder, "pROBE");
-            Directory.CreateDirectory(upper);
-            if (Directory.Exists(flipped))
+            var root = Path.Combine(folder, "Probe");
+            Directory.CreateDirectory(root);
+            Assert.That(GuidPathIdentity.IgnoresCase(root), Is.Null, "An empty root provides no evidence about its contents.");
+            WriteMeta(root, "Asset.meta");
+            Assert.That(GuidPathIdentity.IgnoresCase(root), Is.EqualTo(File.Exists(Path.Combine(root, "ASSET.META"))));
+        }
+
+        [Test] public void CaseEvidenceInsideRootOverridesPlatformFallback()
+        {
+            // Content evidence must win even when the platform fallback assumes case aliases.
+            var root = Path.Combine(folder, "Probe");
+            Directory.CreateDirectory(root);
+            WriteMeta(root, "Asset.meta");
+            RequireCaseSensitiveFiles(root);
+            WriteMeta(root, "asset.meta");
+            var result = GuidCollisionCheck.Find(true, path => GuidPathIdentity.IgnoresCase(path), root);
+            Assert.That(result[0].paths.Length, Is.EqualTo(2));
+        }
+
+        [Test] public void LinkedTraversalReprobesDirectoryCaseIdentity()
+        {
+            var source = Path.Combine(folder, "Source");
+            var target = Path.Combine(folder, "Target");
+            Directory.CreateDirectory(source);
+            WriteMeta(target, "Asset.meta");
+            RequireCaseSensitiveFiles(target);
+            WriteMeta(target, "asset.meta");
+            WriteMeta(Path.Combine(target, "Dir"));
+            WriteMeta(Path.Combine(target, "dir"));
+            Link(target, Path.Combine(source, "Alias"));
+            foreach (var roots in new[] { new[] { source }, new[] { source, target }, new[] { target, source } })
             {
-                Assert.That(GuidPathIdentity.IgnoresCase(upper), Is.True);
-                return;
+                var result = GuidCollisionCheck.Find(true, path => path == source ? true : false, roots);
+                Assert.That(result.Count, Is.EqualTo(1));
+                Assert.That(result[0].paths.Length, Is.EqualTo(4), "A linked sensitive subtree preserves distinct files and directories.");
             }
-            Assert.That(GuidPathIdentity.IgnoresCase(upper), Is.False);
-            Directory.CreateDirectory(flipped);
-            Assert.That(GuidPathIdentity.IgnoresCase(upper), Is.False, "Two real directories are not case aliases.");
-            Directory.Delete(flipped);
-            Link(upper, flipped);
-            Assert.That(GuidPathIdentity.IgnoresCase(upper), Is.False, "A separate symlink entry does not change filesystem case sensitivity.");
-            Assert.That(GuidPathIdentity.Canonical(flipped), Is.EqualTo(GuidPathIdentity.Canonical(upper)));
         }
 
         [Test] public void PublicFindKeepsCaseDistinctFilesOnSensitiveVolume()
@@ -122,11 +144,24 @@ namespace YetiKit.Quality.Tests
             Assert.That(result[0].paths.Length, Is.EqualTo(2));
         }
 
+        [Test] public void CaseDistinctFixtureGuardSkipsWhenLowercasePathAlreadyExists()
+        {
+            WriteMeta(folder);
+            Assert.Throws<IgnoreException>(() => RequireCaseSensitiveFiles(folder));
+        }
+
+        static void RequireCaseSensitiveFiles(string directory)
+        {
+            if (File.Exists(Path.Combine(directory, "asset.meta")))
+                Assert.Ignore("Requires a case-sensitive filesystem.");
+        }
+
         [TestCase(true, 1)]
         [TestCase(false, 2)]
         public void InconclusiveProbeFallsBackToPlatform(bool defaultIgnoreCase, int pathCount)
         {
             WriteMeta(folder, "Asset.meta");
+            RequireCaseSensitiveFiles(folder);
             WriteMeta(folder, "asset.meta");
             var result = GuidCollisionCheck.Find(defaultIgnoreCase, _ => null, folder);
             Assert.That(result.Count, Is.EqualTo(pathCount == 1 ? 0 : 1));

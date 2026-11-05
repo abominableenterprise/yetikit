@@ -47,28 +47,20 @@ namespace YetiKit.Quality.Editor
             return resolved.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
         }
 
-        // Inspect actual directory spelling without writing into a potentially read-only package.
-        // A flipped name that exists but is not a separate directory entry is a case alias.
+        // Inspect entries INSIDE the scanned directory, never its parent's case behavior.
+        // Stay read-only; empty or uncased contents provide no evidence.
         internal static bool? IgnoresCase(string root)
         {
             try
             {
-                var directory = new DirectoryInfo(root);
-                while (directory.Parent != null)
+                var entries = Directory.EnumerateFileSystemEntries(root).Select(Path.GetFileName).ToArray();
+                foreach (var name in entries)
                 {
-                    var name = directory.Name;
                     var flipped = new string(name.Select(c => char.IsUpper(c) ? char.ToLowerInvariant(c) : char.ToUpperInvariant(c)).ToArray());
-                    if (name != flipped)
-                    {
-                        var alias = Path.Combine(directory.Parent.FullName, flipped);
-                        if (!Directory.Exists(alias)) return false;
-                        var entries = Directory.EnumerateDirectories(directory.Parent.FullName).Select(Path.GetFileName).ToArray();
-                        if (entries.Contains(name, StringComparer.Ordinal) && entries.Contains(flipped, StringComparer.Ordinal)) return false;
-                        // With only one directory entry, matching final paths confirm an alias.
-                        if (StringComparer.OrdinalIgnoreCase.Equals(Canonical(directory.FullName), Canonical(alias))) return true;
-                        return null;
-                    }
-                    directory = directory.Parent;
+                    if (name == flipped) continue;
+                    var alias = Path.Combine(root, flipped);
+                    if (!File.Exists(alias) && !Directory.Exists(alias)) return false;
+                    return !entries.Contains(flipped, StringComparer.Ordinal);
                 }
             }
             catch (IOException) { }

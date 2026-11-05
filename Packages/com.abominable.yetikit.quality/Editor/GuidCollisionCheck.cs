@@ -39,26 +39,27 @@ namespace YetiKit.Quality.Editor
             }
             var files = new HashSet<string>(StringComparer.Ordinal);
             var visited = new HashSet<string>(StringComparer.Ordinal);
-            // Comparer-specific sets preserve the injected identity seam, without folding sensitive roots.
+            // Each directory's contents can have different case behavior across links or mounts.
             var directoryKeys = new Dictionary<IEqualityComparer<string>, HashSet<string>>();
             var fileKeys = new Dictionary<IEqualityComparer<string>, HashSet<string>>();
             foreach (var root in scanRoots)
             {
-                if (!directoryKeys.TryGetValue(root.comparer, out var directories))
-                {
-                    directories = directoryKeys[root.comparer] = new HashSet<string>(root.comparer);
-                    fileKeys[root.comparer] = new HashSet<string>(root.comparer);
-                }
                 var pending = new Stack<string>();
                 pending.Push(root.path);
                 while (pending.Count > 0)
                 {
                     var directory = GuidPathIdentity.Canonical(pending.Pop());
+                    var parentComparer = comparerForRoot(Path.GetDirectoryName(directory) ?? directory);
+                    if (!directoryKeys.TryGetValue(parentComparer, out var directories))
+                        directories = directoryKeys[parentComparer] = new HashSet<string>(parentComparer);
                     if (!directories.Add(directory) || !visited.Add(directory)) continue;
+                    var comparer = comparerForRoot(directory);
+                    if (!fileKeys.TryGetValue(comparer, out var metadata))
+                        metadata = fileKeys[comparer] = new HashSet<string>(comparer);
                     foreach (var file in Directory.EnumerateFiles(directory, "*.meta"))
                     {
                         var key = GuidPathIdentity.Canonical(file);
-                        if (fileKeys[root.comparer].Add(key)) files.Add(key);
+                        if (metadata.Add(key)) files.Add(key);
                     }
                     // Canonical visited-directory keys stop links back to an ancestor, and alias subtrees.
                     foreach (var child in Directory.EnumerateDirectories(directory)) pending.Push(child);
