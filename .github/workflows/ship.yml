@@ -25,5 +25,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq libxml2-utils
       - name: Verify GNU timeout dependency
         run: timeout --version | grep -F 'GNU coreutils'
-      - name: Run offline fake-editor regressions
+      - name: Check Quest shell and launcher syntax
+        run: |
+          bash -n Tools/ship/quest-release.sh
+          for module in Tools/ship/quest-release/*.sh; do bash -n "$module"; done
+          python3 -c 'import ast; ast.parse(open("Tools/ship/android-launcher.py").read())'
+      - name: Run offline fake-editor and Quest-device regressions
         run: Tools/ship/tests/run.sh

@@ -1,0 +1,31 @@
+name: Mesh quality
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  mesh:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install numpy
+      - name: Unit tests and required broken-example verdicts
+        run: python3 -m unittest discover -s Tools/quality/mesh/tests -v
+      - name: Run CLI against every fixture (broken examples must fail)
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixtures=Tools/quality/mesh/tests/fixtures
+          python3 Tools/quality/mesh/check_meshes.py --config "$fixtures/exceptions.json" "$fixtures/closed_cube.glb" "$fixtures/open_tube.glb"
+          for broken in missing_face flipped_faces inside_out; do
+            set +e
+            python3 Tools/quality/mesh/check_meshes.py --json "$broken.json" "$fixtures/$broken.glb"
+            status=$?
+            set -e
+            test "$status" -eq 1
+            python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r["files"][0]["status"] == "FAIL" and r["files"][0].get("meshes")' "$broken.json"
+          done

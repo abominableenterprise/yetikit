@@ -1,0 +1,38 @@
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  * Task{b7c3e41 #212 type=home A=10045:com.oculus.vrshell U=0 visible=true visibleRequested=true mode=fullscreen translucent=false sz=1}
+    mResumedActivity: ActivityRecord{5e3f1a2 u0 com.oculus.vrshell/.MainActivity t212}
+    * Hist #0: ActivityRecord{5e3f1a2 u0 com.oculus.vrshell/.MainActivity t212}
+  * Task{4a9d0c7 #187 type=standard A=10093:com.oculus.systemux U=0 visible=true visibleRequested=true mode=multi-window translucent=true sz=1}
+    mResumedActivity: ActivityRecord{2c81b5e u0 com.oculus.systemux/.panels.NotificationsPanelActivity t187}
+    * Hist #0: ActivityRecord{2c81b5e u0 com.oculus.systemux/.panels.NotificationsPanelActivity t187}
+  * Task{91e07fa #190 type=standard A=10101:com.oculus.explore U=0 visible=true visibleRequested=true mode=multi-window translucent=true sz=1}
+    mResumedActivity: ActivityRecord{e04d3b9 u0 com.oculus.explore/.ExplorePanelActivity t190}
+    * Hist #0: ActivityRecord{e04d3b9 u0 com.oculus.explore/.ExplorePanelActivity t190}
+
+  Resumed activities in task display areas (from top to bottom):
+    Resumed: ActivityRecord{5e3f1a2 u0 com.oculus.vrshell/.MainActivity t212}
+    Resumed: ActivityRecord{2c81b5e u0 com.oculus.systemux/.panels.NotificationsPanelActivity t187}
+    Resumed: ActivityRecord{e04d3b9 u0 com.oculus.explore/.ExplorePanelActivity t190}
+
+  ResumedActivity: ActivityRecord{5e3f1a2 u0 com.oculus.vrshell/.MainActivity t212}
+
+  topDisplayFocusedRootTask=Task{b7c3e41 #212 type=home A=10045:com.oculus.vrshell U=0 visible=true visibleRequested=true mode=fullscreen translucent=false sz=1}
+  topResumedActivity=ActivityRecord{2c81b5e u0 com.oculus.systemux/.panels.NotificationsPanelActivity t187}
+  topResumedActivity=ActivityRecord{e04d3b9 u0 com.oculus.explore/.ExplorePanelActivity t190}
+  topResumedActivity=ActivityRecord{5e3f1a2 u0 com.oculus.vrshell/.MainActivity t212}
+WINDOW MANAGER WINDOWS (dumpsys window windows)
+  Window #0 Window{8c1d2e3 u0 com.oculus.vrshell/.MainActivity}:
+    mDisplayId=0 rootTaskId=212 mSession=Session{3f2a 4242:u0a87} mClient=android.os.BinderProxy@1e2f
+  Window #1 Window{77a0b14 u0 com.oculus.systemux/com.oculus.systemux.panels.NotificationsPanelActivity}:
+    mDisplayId=0 rootTaskId=187 mSession=Session{9b1c 2210:u0a93} mClient=android.os.BinderProxy@44d0
+  mCurrentFocus=Window{8c1d2e3 u0 com.oculus.vrshell/.MainActivity}
+  mFocusedApp=ActivityRecord{5e3f1a2 u0 com.oculus.vrshell/.MainActivity t212}
+POWER MANAGER (dumpsys power)
+  mWakefulness=Awake
+  mWakefulnessChanging=false
+  mProximityPositive=false
+Display Power: state=ON
+VR POWER MANAGER (dumpsys vrpowermanager)
+  Headset state: HEADSET_MOUNTED
+  Mounted since: 2026-11-01 09:41:07
