@@ -50,6 +50,10 @@ canonical ULF path, shared across checkouts; secrets are never persisted.
 Old checkout-local numeric-PID watcher upgrade bridges are intentionally omitted:
 finish/return any pre-vendoring session before switching toolsets. Shared watcher
 ownership, activation locks, and seat-retirement protections are retained.
+Editor commands sharing `SHM_DIR` are serialized by a persistent cleanup lock:
+an overlapping runner fails before starting an editor or deleting shared memory.
+Wait for the active run or invoke `stop` from its checkout; never remove the lock
+file while a run is active.
 
 ## Commands
 
@@ -160,6 +164,9 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `noise.repackRegex` | Optional eligible prop mesh/prefab path ERE (capture group 1 labels the prop); disabled if omitted. |
 | `tests.builderFixtures` | Optional object mapping exact builder paths to arrays of fully qualified fixture names. |
 
+Configuration paths are normalized once on load: `./`, repeated separators,
+and trailing separators do not change keep safeguards or source detection.
+Standalone cleanup includes `scene.keepPaths` as well as CLI `--keep` paths.
 Paths used as outputs cannot be absolute or contain `..` components. Strings
 cannot be empty or contain control characters. Regex values are trusted project
 policy: keep them anchored and narrow, especially the repack eligibility rule.

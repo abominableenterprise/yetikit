@@ -172,9 +172,19 @@ cache_restore() {
   return 0
 }
 
+# Cleanup touches global shared memory, so serialize editor runs across checkouts
+# and installations using that SHM_DIR. Refuse overlap instead of killing a peer.
+lock_unity() {
+  [ -z "${UNITY_CLEANUP_FD:-}" ] || return 0
+  exec {UNITY_CLEANUP_FD}> "$SHM_DIR/.linux-unity-cleanup.lock"
+  flock -n "$UNITY_CLEANUP_FD" || die "another Unity run owns $SHM_DIR; wait for it or stop its checkout"
+  chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
+}
+
 # Kill editor helpers left by a crashed or timed-out run. A stale Unity.DataStore shared-memory
 # segment makes the next run fail with "Error loading the file 'VirtualArtifacts/...'".
 cleanup_unity() {
+  lock_unity
   local p
   for p in /proc/[0-9]*; do
     case "$(readlink "$p/exe" 2>/dev/null)" in "$UNITY_ROOT"/*) kill -9 "${p#/proc/}" 2>/dev/null || true ;; esac
@@ -321,6 +331,7 @@ cmd_stop() {
       done
       [ "$left" = 1 ] || break; sleep 0.1
     done
+    lock_unity
     rm -f "$f" "$SHM_DIR"/udsMem* "$SHM_DIR"/sem.udsMem* "$PROJECT/Temp/UnityLockfile"; exec {fd}>&-
   done
   [ "$found" = 1 ] || log "stop: no pidfile ($PIDFILE): nothing this script started is running"
@@ -663,6 +674,7 @@ case "${1:-}" in
   open|test|scene|lab|apk|all)
     # Every process this run forks inherits the marker, so `stop` finds it in any process group (timeout's,
     # a foreground run's) and never signals a pipeline peer such as `| tee`.
+    lock_unity
     write_pidfile; export LINUX_UNITY_RUN="${PID_LINE/ /:}"; chain_exit_trap release_pidfile
     if [ "${1:-}" = test ]; then test_stages_claim; fi ;;
 esac

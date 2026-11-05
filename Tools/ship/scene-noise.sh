@@ -391,6 +391,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   set -euo pipefail
   top="$PROJECT"
   keep=(); before=""; revert=revert_scene_noise
+  while IFS= read -r k; do keep+=("$k"); done < <(ship_config_get '.scene.keepPaths[]?')
   usage="usage: $0 [--run] [--before <file>] [--keep <path>]..."
   # Resolve every --keep and --before from the caller's directory before the cd below.
   while [ $# -gt 0 ]; do
