@@ -86,6 +86,8 @@ cmd_apk() {
   mkdir -p "$OUT_DIR"
   # The swapfile goes first, then the trap already set (licence return, pidfile). TERM/INT/HUP exit through it too
   # (bash runs no EXIT trap for an untrapped signal).
+  # Cleanup owns only a file assigned by this invocation's apk_swap_on, never caller state.
+  APK_SWAPFILE=""
   chain_exit_trap apk_swap_off; trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
   [ -z "$swap" ] || apk_swap_on "$swap"
   [ "$APK_JOBS" = 0 ] || log "apk: IL2CPP/bee capped at $APK_JOBS parallel jobs (APK_JOBS)"

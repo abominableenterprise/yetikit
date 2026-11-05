@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "unityVersion": "6000.6.6f1",
+  "build": {
+    "devMethod": "ExampleGame.World.Editor.WorldBuild.DevelopmentApk",
+    "releaseMethod": "ExampleGame.World.Editor.WorldBuild.ContestApk",
+    "apkPath": "Builds/Android/GeneratedScene-dev.apk",
+    "releaseApkPath": "Builds/Android/ExampleGame-contest.apk"
+  },
+  "knownFlakes": "Tools/ship/known-flakes.txt",
+  "labMethod": "ExampleGame.Lab.Editor.TeleportLabBuilder.Run",
+  "scene": {
+    "steps": [
+      "ExampleGame.World.Editor.PropSetup.Run",
+      "ExampleGame.World.Editor.WorldSceneBuilder.Run",
+      "ExampleGame.World.Editor.WorldStats.Run"
+    ],
+    "areaStep": "ExampleGame.World.Editor.WorldSceneBuilder.BuildAreaFromCommandLine",
+    "areaSteps": [
+      "ExampleGame.World.Editor.PropSetup.Run",
+      "ExampleGame.World.Editor.WorldSceneBuilder.BuildAreaFromCommandLine"
+    ],
+    "lightmapDir": "Assets/Scenes/GeneratedScene",
+    "areasDir": "Assets/Art/World/Areas",
+    "areasFile": "Tools/ship/world-areas.txt",
+    "keepPaths": ["docs/art/world/stats.md"]
+  },
+  "noise": {
+    "protectedRegex": "^(Assets/Scenes/|docs/art/world/stats\\.md$)",
+    "sourceRegex": "\\.(glb|fbx|jpg|jpeg|png|tga|psd)(\\.meta)?$",
+    "generatorsRegex": "^Assets/Editor/World/(GrabCatalog|PropSetup|WorldGrabbables)\\.cs$",
+    "codeRegex": "^Assets/(Scripts|Editor)/|\\.(cs|asmdef)$",
+    "atlasPath": "Assets/Art/Props/Grabbables_Atlas.png",
+    "timeManagerPath": "ProjectSettings/TimeManager.asset",
+    "specularMaterialPath": "Assets/Art/World/Materials/BasketPortableStand.mat",
+    "propsDir": "Assets/Art/Props",
+    "repackRegex": "^Assets/Art/Props/([^/]+)/[^/]+(_Atlas\\.asset|\\.prefab)$"
+  },
+  "tests": {"builderFixtures": {}}
+}

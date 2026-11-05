@@ -1,0 +1,3 @@
+# Synthetic fixture-level and method-level retry entries.
+ExampleGame.Tests.UnstableFixture
+ExampleGame.Tests.UnstableMethod.SometimesFails
