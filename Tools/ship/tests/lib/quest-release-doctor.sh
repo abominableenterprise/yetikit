@@ -171,4 +171,3 @@ rc=0
 ) || rc=$?
 check "verify with only a macOS embedded JDK exports Java and finds bundled SDK apksigner" \
   '[ "$rc" = 0 ] && grep -q "verify: signer certificate ok" "$tmp/err" && [ ! -f "$tmp/unity.log" ]'
-
