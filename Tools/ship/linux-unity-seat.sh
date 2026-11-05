@@ -164,6 +164,8 @@ activation_gate() {
 }
 activation_ungate() {
   [ -n "${ACQUISITION_FD:-}" ] || return 0
+  # A licensing worker may still hold an inherited copy of this descriptor.
+  flock -u "$ACQUISITION_FD"
   exec {ACQUISITION_FD}>&-
   unset ACQUISITION_FD
 }

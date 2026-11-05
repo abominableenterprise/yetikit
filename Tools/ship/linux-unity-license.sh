@@ -47,6 +47,12 @@ set_aside_ulf() {
   log "moved the invalid licence to $bad"
 }
 
+# Call only in a child shell: keep wrapper-owned locks out of client workers.
+licensing_close_locks() {
+  [ -z "${ACQUISITION_FD:-}" ] || exec {ACQUISITION_FD}>&-
+  [ -z "${ACTIVATION_FD:-}" ] || exec {ACTIVATION_FD}>&-
+}
+
 # A wrapper-only signal must not leave a client activating after seat cleanup.
 activation_signal() {
   local status="$2" i
@@ -75,7 +81,7 @@ activate_client() {
   saved="$(trap -p TERM INT HUP)"
   # Isolate the full client tree; $! is the session/group leader (job control is off).
   # Even if the client exits on TERM, its workers remain addressable for escalation.
-  setsid "$LC" --activate-ulf --username "$UNITY_USERNAME" --password "$UNITY_PASSWORD" > "$capture" 2>&1 &
+  (licensing_close_locks; exec setsid "$LC" --activate-ulf --username "$UNITY_USERNAME" --password "$UNITY_PASSWORD") > "$capture" 2>&1 &
   client=$!
   trap 'activation_signal TERM 143' TERM
   trap 'activation_signal INT 130' INT
@@ -124,7 +130,7 @@ cmd_activate() {
   [ -f "$ULF" ] || die "activation left no $ULF (recover: $SHIP_COMMAND return, then activate)"
   why="$(ulf_problem)"
   [ -z "$why" ] || die "activation wrote an invalid $ULF ($why); recover: $SHIP_COMMAND return, rm $ULF, then activate"
-  "$LC" --showEntitlements 2>&1 | mask | grep -E 'Product Name|com.unity.editor.headless' >&2 || true
+  (licensing_close_locks; exec "$LC" --showEntitlements) 2>&1 | mask | grep -E 'Product Name|com.unity.editor.headless' >&2 || true
   SEAT_OWNED=0; SEAT_PERSISTED=0
   activation_unlock
   activation_ungate
@@ -145,10 +151,10 @@ cmd_return() {
   # Keep the supervised shell alive after TERM even if the client exits: timeout must still KILL its group.
   # Capture to a file so an inherited output pipe cannot keep this command (and the activity lock) blocked.
   capture="$(mktemp)"
-  timeout -k 5 "$limit" bash -c '
+  (licensing_close_locks; exec timeout -k 5 "$limit" bash -c '
     trap "while :; do /bin/sleep 1; done" TERM
     "$@" & wait $!
-  ' _ "$LC" --return-ulf --username "$UNITY_USERNAME" --password "$UNITY_PASSWORD" > "$capture" 2>&1 || rc=$?
+  ' _ "$LC" --return-ulf --username "$UNITY_USERNAME" --password "$UNITY_PASSWORD") > "$capture" 2>&1 || rc=$?
   out="$(< "$capture")"; rm -f "$capture"
   printf '%s\n' "$out" | mask >&2
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then log "return: licensing client timed out after $limit s (UNITY_RETURN_TIMEOUT)"; fi
