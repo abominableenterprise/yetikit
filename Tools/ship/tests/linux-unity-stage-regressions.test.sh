@@ -169,8 +169,8 @@ def observer_ready():
             and 'stage compile start' in stages.read_text())
 
 
-# A second command is refused by write_pidfile. It must not truncate or append
-# timing output belonging to the still-running owner (including credential stages).
+# A second command is refused by the shared cleanup lock or write_pidfile. It
+# must not change timing output belonging to the still-running owner.
 runner = start_run('owner')
 marker = None
 try:
@@ -182,9 +182,11 @@ try:
         contender = subprocess.run(launcher + [script, 'test', 'editmode'],
                                    env=dict(os.environ, EDITMODE_GFX='0'),
                                    stdout=log, stderr=log, timeout=10)
+    refusal = (root / 'contender.log').read_text()
     check('overlapping test is refused while the original owner remains live',
           contender.returncode != 0 and runner.poll() is None
-          and 'another run' in (root / 'contender.log').read_text())
+          and (f'another run (pid {runner.pid},' in refusal
+               or f'another Unity run owns {os.environ["SHM_DIR"]};' in refusal))
     check('refused test preserves the owner pidfile',
           (out / 'linux-unity.pid').read_bytes() == pidfile)
     check('refused test neither resets nor appends to the owner stage log',

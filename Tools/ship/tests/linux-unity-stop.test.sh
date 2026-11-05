@@ -92,7 +92,7 @@ FAKE_SLEEP=300 bash "$script" open >/dev/null 2>&1 & runner=$!
 wait_for "$tmp/unity.pid"
 rc=0; bash "$script" open --bad 2>"$tmp/err" || rc=$?
 check "a second command while a run is live fails and leaves the live run's pidfile" \
-  '[ "$rc" != 0 ] && grep -q "another run (pid $runner" "$tmp/err" && [ "$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")" = "$runner" ]'
+  '[ "$rc" != 0 ] && { grep -qF "another run (pid $runner," "$tmp/err" || grep -qF "another Unity run owns $SHM_DIR;" "$tmp/err"; } && alive "$runner" && [ "$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")" = "$runner" ]'
 bash "$script" stop 2>"$tmp/err"; wait "$runner" 2>/dev/null || true
 check "stop still finds and kills that live run" '! alive "$runner" && grep -q "stop: killing $runner" "$tmp/err"'
 # A cache restore that forks a new sleep every 20 ms (at most 500), and one child that ignores TERM.
