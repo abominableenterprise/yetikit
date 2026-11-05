@@ -5,6 +5,11 @@ tests="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for dependency in bash jq python3 perl git xmllint timeout flock sha256sum; do
   command -v "$dependency" >/dev/null || { printf 'missing test dependency: %s\n' "$dependency" >&2; exit 1; }
 done
+# GNU timeout's process-group KILL behavior is required by the lifecycle regressions.
+if ! timeout --version | grep -qF 'GNU coreutils'; then
+  printf 'missing test dependency: GNU coreutils timeout\n' >&2
+  exit 1
+fi
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 for command in curl wget crane task-cache apt-get swapon swapoff mkswap fallocate; do

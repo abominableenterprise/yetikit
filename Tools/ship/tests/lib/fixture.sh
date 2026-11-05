@@ -4,7 +4,11 @@ SHIP_TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHIP_SOURCE_DIR="$(cd "$SHIP_TESTS_DIR/.." && pwd)"
 ship_fixture() {
   local project="$1" variant="${2:-scene}" file
-  mkdir -p "$project/Tools/ship"
+  mkdir -p "$project/Tools/ship" "$project/.ship-test-bin"
+  # Preserve synthetic commands/environment without invoking real sudo, even standalone.
+  printf '#!/bin/sh\nexec "$@"\n' > "$project/.ship-test-bin/sudo"
+  chmod +x "$project/.ship-test-bin/sudo"
+  export PATH="$project/.ship-test-bin:$PATH"
   for file in "$SHIP_SOURCE_DIR"/*.sh; do
     cp "$file" "$project/Tools/ship/"
   done
