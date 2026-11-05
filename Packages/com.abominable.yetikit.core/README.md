@@ -74,8 +74,19 @@ require `/bin/sh` and skip on platforms without it.
 
 ### Consumer build wiring
 
-Call the scope from an Editor build method, around the synchronous player
-build; no scene builder or specific build target is required:
+**Full Git history is required before assigning version codes.** `Collect`
+does not detect shallow history: a shallow checkout silently produces a truncated
+count, which can repeat or decrease store version codes. For GitHub Actions,
+configure `actions/checkout@v4` with `fetch-depth: 0`. Other CI systems must also
+fetch the complete history. Before invoking Unity or the build method below,
+validate the checkout and fail the build if history is incomplete:
+
+```sh
+test "$(git rev-parse --is-shallow-repository)" = false || { echo "Build stamping requires full Git history" >&2; exit 1; }
+```
+
+Call the scope from an Editor build method only after that validation, around
+the synchronous player build; no scene builder or specific build target is required:
 
 ```csharp
 using System;
