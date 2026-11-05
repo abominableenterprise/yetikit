@@ -1,4 +1,4 @@
-# Ship: headless Unity on Linux
+# Ship: Unity build and Quest release tooling
 
 Part of the Ship extraction. This toolset runs a consuming project's editor on
 Linux with Xvfb/Mesa, without Docker or changes to its editor APIs. Shell tests
@@ -184,3 +184,167 @@ Part B adds the offline shell tests and CI entry point. No editor, account,
 network, activation or seat is needed. Generated-scene and no-scene fixtures
 cover both project shapes. Installation, licensing, curl, cache and editor
 processes are substituted with local fakes.
+
+## Quest release (macOS)
+
+The [Quest runner](quest-release.sh) consumes the same schema 1 configuration.
+Use a licensed Mac with Bash 3.2+, `jq`, Python 3, Git, `adb` on PATH,
+and the Unity Hub editor matching `unityVersion` (Android Build Support,
+SDK/NDK and OpenJDK installed). Release worktrees need an APFS volume for
+`cp -c -R` Library clones and at least 25 GB free. Prepare a clean, warm
+worktree at `$HOME/wt/<repo name>/mac-pass` first. The editor version in
+`ProjectSettings/ProjectVersion.txt` must agree with configuration.
+
+Use the existing debug keystore at `$ANDROID_USER_HOME/debug.keystore`
+(default `$HOME/.android/debug.keystore`), not a newly generated key. Set
+`QUEST_CERT_SHA256` to the certificate fingerprint expected by the installed
+application, obtained independently with `keytool`. It has **no baked-in
+value**. Builds drop `XDG_CONFIG_HOME` so Gradle uses that same keystore.
+`doctor` checks Java, apksigner, keystore, editor, free disk, adb, idle status
+and concurrent runs, without creating logs, starting Unity or changing a device.
+No real headset or Mac is needed for the synthetic shell tests.
+
+### Configuration
+
+Add an optional `quest` object to schema 1. Omitting it leaves Linux commands
+unchanged; Quest commands require it and `build.devMethod` (profile-only
+projects must supply a development execute method for this runner).
+
+```json
+{
+  "quest": {
+    "package": "com.example.game",
+    "worktreeRoot": "$HOME/wt/consumer",
+    "apkKeepName": "game-dev-{sha}.apk",
+    "perfLogTag": "[GamePerf]",
+    "launcherChecks": {
+      "package": "com.example.game",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "assets": [
+        "assets/synthetic-content.bin"
+      ]
+    },
+    "whatsNewEnv": "YETIKIT_WHATS_NEW",
+    "prevShaEnv": "YETIKIT_PREV_SHA",
+    "dataFiles": [
+      "playtest.json",
+      "throws.csv"
+    ],
+    "launchArgs": []
+  }
+}
+```
+
+| Quest key | Type / default / purpose |
+| --- | --- |
+| `package` | Required dotted Android application ID. Used for launcher verification, data storage and process/crash attribution. |
+| `worktreeRoot` | Nonempty path; default `$HOME/wt/<repo name>`. Relative paths resolve against the project; leading `~/` and `$HOME/` expand without shell evaluation. |
+| `apkKeepName` | Filename pattern containing `{sha}`, default `game-dev-{sha}.apk`. Only letters, digits, `.`, `_`, `-` and braces; no directories. Substitutes the nine-character commit prefix. |
+| `perfLogTag` | Optional literal log tag preceding `fps=…`; omitted means no FPS extraction. |
+| `launcherChecks` | Optional object; Unity GameActivity/VR launcher/theme and ZIP checks always apply. |
+| `launcherChecks.package` | Optional expected package, must equal `quest.package`. |
+| `launcherChecks.permissions` | Optional array of required permission names; default empty. |
+| `launcherChecks.assets` | Optional array of exact required APK archive paths; default empty. No absolute paths or parent traversal. |
+| `whatsNewEnv` | Build notes environment-variable name; default `YETIKIT_WHATS_NEW`. `--notes` exports the absolute notes filename. |
+| `prevShaEnv` | Previous-installed-commit environment-variable name; default `YETIKIT_PREV_SHA`. Build receives the latest successful install's commit unless already supplied. |
+| `dataFiles` | Optional array of safe basenames to back up and hash-check; default `playtest.json`, `throws.csv`. Empty means no application-specific files. Contents never print. |
+| `launchArgs` | Optional string array appended to `adb shell am start`; default empty. No game-specific launch extras are built in. |
+
+`quest.serial` is rejected: the headset serial belongs **only** in environment
+variable `QUEST_SERIAL`. If unset, the runner requires exactly one attached adb
+device; zero or multiple devices fail clearly instead of choosing one. Never
+commit device identity, signing fingerprints or private provenance to config.
+
+### Commands
+
+```sh
+Tools/yetikit/quest-release.sh doctor
+Tools/yetikit/quest-release.sh all
+Tools/yetikit/quest-release.sh all origin/main --full --notes /tmp/release-notes.txt --rollback /tmp/previous.apk
+Tools/yetikit/quest-release.sh prepare origin/main
+Tools/yetikit/quest-release.sh gate
+Tools/yetikit/quest-release.sh build
+Tools/yetikit/quest-release.sh verify /tmp/game.apk
+Tools/yetikit/quest-release.sh install /tmp/game.apk
+Tools/yetikit/quest-release.sh launch
+Tools/yetikit/quest-release.sh rollback /tmp/previous.apk
+Tools/yetikit/quest-release.sh cleanup
+Tools/yetikit/quest-release.sh summary
+Tools/yetikit/quest-release.sh wait 28
+```
+
+`all` fetches origin and resolves a commit, creates separate detached test/build
+worktrees with independent cloned Libraries, runs gate/build in parallel, then
+verifies, installs, launches and cleans up. A failed gate never installs; the
+built APK and failed worktrees remain for inspection. `--rollback` reinstalls the
+previous APK only after a launch crash. Standalone steps use the current run's
+state under `release-logs/current.env`. `summary` reprints the latest step results.
+
+`gate` runs Metal EditMode `Gfx;MacOnly` tests (`--full` runs all). All failures
+listed in `knownFlakes`, or exactly one failure whether listed or not, rerun
+once with the same categories and exact selected filter. Retry coverage and
+result counts must prove the selected tests actually passed. Missing results,
+crashes and empty runs fail closed. The summary labels a passing retry.
+`build` uses `build.devMethod` and `build.apkPath`; a log-growth stall kills only
+that editor, retries once, then fails. The retained APK has commit provenance.
+Notes are supplied through the configured variable names; interpreting those
+variables and numbering the build remains the consumer's build method's job.
+
+`verify` invokes [the launcher checker](android-launcher.py), then apksigner
+and SHA-256. The checker also accepts `--config <yetikit.json>` with a source
+manifest or built APK. Its compatibility `--contest` mode instead requires the
+configured development permissions/assets to be absent; the Unity contract is
+still mandatory. `launch` captures logcat at 30 seconds (when the configured
+wait exceeds 30), then at the final deadline; it reports optional FPS, errors,
+package-attributed crashes, alive status and Quest-shell launch warnings. Shell
+warnings alone do not trigger rollback and a live process is not proof of XR
+presentation. Logs and summaries remain in `<worktreeRoot>/release-logs/`.
+
+For detached operations, use `nohup … all > /tmp/quest-release.out 2>&1 &`, then
+`wait 28` within the caller's command timeout. `wait` takes no lock and writes
+nothing: exit 0 means the watched invocation succeeded and installed (or a
+standalone gate passed), 1 means failure/missing terminal result, and 124 means
+the bounded wait expired. It prints progress once a minute.
+
+### Safety
+
+- Never uninstall, clear app data, grant or revoke permissions. Installation
+  uses **`adb install -r` only**; explicit rollback also adds `-d`.
+- Verify the APK launcher and matching signer before installation, including
+  standalone install and rollback. A mismatched or missing signer fails closed.
+- Require an Oculus device and check focused activity plus current headset-worn
+  state immediately before install. Unknown idle state refuses even with
+  `--force`; that flag bypasses only a known in-use verdict.
+- Back up configured data files with device/local hash equality before install,
+  then check that data did not change. Never print file contents.
+- Serialize each log root with an atomic PID-aware run lock. Device operations
+  additionally use a shared per-headset lock across projects/log roots under
+  `/tmp/yetikit-quest-device-locks-$UID` (hashed runtime serial). Stale
+  locks are reclaimed only after their owners and workers are gone; cancellation
+  drains the owned process group before releasing its lock.
+- Device reconnect, Unity work, stall recovery and `wait` all have bounded waits.
+  No default identity, private endpoint or signing certificate is embedded.
+
+### Environment
+
+| Variable | Default / purpose |
+| --- | --- |
+| `PROJECT`, `YETIKIT_CONFIG` | Consumer root / root `yetikit.json`; `QUEST_REPO` remains a compatibility root override. |
+| `QUEST_SERIAL` | Environment only; otherwise require exactly one attached device. |
+| `QUEST_CERT_SHA256` | Required expected APK signer for build/verify/install; no default. |
+| `QUEST_WT_ROOT`, `QUEST_WARM_WORKTREE` | Configured worktree root / `<root>/mac-pass`. |
+| `QUEST_LOG_ROOT`, `QUEST_APK_DIR` | `<root>/release-logs` / warm worktree plus directory of `build.apkPath`. |
+| `QUEST_BACKUP_ROOT` | `$HOME`; backups contain private application data, keep them private. |
+| `QUEST_MIN_FREE_GB` | `25`. |
+| `QR_GATE_TIMEOUT`, `QR_BUILD_TIMEOUT` | `1800` seconds each. Compatibility aliases: `QUEST_GATE_TIMEOUT`, `QUEST_BUILD_TIMEOUT`. |
+| `QR_BUILD_STALL_SECONDS` | `300` seconds without log growth; one retry. |
+| `QR_ADB_WAIT`, `QR_LAUNCH_WAIT` | `120` / `60` seconds. Compatibility aliases: `QUEST_ADB_WAIT`, `QUEST_LAUNCH_WAIT`. |
+| `QUEST_GATE_CATEGORIES` | `Gfx;MacOnly`; `--full` removes the category filter. |
+| `QUEST_KNOWN_FLAKES` | Configured `knownFlakes`, otherwise no list. |
+| `QUEST_WAIT_POLL` | `5` seconds between read-only `wait` checks. |
+| `UNITY_HUB_EDITORS`, `UNITY_BIN` | `/Applications/Unity/Hub/Editor` / explicit editor executable. |
+| `JAVA_HOME`, `ANDROID_SDK_ROOT`, `AAPT` | Explicit tools, otherwise matching editor's Android support SDK/OpenJDK and newest build-tools. |
+| `ANDROID_USER_HOME` | `$HOME/.android`; contains `debug.keystore`. |
+| configured notes / previous-SHA names | `YETIKIT_WHATS_NEW` / `YETIKIT_PREV_SHA`; environment only. |

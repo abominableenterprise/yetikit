@@ -7,6 +7,9 @@ def relpath:
 def strings: if type == "array" then all(.[]; nonempty) else false end;
 def methods: if strings then length > 0 else false end;
 def invalid($key): "missing or invalid key: \($key)";
+def envname: if nonempty then test("^[A-Za-z_][A-Za-z0-9_]*$") else false end;
+def packageid: if nonempty then test("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$") else false end;
+def basenames: if strings then all(.[]; test("^[A-Za-z0-9_][A-Za-z0-9_.-]*$") and . != "..") else false end;
 if length != 1 then invalid("schema (expected one JSON object)")
 else .[0] |
 if type != "object" then invalid("schema")
@@ -20,6 +23,23 @@ elif (.build | has("cli")) and (.build.cli | nonempty | not) then invalid("build
 elif (.build.apkPath | relpath | not) then invalid("build.apkPath")
 elif has("knownFlakes") and (.knownFlakes | relpath | not) then invalid("knownFlakes")
 elif (.build | has("releaseApkPath")) and (.build.releaseApkPath | relpath | not) then invalid("build.releaseApkPath")
+elif has("quest") and (.quest | type) != "object" then invalid("quest")
+elif has("quest") and (.quest | has("serial")) then invalid("quest.serial (use QUEST_SERIAL environment only)")
+elif has("quest") and (.quest.package | packageid | not) then invalid("quest.package")
+elif has("quest") and (.build.devMethod | nonempty | not) then invalid("build.devMethod (required for Quest builds)")
+elif has("quest") and (.quest | has("worktreeRoot")) and (.quest.worktreeRoot | nonempty | not) then invalid("quest.worktreeRoot")
+elif has("quest") and (.quest | has("apkKeepName")) and
+  (.quest.apkKeepName | if nonempty then test("^[A-Za-z0-9_.{}-]+\\.apk$") and contains("{sha}") else false end | not) then invalid("quest.apkKeepName")
+elif has("quest") and (.quest | has("perfLogTag")) and (.quest.perfLogTag | nonempty | not) then invalid("quest.perfLogTag")
+elif has("quest") and (.quest | has("whatsNewEnv")) and (.quest.whatsNewEnv | envname | not) then invalid("quest.whatsNewEnv")
+elif has("quest") and (.quest | has("prevShaEnv")) and (.quest.prevShaEnv | envname | not) then invalid("quest.prevShaEnv")
+elif has("quest") and (.quest | has("dataFiles")) and (.quest.dataFiles | basenames | not) then invalid("quest.dataFiles")
+elif has("quest") and (.quest | has("launchArgs")) and (.quest.launchArgs | strings | not) then invalid("quest.launchArgs")
+elif has("quest") and (.quest | has("launcherChecks")) and (.quest.launcherChecks | type) != "object" then invalid("quest.launcherChecks")
+elif has("quest") and (.quest.launcherChecks // {} | has("package")) and (.quest.launcherChecks.package != .quest.package) then invalid("quest.launcherChecks.package (must match quest.package)")
+elif has("quest") and (.quest.launcherChecks // {} | has("permissions")) and (.quest.launcherChecks.permissions | strings | not) then invalid("quest.launcherChecks.permissions")
+elif has("quest") and (.quest.launcherChecks // {} | has("assets")) and
+  (.quest.launcherChecks.assets | if type == "array" then all(.[]; relpath) else false end | not) then invalid("quest.launcherChecks.assets")
 elif has("setup") and (.setup | type) != "object" then invalid("setup")
 elif has("setup") and (.setup | has("craneArchive")) and (.setup.craneArchive | nonempty | not) then invalid("setup.craneArchive")
 elif has("labMethod") and (.labMethod | nonempty | not) then invalid("labMethod")
