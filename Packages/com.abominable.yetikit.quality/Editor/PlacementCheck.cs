@@ -62,7 +62,10 @@ namespace YetiKit.Quality.Editor
             bool Accumulate(Mesh mesh, Transform transform)
             {
                 if (!mesh) { result.Reason = "Missing shared mesh."; return false; }
-                var toRoot = root.worldToLocalMatrix * transform.localToWorldMatrix;
+                var toRoot = Matrix4x4.identity;
+                // Never round-trip through world space: large root translations erase small gaps.
+                for (var node = transform; node != root; node = node.parent)
+                    toRoot = Matrix4x4.TRS(node.localPosition, node.localRotation, node.localScale) * toRoot;
                 var axis = toRoot.MultiplyVector(Vector3.forward);
                 if (!Finite(axis) || axis.sqrMagnitude < 1e-12f)
                 { result.Reason = "Invalid mesh forward transform."; return false; }

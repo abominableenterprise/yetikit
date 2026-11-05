@@ -76,6 +76,30 @@ namespace YetiKit.Quality.Tests
             root.transform.localScale = Vector3.one * 2;
             Assert.IsTrue(PlacementCheck.Check(root, default).Pass);
         }
+        [TestCase(0f)]
+        [TestCase(0.05f)]
+        [TestCase(-0.05f)]
+        public void LargeWorldCoordinatesDoNotChangeRootLocalGrounding(float gap)
+        {
+            var child = Cube(Vector3.up * (0.5f + gap), Vector3.one);
+            var group = new GameObject("Nested inactive group");
+            group.transform.SetParent(root.transform, false);
+            group.transform.localPosition = Vector3.up * 0.25f;
+            group.transform.localRotation = Quaternion.Euler(0, 30, 0);
+            child.transform.SetParent(group.transform, false);
+            child.transform.localPosition -= Vector3.up * 0.25f;
+            child.transform.localRotation = Quaternion.Euler(0, -30, 0);
+            group.SetActive(false);
+            var origin = PlacementCheck.Check(root, default);
+            Assert.That(origin.Pass, Is.EqualTo(gap == 0), origin.Reason);
+            root.transform.position = new Vector3(100000, 1048576, 100000);
+            var distant = PlacementCheck.Check(root, default);
+            Assert.That(distant.Pass, Is.EqualTo(origin.Pass));
+            Assert.That(distant.maxGap, Is.EqualTo(origin.maxGap).Within(0.000001f));
+            Assert.That(distant.lowestPerQuadrant, Is.EqualTo(origin.lowestPerQuadrant).Within(0.000001f));
+            Assert.That(distant.forwardErrorDegrees, Is.EqualTo(origin.forwardErrorDegrees).Within(0.000001f));
+        }
+
         [TestCase(0f, true)]
         [TestCase(0.05f, false)]
         [TestCase(-0.05f, false)]
