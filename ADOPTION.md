@@ -2,7 +2,8 @@
 
 **Day 0:** install the [YetiKit skills](skills/README.md); copy [templates/game](templates/game/).
 
-Runtime/tooling status: planned. No adoption commands or release tags are available yet.
+Runtime packages remain planned. Ship and consumer vendoring tooling are available;
+choose an existing release tag before adopting.
 Adopt in order: **Ship → core → quality → hands → interaction → playtest → lab → app.***.
 Within app.*, start with analytics, telemetry and menus; add paid services only
 when needed. A non-XR consumer skips hands, interaction and XR tooling.
@@ -13,8 +14,22 @@ remove old scripts and their metadata, rewrite imports and add game adapters.
 Run smoke + adapter tests, compare serialized inventory, then verify the installed
 build. See [migration safety and day-0 evidence](docs/design.md).
 
+## Adopting / upgrading
+
+Use a kit checkout to update a consumer before Unity resolves packages:
+
+```sh
+/path/to/yetikit/Tools/vendor/kit-bump.sh v0.1.0 --project /path/to/consumer --modules core,hands
+/path/to/yetikit/Tools/vendor/kit-check.sh --project /path/to/consumer
+```
+
+The tag above is illustrative. Bump replaces the vendored Ship tree and pins all
+selected packages plus their dependency closure at one tag. Commit the Ship copy,
+VERSION receipt and consumer manifest together. See [vendoring usage and rules](Tools/vendor/README.md)
+for offline sources, CI checks and the debugging-only `file:` override.
+
 ## Ship
-planned
+See [Ship tooling](Tools/ship/README.md).
 ## core
 planned
 ## quality

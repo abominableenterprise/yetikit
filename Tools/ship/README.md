@@ -22,6 +22,10 @@ the runtime libraries. Put `crane` on PATH (or in `$BIN_DIR`, default `$HOME/bin
 first, or configure `setup.craneArchive` with an archive containing its Linux
 x86-64 executable. No download service address is embedded in Ship.
 
+## Adopting / upgrading
+
+Games vendor this with `Tools/vendor/kit-bump.sh`; see [vendoring and CI checks](../vendor/README.md).
+
 ## Licence lifecycle: once per session
 
 ```sh
