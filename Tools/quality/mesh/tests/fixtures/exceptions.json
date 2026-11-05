@@ -1,0 +1,8 @@
+{
+  "exceptions": {
+    "Tools/quality/mesh/tests/fixtures/open_tube.glb": {
+      "allowOpen": true,
+      "reason": "Intentional openings at both ends of a synthetic tube"
+    }
+  }
+}
