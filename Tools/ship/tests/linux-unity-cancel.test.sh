@@ -83,8 +83,8 @@ def until(condition, seconds=60):
 def gone(pid):
     return not Path(f'/proc/{pid}').exists()
 
-# INT must work for a client retaining inherited dispositions. TERM must also
-# escalate for a stubborn client, and wrapper-only APK TERM must not build.
+# INT must work for a client ignoring it. TERM must also escalate for a
+# stubborn client, and wrapper-only APK TERM must not build.
 cases = [('activate', signal.SIGINT, False),
                                 ('activate', signal.SIGINT, True),
                                 ('activate', signal.SIGTERM, True),
@@ -110,10 +110,14 @@ for command, sig, stubborn, fork in cases:
             client = int((root / 'client.pid').read_text())
             if fork:
                 worker = int((root / 'worker.pid').read_text())
-            # Confirm this regression actually exercises inherited ignored INT.
+            else:
+                # client.ready precedes exec. Wait for the final executable so
+                # /proc cannot sample Bash's transient exec-time signal setup.
+                until(lambda: Path(f'/proc/{client}/exe').resolve() == Path('/bin/sleep').resolve())
+            # Confirm the client really ignores INT before cancelling the wrapper.
             ignored = next(line.split()[1] for line in Path(f'/proc/{client}/status').read_text().splitlines()
                            if line.startswith('SigIgn:'))
-            assert int(ignored, 16) & (1 << (signal.SIGINT - 1)), 'fixture client must ignore SIGINT'
+            assert int(ignored, 16) & (1 << (signal.SIGINT - 1)), (command, sig, stubborn, fork, ignored)
             cancelled_at = time.monotonic()
             runner.send_signal(sig)
             try:
