@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
-# Run all shell regressions serially: fake editors/clients, no network or host seats.
+# Run shell regressions serially: fake editors/clients, no network or host seats.
+# Optional arguments select test basenames for focused runs with the same CI isolation.
 set -euo pipefail
 tests="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+test_files=("$tests"/*.test.sh)
+if [ "$#" -gt 0 ]; then
+  test_files=()
+  for name in "$@"; do
+    case "$name" in */*) printf 'invalid test basename: %s\n' "$name" >&2; exit 1 ;; esac
+    case "$name" in *.test.sh) ;; *) printf 'invalid test basename: %s\n' "$name" >&2; exit 1 ;; esac
+    [ -f "$tests/$name" ] || { printf 'missing test: %s\n' "$name" >&2; exit 1; }
+    test_files+=("$tests/$name")
+  done
+fi
 for dependency in bash jq python3 perl git xmllint timeout flock sha256sum; do
   command -v "$dependency" >/dev/null || { printf 'missing test dependency: %s\n' "$dependency" >&2; exit 1; }
 done
@@ -19,12 +30,12 @@ done
 printf '#!/bin/sh\nexec "$@"\n' > "$tmp/bin/sudo"
 chmod +x "$tmp/bin/"*
 failed=0; passed=0
-for test in "$tests"/*.test.sh; do
+for test in "${test_files[@]}"; do
   name="$(basename "$test")"
   mkdir -p "$tmp/$name/home" "$tmp/$name/shm"
   printf '\n=== %s ===\n' "$name"
   if (
-    for variable in ${!UNITY_@} ${!THEROBOTS_@} ${!FAKE_@} ${!APK_@} ${!NOISE_@} ${!IDLE_@} ${!SEAT_@}; do unset "$variable"; done
+    for variable in ${!UNITY_@} ${!THEROBOTS_@} ${!FAKE_@} ${!APK_@} ${!NOISE_@} ${!IDLE_@} ${!SEAT_@} ${!QUEST_@} ${!QR_@}; do unset "$variable"; done
     unset PROJECT YETIKIT_CONFIG USERNAME PASSWORD ULF OUT_DIR PIDFILE PIDFILE_FALLBACK BIN_DIR \
       KNOWN_FLAKES SCENE_AREAS EDITMODE_GFX TASK_CACHE MEMINFO TEST_PR_GFX_MAX \
       FOLLOWUPS_TEST_SCRIPT SHARED_IDLE_TEST_SCRIPT PIDFILE_TEST_SCRIPT WATCHER_CASE \
