@@ -25,14 +25,15 @@ namespace YetiKit.Core.Editor
         public static Func<string, string> Git = RunGit;
         public static Func<string, string> Env = Environment.GetEnvironmentVariable;
 
-        /// <summary>The build info for HEAD (git failing: number 0, "dev", a warning).</summary>
+        /// <summary>The build info for HEAD (git failing or incomplete history: number 0, "dev", a warning).</summary>
         public static BuildInfo Collect(DateTime utc, string notesEnv = NotesEnv, string prevShaEnv = PrevShaEnv)
         {
             var count = Git("rev-list --count --first-parent HEAD");
             var sha = Git("rev-parse --short=7 HEAD");
-            if (!int.TryParse(count?.Trim(), out var number) || string.IsNullOrWhiteSpace(sha))
+            var history = Git("rev-parse --is-shallow-repository");
+            if (!int.TryParse(count?.Trim(), out var number) || string.IsNullOrWhiteSpace(sha) || history?.Trim() != "false")
             {
-                Debug.LogWarning("[BuildStamp] git failed: build number 0 (the build goes on)");
+                Debug.LogWarning("[BuildStamp] git failed or full Git history unavailable: build number 0 (the build goes on)");
                 number = 0;
                 sha = null;
             }

@@ -29,6 +29,7 @@ namespace YetiKit.Core.Tests
             BuildStamp.Git = a =>
             {
                 calls.Add(a);
+                if (a == "rev-parse --is-shallow-repository") return "false\n";
                 if (a.StartsWith("rev-list")) return "141\n";
                 if (a.StartsWith("rev-parse")) return "d3050c5\n";
                 return "Merge pull request #229 from a/b" + ReleaseNotes.Field + "Capture: hold to talk" + ReleaseNotes.Record;
@@ -49,7 +50,7 @@ namespace YetiKit.Core.Tests
             Assert.AreEqual("b141-d3050c5", info.Id);
             Assert.AreEqual("2026-11-01T12:00:00Z", info.Date);
             CollectionAssert.AreEqual(new[] { "Capture: hold to talk" }, info.Notes);
-            StringAssert.EndsWith(" -n 8 HEAD", calls[2]);
+            StringAssert.EndsWith(" -n 8 HEAD", calls[3]);
         }
 
         [Test]
@@ -81,7 +82,7 @@ namespace YetiKit.Core.Tests
                 vars[BuildStamp.NotesEnv] = file;
                 vars[BuildStamp.PrevShaEnv] = "abc1234";
                 Assert.IsEmpty(BuildStamp.Collect(Utc).Notes);
-                Assert.AreEqual(2, calls.Count, "only the number and SHA queries, never a merge query");
+                Assert.AreEqual(3, calls.Count, "only the number, SHA and history queries, never a merge query");
             }
             finally { File.Delete(file); }
         }
@@ -92,7 +93,7 @@ namespace YetiKit.Core.Tests
             vars[BuildStamp.NotesEnv] = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing.txt");
             LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("cannot read YETIKIT_WHATS_NEW"));
             CollectionAssert.AreEqual(new[] { "Capture: hold to talk" }, BuildStamp.Collect(Utc).Notes);
-            StringAssert.EndsWith(" -n 8 HEAD", calls[2]);
+            StringAssert.EndsWith(" -n 8 HEAD", calls[3]);
         }
 
         [TestCase(null, true)]
@@ -109,11 +110,11 @@ namespace YetiKit.Core.Tests
                 return rangeResult;
             };
             var notes = BuildStamp.Collect(Utc).Notes;
-            Assert.AreEqual(retries ? 4 : 3, calls.Count);
-            StringAssert.EndsWith(" abc1234..HEAD", calls[2]);
+            Assert.AreEqual(retries ? 5 : 4, calls.Count);
+            StringAssert.EndsWith(" abc1234..HEAD", calls[3]);
             if (retries)
             {
-                StringAssert.EndsWith(" -n 8 HEAD", calls[3]);
+                StringAssert.EndsWith(" -n 8 HEAD", calls[4]);
                 CollectionAssert.AreEqual(new[] { "Capture: hold to talk" }, notes);
             }
             else Assert.IsEmpty(notes, "a successful empty range must remain empty");
@@ -131,7 +132,7 @@ namespace YetiKit.Core.Tests
                 return null;
             };
             Assert.IsEmpty(BuildStamp.Collect(Utc).Notes);
-            Assert.AreEqual(4, calls.Count, "only one fallback attempt");
+            Assert.AreEqual(5, calls.Count, "only one fallback attempt");
         }
 
         [Test]
@@ -139,7 +140,7 @@ namespace YetiKit.Core.Tests
         {
             vars["CUSTOM_PREV_SHA"] = "abc1234";
             BuildStamp.Collect(Utc, notesEnv: "CUSTOM_WHATS_NEW", prevShaEnv: "CUSTOM_PREV_SHA");
-            StringAssert.EndsWith(" abc1234..HEAD", calls[2]);
+            StringAssert.EndsWith(" abc1234..HEAD", calls[3]);
         }
 
         [TestCase("not-a-sha")]
@@ -148,8 +149,8 @@ namespace YetiKit.Core.Tests
         {
             vars[BuildStamp.PrevShaEnv] = prev;
             BuildStamp.Collect(Utc);
-            Assert.AreEqual(3, calls.Count);
-            StringAssert.EndsWith(" -n 8 HEAD", calls[2]);
+            Assert.AreEqual(4, calls.Count);
+            StringAssert.EndsWith(" -n 8 HEAD", calls[3]);
         }
 
         [Test]
@@ -161,6 +162,73 @@ namespace YetiKit.Core.Tests
             Assert.AreEqual(0, info.Number);
             Assert.IsFalse(info.Known);
             Assert.IsEmpty(info.Notes);
+        }
+
+        [TestCase(null)]
+        [TestCase("")]
+        [TestCase("true\n")]
+        [TestCase("unexpected")]
+        public void UnverifiedHistoryNeverSuppliesAKnownBuildNumber(string history)
+        {
+            var original = BuildStamp.Git;
+            BuildStamp.Git = a => a == "rev-parse --is-shallow-repository" ? history : original(a);
+            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("full Git history"));
+            var info = BuildStamp.Collect(Utc);
+            Assert.AreEqual(0, info.Number);
+            Assert.IsFalse(info.Known);
+        }
+
+        [Test]
+        public void ARealShallowCloneCannotSupplyAStoreVersionCode()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "stamp-history-" + Guid.NewGuid().ToString("N"));
+            var source = Path.Combine(root, "source");
+            var shallow = Path.Combine(root, "shallow");
+            var cwd = Directory.GetCurrentDirectory();
+            var version = PlayerSettings.bundleVersion;
+            var code = PlayerSettings.Android.bundleVersionCode;
+            string GitAt(string folder, string args)
+            {
+                var psi = new ProcessStartInfo("git", args)
+                {
+                    WorkingDirectory = folder,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                };
+                var run = typeof(BuildStamp).GetMethod("RunProcess", BindingFlags.Static | BindingFlags.NonPublic);
+                var output = (string)run.Invoke(null, new object[] { psi, 5000 });
+                Assert.IsNotNull(output, "git " + args);
+                return output;
+            }
+            try
+            {
+                Directory.CreateDirectory(source);
+                GitAt(source, "init");
+                for (var i = 0; i < 2; i++)
+                    GitAt(source, "-c user.name=Synthetic -c user.email=synthetic@example.invalid commit --allow-empty -m fixture");
+                GitAt(root, "clone --depth=1 \"" + new Uri(source).AbsoluteUri + "\" \"" + shallow + "\"");
+                BuildStamp.Git = git;
+                Directory.SetCurrentDirectory(source);
+                Assert.AreEqual(2, BuildStamp.Collect(Utc).Number, "complete history remains usable");
+                Directory.SetCurrentDirectory(shallow);
+                LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("full Git history"));
+                var info = BuildStamp.Collect(Utc);
+                Assert.AreEqual(0, info.Number, "never accept the truncated count of one");
+                Assert.IsFalse(info.Known);
+                Directory.SetCurrentDirectory(cwd);
+                using (BuildStamp.For(info))
+                {
+                    Assert.AreEqual(version, PlayerSettings.bundleVersion);
+                    Assert.AreEqual(code, PlayerSettings.Android.bundleVersionCode);
+                }
+            }
+            finally
+            {
+                Directory.SetCurrentDirectory(cwd);
+                Directory.Delete(root, true);
+            }
         }
 
         [Test]

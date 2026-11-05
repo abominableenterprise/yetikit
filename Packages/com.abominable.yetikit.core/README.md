@@ -53,8 +53,9 @@ require `/bin/sh` and skip on platforms without it.
 - `BuildStamp.Collect(utc, notesEnv = BuildStamp.NotesEnv,
   prevShaEnv = BuildStamp.PrevShaEnv)` reads first-parent commit count and
   short SHA from git. Git runs in the Unity project's current directory
-  (which must be inside the consumer checkout). Git failure warns and yields
-  build zero rather than failing the build.
+  (which must be inside the consumer checkout). Git failure or incomplete or
+  unverified history warns and yields build zero rather than failing the build;
+  `For` leaves version settings unchanged for build zero.
 - `YETIKIT_WHATS_NEW` names a UTF-8 notes file. A readable empty file means no
   notes. If absent/unreadable, merge titles since `YETIKIT_PREV_SHA` (a hex
   SHA) are used; absent/invalid SHA or failed range query falls back to the
@@ -75,8 +76,9 @@ require `/bin/sh` and skip on platforms without it.
 ### Consumer build wiring
 
 **Full Git history is required before assigning version codes.** `Collect`
-does not detect shallow history: a shallow checkout silently produces a truncated
-count, which can repeat or decrease store version codes. For GitHub Actions,
+checks `git rev-parse --is-shallow-repository` and only accepts the count when
+that query reports `false`; otherwise it warns and returns unknown build zero,
+so `For` does not assign a truncated count to version settings. For GitHub Actions,
 configure `actions/checkout@v4` with `fetch-depth: 0`. Other CI systems must also
 fetch the complete history. Before invoking Unity or the build method below,
 validate the checkout and fail the build if history is incomplete:
