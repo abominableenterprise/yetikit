@@ -61,6 +61,15 @@ namespace YetiKit.Quality.Tests
         }
         [Test] public void CleanPrefabHasNoMissingScripts() => Assert.IsEmpty(MissingScriptScan.Find(new[] { Prefab(false) }));
 
+        [Test] public void StaleExplicitPrefabPathThrowsEvenAlongsideCleanPrefab()
+        {
+            var clean = Prefab(false);
+            var stale = folder + "/Moved.prefab";
+            var error = Assert.Throws<ArgumentException>(() => MissingScriptScan.Find(new[] { clean, stale }));
+            StringAssert.Contains(stale, error.Message);
+            StringAssert.Contains("load", error.Message);
+        }
+
         [Test] public void SceneScanPreservesLoadedSceneAndFindsMissingScript()
         {
             var prefab = Prefab(true);

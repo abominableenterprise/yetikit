@@ -25,7 +25,7 @@ namespace YetiKit.Quality.Editor
             if (rules == null) throw new ArgumentNullException(nameof(rules));
             var violations = new List<string>();
             foreach (var name in assemblies.Distinct())
-                if (name.IndexOf(".Dev", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                if (name.Split('.').Any(segment => string.Equals(segment, "Dev", StringComparison.OrdinalIgnoreCase)) ||
                     rules.forbiddenAssemblyPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
                     violations.Add("Forbidden assembly: " + name);
             foreach (var permission in permissions.Distinct())

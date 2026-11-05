@@ -9,7 +9,9 @@ synthetic regression tests. No game catalog, scene edits or asset repairs occur.
 
 - `MissingScriptScan.Find(IEnumerable<string> assetPaths)` returns tuples
   `(assetPath, gameObjectPath, componentIndex)`. Prefabs/models and scenes are
-  supported, including inactive descendants. Component indices include Transform.
+  supported, including inactive descendants. An explicit prefab/model path that
+  cannot be loaded throws an actionable error rather than silently passing.
+  Component indices include Transform.
   Scenes open in isolated preview scenes and close in `finally`; loaded scenes
   are not replaced or saved. `FindInFolders(params string[] folders)` searches
   existing AssetDatabase folders. Pass explicit folders, not an empty array.
@@ -77,11 +79,14 @@ Never refresh/import intentionally colliding metadata fixtures.
 
 `BuildAudit.Check(BuildReport, BuildAuditRules)` returns violation strings.
 An overload accepts assembly names and permission strings for cheap tests.
-Defaults reject any assembly containing `.Dev` (case-insensitive), names starting
-with `YetiKit.Playtest` or `YetiKit.Lab`, and **all permissions not explicitly
-allowed**. `forbiddenAssemblyPrefixes` adds/replaces prefix rules; the `.Dev`
-guard remains. `forbiddenPermissions` defaults to `{"*"}`; replace it with exact
-permission names for a narrower deny list. Exact `allowedPermissions` wins.
+Defaults reject any assembly with an exact `Dev` dot-separated name segment
+(case-insensitive), names starting with `YetiKit.Playtest` or `YetiKit.Lab`, and
+**all permissions not explicitly allowed**. For example, `Consumer.Dev.Tools`
+and `Consumer.Dev` are rejected; `Unity.Services.Core.Device` and
+`Consumer.Devices` are not. `forbiddenAssemblyPrefixes` adds/replaces prefix
+rules; the exact `Dev` segment guard remains. `forbiddenPermissions` defaults to
+`{"*"}`; replace it with exact permission names for a narrower deny list. Exact
+`allowedPermissions` wins.
 
 Opt in immediately before `BuildPipeline.BuildPlayer`, not through a runtime
 component. The hook checks selected assemblies before stripping/IL2CPP, then

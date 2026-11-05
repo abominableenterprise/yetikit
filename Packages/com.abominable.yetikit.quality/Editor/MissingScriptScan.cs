@@ -24,7 +24,8 @@ namespace YetiKit.Quality.Editor
                 else
                 {
                     var root = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-                    if (root) Scan(root, path, "", found);
+                    if (!root) throw new System.ArgumentException("Cannot load prefab or model at asset path: " + path, nameof(assetPaths));
+                    Scan(root, path, "", found);
                 }
             }
             return found;
