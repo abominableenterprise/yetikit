@@ -9,7 +9,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check shell syntax (empty until Ship lands)
+      - name: Validate Unity metadata and assembly definitions
+        run: |
+          python3 -B Tools/ci/test-check-unity.py
+          python3 -B Tools/ci/check-unity.py
+      - name: Check shell syntax
         shell: bash
         run: |
           set -euo pipefail
