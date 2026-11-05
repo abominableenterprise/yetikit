@@ -1,0 +1,29 @@
+name: Ship shell tests
+
+on:
+  pull_request:
+    paths:
+      - 'Tools/ship/**'
+      - '.github/workflows/ship.yml'
+  push:
+    paths:
+      - 'Tools/ship/**'
+      - '.github/workflows/ship.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shell-tests:
+    # Ship requires GNU coreutils; do not drift to images with replacement utilities.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shell test dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq libxml2-utils
+      - name: Verify GNU timeout dependency
+        run: timeout --version | grep -F 'GNU coreutils'
+      - name: Run offline fake-editor regressions
+        run: Tools/ship/tests/run.sh
