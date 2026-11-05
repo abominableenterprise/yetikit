@@ -94,7 +94,8 @@ def load_meshes(path):
             indices = accessor(primitive["indices"]).ravel() if "indices" in primitive else np.arange(len(positions))
             if len(indices) % 3 or not len(indices) or np.max(indices) >= len(positions):
                 raise ValueError("invalid triangle indices")
-            tris.extend((indices.reshape(-1, 3) + len(verts)).tolist())
+            # Primitive offsets can exceed the accessor's unsigned index range.
+            tris.extend((indices.astype(np.int64).reshape(-1, 3) + len(verts)).tolist())
             verts.extend(positions.tolist())
         meshes.append((mesh.get("name", str(index)), verts, tris))
     if not meshes:
