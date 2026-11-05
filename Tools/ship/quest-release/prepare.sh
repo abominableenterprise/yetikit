@@ -167,17 +167,9 @@ qr_prepare() {
   qr_log "worktrees ready: $(qr_wt test), $(qr_wt build)"
 }
 
-# Unity re-save noise: the only changes cleanup may throw away.
-qr_is_noise() {
-  case "$1" in
-    *.mat|*.asset|ProjectSettings/*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-# Remove worktree $1 when every change in it is noise; otherwise keep it and print why.
+# Remove only clean worktrees. Paths cannot distinguish Unity re-saves from authored edits.
 qr_cleanup_one() {
-  local wt="$1" kept="" record path original status_file
+  local wt="$1" status_file
   [ -d "$wt" ] || { echo "absent"; return 0; }
   status_file="$(mktemp "${QR_RUN_DIR}/status.XXXXXX")" || { echo "inspection failed"; return 1; }
   if ! git -C "$wt" status --porcelain -z --untracked-files=all > "$status_file" 2>/dev/null; then
@@ -186,24 +178,16 @@ qr_cleanup_one() {
     echo "kept (inspection failed)"
     return 1
   fi
-  # Porcelain -z places the destination first, then a second NUL-terminated source for renames/copies.
-  # Check both sides: a staged source rename to an .asset is not disposable Unity noise.
-  while IFS= read -r -d '' record; do
-    path="${record:3}"
-    qr_is_noise "$path" || kept="$kept $path"
-    case "${record:0:2}" in
-      *R*|*C*)
-        IFS= read -r -d '' original || { rm -f "$status_file"; echo "kept (invalid status)"; return 1; }
-        qr_is_noise "$original" || kept="$kept $original" ;;
-    esac
-  done < "$status_file"
-  rm -f "$status_file"
-  if [ -n "$kept" ]; then
-    qr_log "keeping $wt: real changes:$kept"
-    echo "kept (changed:$kept)"
+  # Any status record means local work, including staged changes, untracked files and deletions.
+  if [ -s "$status_file" ]; then
+    rm -f "$status_file"
+    qr_log "keeping $wt: local changes; cleanup requires a clean worktree"
+    echo "kept (local changes)"
     return 1
   fi
-  if qr_git worktree remove --force "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1; then
+  rm -f "$status_file"
+  # Do not force: Git must also refuse changes made after the status check.
+  if qr_git worktree remove "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1; then
     echo "removed"
   else
     qr_log "git worktree remove $wt failed (cleanup.log)"; echo "remove failed"; return 1
