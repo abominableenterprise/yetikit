@@ -5,6 +5,8 @@ under the [MIT license](LICENSE). Proven features will be extracted incrementall
 from a consumer game; gameplay, characters and scene policy stay in each game.
 This is a skeleton: **all modules are planned**, with no runtime code or Unity host yet.
 
+**Day 0:** install the [YetiKit skills](skills/README.md); copy [templates/game](templates/game/).
+
 ## Modules
 
 | Module | Purpose | Status |
@@ -47,4 +49,4 @@ Mobile app modules are non-XR; installing core must not pull XR dependencies.
 
 See the [design](docs/design.md), [adoption playbook](ADOPTION.md),
 [contribution rules](AGENTS.md) and [changelog](CHANGELOG.md).
-CI currently checks shell syntax and package JSON only; Unity tests come later.
+CI checks shell syntax, package JSON and skill metadata; Unity tests come later.
