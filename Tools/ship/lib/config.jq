@@ -9,7 +9,12 @@ def methods: if strings then length > 0 else false end;
 def invalid($key): "missing or invalid key: \($key)";
 def envname: if nonempty then test("^[A-Za-z_][A-Za-z0-9_]*$") else false end;
 def packageid: if nonempty then test("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$") else false end;
-def basenames: if strings then all(.[]; test("^[A-Za-z0-9_][A-Za-z0-9_.-]*$") and . != ".." and . != "SHA256SUMS") else false end;
+# Backup destinations must also be distinct on default case-insensitive macOS volumes.
+def basenames:
+  if strings then
+    all(.[]; test("^[A-Za-z0-9_][A-Za-z0-9_.-]*$") and . != ".." and (ascii_downcase != "sha256sums")) and
+    (map(ascii_downcase) | length == (unique | length))
+  else false end;
 if length != 1 then invalid("schema (expected one JSON object)")
 else .[0] |
 if type != "object" then invalid("schema")
