@@ -240,6 +240,49 @@ namespace YetiKit.Core.Tests
             finally { AssetDatabase.DeleteAsset("Assets/CoreStampTest"); }
         }
 
+        [TestCase(false, false)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public void DirectoryTargetsAreRejectedWithoutDeletingAssetsOrChangingVersions(bool remove, bool imported)
+        {
+            var path = "Assets/StampDirectory-" + Guid.NewGuid().ToString("N") + ".json";
+            var payload = path + "/Keep.txt";
+            var version = PlayerSettings.bundleVersion;
+            var code = PlayerSettings.Android.bundleVersionCode;
+            try
+            {
+                Directory.CreateDirectory(path);
+                File.WriteAllText(payload, "synthetic asset that must survive");
+                if (imported) AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                var folderMeta = imported ? File.ReadAllBytes(path + ".meta") : null;
+                var assetMeta = imported ? File.ReadAllBytes(payload + ".meta") : null;
+                Exception failure = null;
+                try
+                {
+                    if (remove) BuildStamp.Remove(path);
+                    else using (BuildStamp.For(new BuildInfo(141, "d3050c5", Utc, null), path)) { }
+                }
+                catch (Exception e) { failure = e; }
+
+                Assert.IsTrue(Directory.Exists(path), "a JSON-named folder must never be deleted");
+                Assert.AreEqual("synthetic asset that must survive", File.ReadAllText(payload));
+                if (imported)
+                {
+                    CollectionAssert.AreEqual(folderMeta, File.ReadAllBytes(path + ".meta"));
+                    CollectionAssert.AreEqual(assetMeta, File.ReadAllBytes(payload + ".meta"));
+                }
+                Assert.AreEqual(version, PlayerSettings.bundleVersion);
+                Assert.AreEqual(code, PlayerSettings.Android.bundleVersionCode);
+                Assert.That(failure, Is.TypeOf<ArgumentException>(), "reject before setup or removal");
+            }
+            finally
+            {
+                if (!AssetDatabase.DeleteAsset(path) && Directory.Exists(path)) Directory.Delete(path, true);
+                if (File.Exists(path + ".meta")) File.Delete(path + ".meta");
+            }
+        }
+
         [TestCase("../outside.json")]
         [TestCase("Assets/../outside.json")]
         [TestCase("Assets//outside.json")]

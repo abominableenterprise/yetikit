@@ -117,6 +117,10 @@ namespace YetiKit.Core.Editor
                 !assetPath.EndsWith(".json", StringComparison.Ordinal) || assetPath.Contains("..") ||
                 assetPath.Contains("\\") || assetPath.Contains("//"))
                 throw new ArgumentException("Use an Assets-relative JSON path.", nameof(assetPath));
+            // DeleteAsset is recursive for folders, including ones named with a .json suffix.
+            // Both setup and removal must reject them before touching settings or assets.
+            if (Directory.Exists(assetPath) || AssetDatabase.IsValidFolder(assetPath))
+                throw new ArgumentException("The generated JSON path must not be a directory.", nameof(assetPath));
         }
 
         /// <summary>Delete the generated file and empty parent folders, stopping at Assets.</summary>
