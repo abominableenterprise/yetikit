@@ -23,6 +23,15 @@ check 'production non-root as_root stays inside standalone fixture wrappers' \
   'as_root fixture-command && [ ! -e "$tmp/escaped" ]'
 unset -f id
 
+fixture_clears_swap_state() (
+  export APK_SWAPFILE="$tmp/inherited-swap"
+  printf 'keep\n' > "$APK_SWAPFILE"
+  tmp="$tmp/standalone"; proj="$tmp/project"; mkdir -p "$tmp"
+  . "$ship/tests/lib/fake-unity.sh"
+  [ "${APK_SWAPFILE-unset}" = unset ] && [ "$(<"$tmp/../inherited-swap")" = keep ]
+)
+check 'standalone fake fixture clears inherited swap cleanup ownership' 'fixture_clears_swap_state'
+
 mkdir -p "$tmp/non-gnu"
 cat > "$tmp/non-gnu/timeout" <<'EOF'
 #!/bin/sh
