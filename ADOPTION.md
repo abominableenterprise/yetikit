@@ -41,6 +41,7 @@ Setup also accepts a preinstalled crane on PATH or a configured archive; see
 ## core
 planned
 ## quality
+Add [editor validators](Packages/com.abominable.yetikit.quality/README.md) to consumer EditMode tests and opt into the release build audit.
 Run the [mesh quality checks](Tools/quality/README.md) on changed GLB/glTF/FBX assets in CI before importing or shipping art.
 ## hands
 planned
