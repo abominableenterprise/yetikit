@@ -1,0 +1,13 @@
+{
+  "name": "com.abominable.yetikit.interaction",
+  "version": "0.0.1",
+  "unity": "6000.6",
+  "displayName": "YetiKit Interaction",
+  "description": "Planned grab, carry, hand-off, release and throw components.",
+  "license": "MIT",
+  "dependencies": {
+    "com.abominable.yetikit.hands": "0.0.1",
+    "com.abominable.yetikit.core": "0.0.1",
+    "com.unity.xr.interaction.toolkit": "3.6.1"
+  }
+}
