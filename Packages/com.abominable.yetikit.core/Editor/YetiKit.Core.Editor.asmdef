@@ -1,0 +1,7 @@
+{
+  "name": "YetiKit.Core.Editor",
+  "rootNamespace": "YetiKit.Core.Editor",
+  "references": ["YetiKit.Core"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": false
+}

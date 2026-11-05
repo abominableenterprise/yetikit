@@ -10,12 +10,15 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ### Added
 - Public skeleton, planned package manifests, adoption/design docs and seat-free CI.
+- Shared build identity, release notes and performance utilities, with a minimal test host.
+- Licence-free checks for Unity script metadata and assembly references.
 
 ### Fixed
 - None.
 
 ### Behaviour changes
-- None; no runtime implementation yet.
+- Build headers use the consumer's product name; build notes use kit-neutral environment variables.
 
 ### Adapter changes
-- None; consumers must wait for implemented, tagged modules before adoption.
+- Consumers opt into the core runtime/editor assemblies and wrap builds in a build-stamp scope.
+  See the core README for setup. Other modules remain planned; no release tag exists yet.
