@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "unityVersion": "6000.6.6f1",
+  "build": {
+    "devMethod": "YetiKit.Host.Editor.HostBuild.DevelopmentApk",
+    "releaseMethod": "YetiKit.Host.Editor.HostBuild.DevelopmentApk",
+    "apkPath": "Builds/Android/host.apk"
+  }
+}
