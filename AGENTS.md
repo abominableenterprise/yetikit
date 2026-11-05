@@ -17,6 +17,7 @@ shared packages, documentation and a minimal Unity test Host, not game code.
 
 - Packages: `Packages/com.abominable.yetikit.<module>/{Runtime,Editor,Tests}`.
 - Shell tooling: `Tools/ship/`; mesh checks: `Tools/art/`.
+- Run Unity only through `Tools/ship/linux-unity.sh` (it holds the per-run seat lease); never activate the editor directly.
 - `Host/` is the Unity test project using local package references.
 - One asmdef per module, `autoReferenced: false`; no kit asmdef ever references a game.
 - Moved scripts keep their original `.cs.meta` GUID; change only the namespace
@@ -49,3 +50,6 @@ shared packages, documentation and a minimal Unity test Host, not game code.
 
 hub-merge: on
 hub-merge-requires: checknorris
+hub-secret-limit: login.unity.com=2
+hub-secret-limit: Unity=2
+hub-secret-lease: per-run
