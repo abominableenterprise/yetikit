@@ -21,6 +21,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          validate_manifest() {
+            jq -se 'length == 1 and (.[0] | type == "object")' > /dev/null
+          }
+          # Synthetic regressions: reject empty, non-object, malformed and streamed JSON.
+          for invalid in '' '[]' '{invalid' $'{}\n{}'; do
+            if printf '%s' "$invalid" | validate_manifest 2>/dev/null; then
+              echo 'ERROR: invalid JSON fixture accepted' >&2
+              exit 1
+            fi
+          done
           for manifest in Packages/*/package.json; do
-            jq -e 'type == "object"' "$manifest" > /dev/null
+            validate_manifest < "$manifest"
           done
