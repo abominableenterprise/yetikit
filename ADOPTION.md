@@ -2,8 +2,8 @@
 
 **Day 0:** install the [YetiKit skills](skills/README.md); copy [templates/game](templates/game/).
 
-Runtime packages remain planned. Ship and consumer vendoring tooling are available;
-choose an existing release tag before adopting.
+Version 0.1.0 provides core, quality, Ship, consumer vendoring and mesh checks.
+Hands, interaction, playtest, lab and app modules remain planned (not in 0.1.0).
 Adopt in order: **Ship → core → quality → hands → interaction → playtest → lab → app.***.
 Within app.*, start with analytics, telemetry and menus; add paid services only
 when needed. A non-XR consumer skips hands, interaction and XR tooling.
@@ -19,11 +19,11 @@ build. See [migration safety and day-0 evidence](docs/design.md).
 Use a kit checkout to update a consumer before Unity resolves packages:
 
 ```sh
-/path/to/yetikit/Tools/vendor/kit-bump.sh v0.1.0 --project /path/to/consumer --modules core,hands
+/path/to/yetikit/Tools/vendor/kit-bump.sh v0.1.0 --project /path/to/consumer --modules core,quality
 /path/to/yetikit/Tools/vendor/kit-check.sh --project /path/to/consumer
 ```
 
-The tag above is illustrative. Bump replaces the vendored Ship tree and pins all
+Bump replaces the vendored Ship tree and pins all
 selected packages plus their dependency closure at one tag. Commit the Ship copy,
 VERSION receipt and consumer manifest together. See [vendoring usage and rules](Tools/vendor/README.md)
 for offline sources, CI checks and the debugging-only `file:` override.
@@ -39,7 +39,8 @@ GOBIN="$HOME/bin" go install github.com/google/go-containerregistry/cmd/crane@v0
 Setup also accepts a preinstalled crane on PATH or a configured archive; see
 [Ship requirements](Tools/ship/README.md#vendor-into-a-game).
 ## core
-planned
+Reference the opt-in runtime/editor assemblies and wrap consumer builds in a
+build-stamp scope. Follow the [core setup and build adapter example](Packages/com.abominable.yetikit.core/README.md).
 ## quality
 Add [editor validators](Packages/com.abominable.yetikit.quality/README.md) to consumer EditMode tests and opt into the release build audit.
 Run the [mesh quality checks](Tools/quality/README.md) on changed GLB/glTF/FBX assets in CI before importing or shipping art.
