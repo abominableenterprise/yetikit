@@ -17,7 +17,12 @@ qr_device_locked() (
   qr_lock_dir() { printf '%s\n' "$device_lock"; }
   QR_LOCK_HELD=""
   qr_lock_acquire || exit 1
-  trap 'qr_lock_release' EXIT
+  # Cancellation TERM reaches this shell and adb together. Leave the generation
+  # for stale reclamation until the outer owner has drained every worker; an
+  # EXIT release here would authorize a second consumer during that drain.
+  local cancelled=0
+  trap 'cancelled=1; exit 143' HUP INT TERM
+  trap '[ "$cancelled" = 1 ] || qr_lock_release' EXIT
   # Record the cancellable worker group too: an owner killed before its workers
   # finish must not authorize a second consumer to mutate the same headset.
   case "$group" in

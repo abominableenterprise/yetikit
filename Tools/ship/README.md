@@ -249,7 +249,7 @@ projects must supply a development execute method for this runner).
 | `launcherChecks.assets` | Optional array of exact required APK archive paths; default empty. No absolute paths or parent traversal. |
 | `whatsNewEnv` | Build notes environment-variable name; default `YETIKIT_WHATS_NEW`. `--notes` exports the absolute notes filename. |
 | `prevShaEnv` | Previous-installed-commit environment-variable name; default `YETIKIT_PREV_SHA`. Build receives the latest successful install's commit unless already supplied. |
-| `dataFiles` | Optional array of safe basenames to back up and hash-check; default `playtest.json`, `throws.csv`. Empty means no application-specific files. Contents never print. |
+| `dataFiles` | Optional array of safe basenames to back up and hash-check; default `playtest.json`, `throws.csv`. `SHA256SUMS` is reserved for backup metadata. Empty means no application-specific files. Contents never print. |
 | `launchArgs` | Optional string array appended to `adb shell am start`; default empty. No game-specific launch extras are built in. |
 
 `quest.serial` is rejected: the headset serial belongs **only** in environment
