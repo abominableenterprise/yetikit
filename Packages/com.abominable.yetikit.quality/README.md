@@ -17,8 +17,9 @@ synthetic regression tests. No game catalog, scene edits or asset repairs occur.
   existing AssetDatabase folders. Pass explicit folders, not an empty array.
 - `GuidCollisionCheck.Find(params string[] roots)` reads all `.meta` text files
   recursively without importing. Returns `(guid, paths[])` with normalized,
-  absolute paths; overlapping roots do not double-count files. GUID comparison
-  is case-insensitive. Include both consumer assets and the kit checkout to catch
+  absolute paths; overlapping roots are scanned once and files are deduplicated.
+  Path identity is case-insensitive on Windows/macOS and ordinal on Linux; GUID
+  comparison is case-insensitive. Include both consumer assets and the kit checkout to catch
   migration copies. Missing directories throw rather than silently pass.
 - `PlacementCheck.Check(GameObject prefabOrModel, PlacementSpec spec)` returns
   `lowestPerQuadrant`, `maxGap`, `forwardErrorDegrees`, `Pass` and `Reason`.
