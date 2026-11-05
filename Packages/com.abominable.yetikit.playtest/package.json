@@ -1,0 +1,11 @@
+{
+  "name": "com.abominable.yetikit.playtest",
+  "version": "0.0.1",
+  "unity": "6000.6",
+  "displayName": "YetiKit Playtest",
+  "description": "Planned dev-only capture, durable recording and optional upload.",
+  "license": "MIT",
+  "dependencies": {
+    "com.abominable.yetikit.core": "0.0.1"
+  }
+}

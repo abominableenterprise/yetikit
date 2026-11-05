@@ -1,0 +1,13 @@
+{
+  "name": "com.abominable.yetikit.lab",
+  "version": "0.0.1",
+  "unity": "6000.6",
+  "displayName": "YetiKit Lab",
+  "description": "Planned dev-only experiments, live tuning and start panel.",
+  "license": "MIT",
+  "dependencies": {
+    "com.abominable.yetikit.hands": "0.0.1",
+    "com.abominable.yetikit.core": "0.0.1",
+    "com.abominable.yetikit.playtest": "0.0.1"
+  }
+}

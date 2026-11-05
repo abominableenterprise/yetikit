@@ -1,0 +1,35 @@
+# Unity-generated state (including the future Host project)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Bb]uild/
+[Bb]uilds/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# IDE / OS state
+.vs/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.DS_Store
+Thumbs.db
+
+# Local credentials and build artifacts
+.env
+.env.*
+*.keystore
+*.jks
+*.apk
+*.aab
+*.ipa
+*.unitypackage
