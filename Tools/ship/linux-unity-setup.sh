@@ -7,7 +7,7 @@ install_crane() {
   log "installing crane $CRANE_VERSION into $BIN_DIR"
   mkdir -p "$BIN_DIR"
   local archive; archive="$(ship_config_get '.setup.craneArchive // empty')"
-  [ -n "$archive" ] || die "setup: install crane on PATH or set missing key setup.craneArchive"
+  [ -n "$archive" ] || die "setup: crane is missing; with Go installed, run: GOBIN=$(printf %q "$BIN_DIR") go install github.com/google/go-containerregistry/cmd/crane@$CRANE_VERSION; then re-run setup (or set setup.craneArchive)"
   curl -fsSL "$archive" \
     | tar -xz -C "$BIN_DIR" crane
 }

@@ -20,7 +20,16 @@ Requirements: Linux, Bash 4+, `jq`, Git, GNU coreutils, util-linux (`flock`),
 Perl, curl, tar, and Xvfb/xauth plus the editor runtime libraries. `setup` installs
 the runtime libraries. Put `crane` on PATH (or in `$BIN_DIR`, default `$HOME/bin`)
 first, or configure `setup.craneArchive` with an archive containing its Linux
-x86-64 executable. No download service address is embedded in Ship.
+x86-64 executable. If Go is installed, this pinned one-line command installs
+crane into the default location (use your `$BIN_DIR` instead if overridden):
+
+```sh
+GOBIN="$HOME/bin" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+```
+
+See the [pinned crane release](https://github.com/google/go-containerregistry/releases/tag/v0.22.1).
+Setup prints the corresponding command with its actual install directory when
+crane is missing; it does not silently download an unverified executable.
 
 ## Adopting / upgrading
 
@@ -183,6 +192,14 @@ are shared runner conventions, not generated game content.
 ```sh
 Tools/ship/tests/run.sh
 ```
+
+The [Ship CI workflow](../../.github/workflows/ship.yml) is path-filtered to
+Ship and its workflow. The local aggregate runner defaults to changed Ship
+files since `origin/main`, including working-tree changes; unrelated changes
+select no tests. Shared tooling, fixtures, or workflow changes select the full
+suite. Use `Tools/ship/test-all.sh --changed <base>` for another comparison base,
+or `Tools/ship/test-all.sh --all` to explicitly run unchanged tests. The serial
+command above always runs the full suite for repeatability checks.
 
 Part B adds the offline shell tests and CI entry point. No editor, account,
 network, activation or seat is needed. Generated-scene and no-scene fixtures

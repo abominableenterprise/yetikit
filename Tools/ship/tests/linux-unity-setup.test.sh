@@ -43,6 +43,20 @@ printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/nohup"
 chmod +x "$tmp/bin/"*
 
 unset UNITY_USERNAME UNITY_PASSWORD USERNAME PASSWORD THEROBOTS_HUB_URL THEROBOTS_TASK_ID THEROBOTS_TASK_TOKEN UNITY_RETURN_ON_EXIT
+# Source only the installer module with a stubbed lookup: this must print a
+# usable pinned command without invoking curl or any real installer.
+missing_rc=0
+bash -c '
+  . "$1"
+  command() { [ "$*" != "-v crane" ] && builtin command "$@"; }
+  log() { :; }
+  die() { printf "%s\n" "$*" >&2; exit 1; }
+  ship_config_get() { :; }
+  BIN_DIR="$2/install with spaces"; CRANE_VERSION=v0.22.1
+  install_crane
+' _ "$(dirname "$script")/linux-unity-setup.sh" "$tmp" > "$tmp/missing-crane" 2>&1 || missing_rc=$?
+check 'missing crane gives a pinned one-line install command with a quoted destination' \
+  '[ "$missing_rc" = 1 ] && grep -qF "go install github.com/google/go-containerregistry/cmd/crane@v0.22.1" "$tmp/missing-crane" && grep -qF "install\\ with\\ spaces" "$tmp/missing-crane" && [ ! -e "$tmp/download-calls" ]'
 setup_args=()
 run() { PATH="$tmp/bin:$PATH" PROJECT="$tmp" UNITY_ROOT="$tmp/root/unity" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/logs" \
   UNITY_USERNAME=u UNITY_PASSWORD=p "$@" bash "$script" setup "${setup_args[@]}" >"$tmp/out" 2>&1; }
