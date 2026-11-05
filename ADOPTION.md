@@ -33,7 +33,7 @@ See [Ship tooling](Tools/ship/README.md).
 ## core
 planned
 ## quality
-planned
+Add [editor validators](Packages/com.abominable.yetikit.quality/README.md) to consumer EditMode tests and opt into the release build audit.
 ## hands
 planned
 ## interaction

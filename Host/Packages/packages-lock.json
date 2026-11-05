@@ -6,6 +6,12 @@
       "source": "local",
       "dependencies": {}
     },
+    "com.abominable.yetikit.quality": {
+      "version": "file:../../Packages/com.abominable.yetikit.quality",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "com.unity.ext.nunit": {
       "version": "2.1.0",
       "depth": 1,
