@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-all: slow
+# test-all: slow linux-unity.sh android.sh
 # Tests linux-unity.sh setup --android (image choice, base editor replaced), apk [dev|contest] (editor arguments, log,
 # APK report, failures, Android Library cache) and cache-key android, with the fake editor; never runs Unity.
 # Run: bash Tools/ship/tests/linux-unity-apk.test.sh

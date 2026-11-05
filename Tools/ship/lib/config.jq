@@ -59,8 +59,10 @@ elif has("scene") and (.scene | has("areaSteps")) and (.scene.areaSteps | method
 elif has("scene") and (.scene | has("areasFile")) and (.scene.areasFile | relpath | not) then invalid("scene.areasFile")
 elif has("scene") and (.scene | has("areasDir")) and (.scene.areasDir | relpath | not) then invalid("scene.areasDir")
 elif has("noise") and (.noise | type) != "object" then invalid("noise")
-elif has("noise") and ([.noise | to_entries[] | select(.value | nonempty | not) | .key] | length) > 0 then
-  invalid("noise." + ([.noise | to_entries[] | select(.value | nonempty | not) | .key][0]))
+elif has("noise") and (.noise | has("fontAssetPaths")) and
+  (.noise.fontAssetPaths | if type == "array" then all(.[]; relpath) else false end | not) then invalid("noise.fontAssetPaths")
+elif has("noise") and ([.noise | to_entries[] | select(.key != "fontAssetPaths") | select(.value | nonempty | not) | .key] | length) > 0 then
+  invalid("noise." + ([.noise | to_entries[] | select(.key != "fontAssetPaths") | select(.value | nonempty | not) | .key][0]))
 elif has("noise") and (.noise | has("fixedTimestepCount")) and (.noise.fixedTimestepCount | test("^[1-9][0-9]*$") | not) then invalid("noise.fixedTimestepCount")
 elif has("noise") and ([.noise | to_entries[] | select(.key == "atlasPath" or .key == "timeManagerPath" or .key == "specularMaterialPath" or .key == "propsDir") | select(.value | relpath | not) | .key] | length) > 0 then
   invalid("noise." + ([.noise | to_entries[] | select(.key == "atlasPath" or .key == "timeManagerPath" or .key == "specularMaterialPath" or .key == "propsDir") | select(.value | relpath | not) | .key][0]))

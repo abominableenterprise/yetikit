@@ -79,7 +79,7 @@ file while a run is active.
 | `test playmode [Unity args...]` | PlayMode tests on Xvfb. |
 | `test pr [base] [Unity args...]` | Full pure pass, then only touched Gfx fixtures (default base `origin/main`). Changed runtime types search their area's tests; editor builders search all tests. No caller `-testFilter`/`-testCategory`. |
 | `scene [--keep path]... [--area Area]...` | Run configured generated-scene steps; optionally only configured area steps, then conservative noise cleanup. Without `scene`, explain that no generated scene is configured. |
-| `lab` | Run the optional `labMethod`. |
+| `lab [--keep [path]]...` | Run the optional `labMethod`; cleanup/`--keep` as in `open`. |
 | `apk [dev\|release\|contest]` | Android build on Xvfb; `contest` is a compatibility alias for `release`. Print path, size and SHA-256; remove stale APK before building. |
 | `cache-key [android]` | Bare SHA-256 of package manifest, lockfile, project editor version and configured Unity version; Android has its own key. |
 | `cache-restore` / `cache-save` | Use external `task-cache` when available; missing service is a no-op, failed/timed-out restore falls back to cold import. |
@@ -93,10 +93,12 @@ Only a pass consisting entirely of known failures reruns once. Both result XMLs
 are retained and a successful retry prints `flaky-passed`, not an unqualified
 first-pass success. Missing results/crashes are never flakes.
 
-`open`/`test` revert only newly introduced material float/keyword or prefab float
-formatting noise; `scene` also handles configured atlas repacks and bake-only
-lightmap `platformSettings`. Dirty-before/staged files and `--keep` paths survive.
-A bare `--keep` on open/test skips cleanup. Exit **3** means editor/test work
+Every editor command (`open`, `test`, `apk`, `scene`, `lab`) cleans newly
+introduced noise even after editor failure. Run cleanup covers material keyword,
+prefab float and fixed-timestep formatting, plus explicitly configured static
+font assets; `scene` also handles configured atlas repacks and bake-only lightmap
+`platformSettings`. Dirty-before/staged files and `--keep` paths survive.
+A bare `--keep` on open/test/lab skips cleanup. Exit **3** means editor/test work
 succeeded but noise cleanup failed: rerun only the printed recovery command.
 Standalone `scene-noise.sh [--run] [--before file] [--keep path]...` reads the
 same project config. Avoid concurrent Git operations during cleanup.
@@ -173,6 +175,7 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `noise.timeManagerPath` | Default `ProjectSettings/TimeManager.asset`; only fixed-timestep formatting is eligible. |
 | `noise.fixedTimestepCount` | Optional positive decimal string for Unity's rational fixed-timestep representation (ticks at Unity's 141120000 Hz rate). Without it, rational-count cleanup is disabled. |
 | `noise.specularMaterialPath` | Optional exact material path eligible for `_SPECULAR_COLOR`-only keyword cleanup; disabled if omitted. |
+| `noise.fontAssetPaths` | Optional list of exact repository-relative static font asset paths (default empty). Revert any newly introduced serialization change at these paths, never deletions or `.meta` files; dirty-before/staged and `--keep` protections still apply. Only opt in fonts whose editor changes are disposable. |
 | `noise.propsDir` | Prop sources directory; default `Assets/Art/Props`. |
 | `noise.repackRegex` | Optional eligible prop mesh/prefab path ERE (capture group 1 labels the prop); disabled if omitted. |
 | `tests.builderFixtures` | Optional object mapping exact builder paths to arrays of fully qualified fixture names. |
@@ -196,10 +199,13 @@ Tools/ship/tests/run.sh
 The [Ship CI workflow](../../.github/workflows/ship.yml) is path-filtered to
 Ship and its workflow. The local aggregate runner defaults to changed Ship
 files since `origin/main`, including working-tree changes; unrelated changes
-select no tests. Shared tooling, fixtures, or workflow changes select the full
-suite. Use `Tools/ship/test-all.sh --changed <base>` for another comparison base,
-or `Tools/ship/test-all.sh --all` to explicitly run unchanged tests. The serial
-command above always runs the full suite for repeatability checks.
+select no tests. Shared tooling, fixtures, or workflow changes select all quick
+tests. Slow tests tagged `# test-all: slow [script-basename ...]` require a change
+to their own file or a script explicitly named in the tag; incidental references
+do not opt them in. `--fast` omits all slow-tagged tests. Use
+`Tools/ship/test-all.sh --changed <base>` for another comparison base, or
+`Tools/ship/test-all.sh --all` to explicitly run unchanged tests, including slow
+ones. The serial command above always runs the full suite for repeatability checks.
 
 Part B adds the offline shell tests and CI entry point. No editor, account,
 network, activation or seat is needed. Generated-scene and no-scene fixtures

@@ -41,6 +41,13 @@ done <<'EOF'
 .scene.areasFile = "/outside"|scene.areasFile
 .noise = []|noise
 .noise.atlasPath = 42|noise
+.noise.fontAssetPaths = null|noise.fontAssetPaths
+.noise.fontAssetPaths = "Assets/Fonts/Static.asset"|noise.fontAssetPaths
+.noise.fontAssetPaths = [42]|noise.fontAssetPaths
+.noise.fontAssetPaths = [""]|noise.fontAssetPaths
+.noise.fontAssetPaths = ["/outside.asset"]|noise.fontAssetPaths
+.noise.fontAssetPaths = ["../outside.asset"]|noise.fontAssetPaths
+.noise.fontAssetPaths = ["Assets/Fonts/line\nbreak.asset"]|noise.fontAssetPaths
 .tests = []|tests
 .tests.builderFixtures = []|tests.builderFixtures
 .tests.builderFixtures = {"Assets/Editor/Builder.cs": [42]}|tests.builderFixtures

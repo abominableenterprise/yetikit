@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-all: slow
+# test-all: slow linux-unity.sh
 # Tests `linux-unity.sh test pr [base]`: full pure pass, then only changed/referencing Gfx classes, with a bounded
 # recent-first fallback. Fake editor and fixture files live exclusively in a temp git repo; never runs Unity.
 # Run: bash Tools/ship/tests/linux-unity-test-pr.test.sh

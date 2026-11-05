@@ -366,7 +366,7 @@ run_noise_before() {
   (cd "$PROJECT" && noise_dirty_files)
 }
 
-# After open/test: revert the run's .mat/.prefab noise (scene-noise.sh revert_run_noise) unless --keep skipped it.
+# After an editor command: revert run noise (scene-noise.sh) unless --keep skipped it.
 revert_run_noise_after() {
   git -C "$PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
   if [ "$NOISE_SKIP" = 1 ]; then log "--keep: noise revert skipped"; return 0; fi
@@ -424,7 +424,7 @@ cmd_scene() {
   done
   mkdir -p "$OUT_DIR"
   cleanup_unity
-  local m step dirty_before noise_before steps=()
+  local m step rc=0 dirty_before noise_before steps=()
   if [ ${#areas[@]} = 0 ]; then
     mapfile -t steps < <(ship_config_get '.scene.steps[]')
   else
@@ -438,12 +438,13 @@ cmd_scene() {
     local extra=()
     [ "$m" != "$(ship_config_get '.scene.areaStep // empty')" ] || extra=("${areas[@]}")
     unity -quit -executeMethod "$m" ${extra[@]+"${extra[@]}"} -logFile "$OUT_DIR/scene-$step.log" \
-      || die "$m failed (see $OUT_DIR/scene-$step.log)"
+      || { rc=$?; break; }
   done
   local nrc=0 brc=0
   noise_lock_checked revert_bake_noise "$dirty_before" ${keep[@]+"${keep[@]}"} || brc=$?
   (cd "$PROJECT" && revert_editor_noise "$noise_before" ${keep[@]+"${keep[@]}"}) || nrc=$?
   [ "$nrc" != 0 ] || nrc=$brc
+  [ "$rc" = 0 ] || die "$m failed (exit $rc; see $OUT_DIR/scene-$step.log); noise cleanup exit $nrc"
   log "scene rebuilt"
   if [ "$nrc" != 0 ]; then
     [ "$brc" = 0 ] || log "the bake revert failed too: check $LIGHTMAP_DIR/Lightmap-*.exr.meta for bake-only platformSettings diffs"
@@ -453,14 +454,20 @@ cmd_scene() {
 }
 
 cmd_lab() {
+  parse_keep "$@"
+  [ ${#RUN_ARGS[@]} = 0 ] || die "usage: lab [--keep [<path>]]..."
+  local method before rc=0 nrc=0
+  method="$(ship_config_get '.labMethod // empty')"
+  [ -n "$method" ] || die "lab: missing key labMethod in yetikit.json"
   mkdir -p "$OUT_DIR"
   cleanup_unity
-  local method; method="$(ship_config_get '.labMethod // empty')"
-  [ -n "$method" ] || die "lab: missing key labMethod in yetikit.json"
+  before="$(run_noise_before)"
   log "lab: $method"
-  unity -quit -executeMethod "$method" -logFile "$OUT_DIR/scene-lab.log" \
-    || die "$method failed (see $OUT_DIR/scene-lab.log)"
+  unity -quit -executeMethod "$method" -logFile "$OUT_DIR/scene-lab.log" || rc=$?
+  revert_run_noise_after "$before" || nrc=$?
+  [ "$rc" = 0 ] || die "$method failed (see $OUT_DIR/scene-lab.log); noise cleanup exit $nrc"
   log "lab rebuilt"
+  [ "$nrc" = 0 ] || noise_revert_failed "$nrc" "$before" "lab rebuilt" --run
 }
 
 lightmap_meta_changes() { [ -n "$LIGHTMAP_DIR" ] || return 0; (cd "$PROJECT" && noise_git diff --name-only -- "$LIGHTMAP_DIR/Lightmap-*.exr.meta"); }
@@ -692,7 +699,7 @@ case "${1:-}" in
   cache-save) cmd_cache save ;;
   cache-key) shift; cache_key "$@" ;;
   scene) shift; cmd_scene "$@" ;;
-  lab) cmd_lab ;;
+  lab) shift; cmd_lab "$@" ;;
   test) shift; cmd_test "$@" ;;
   all) cmd_all ;;
   *) sed -n '2,/^set -euo/p' "$0" | grep '^#'; exit 2 ;;
