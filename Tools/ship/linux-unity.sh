@@ -36,7 +36,7 @@
 #   test pr [base] [extra Unity args...]
 #                       the full pure pass, then the Gfx pass only for the [Category("Gfx")] fixtures declared in test
 #                       files changed since `git merge-base base HEAD` (base: origin/main) or in the EditMode test
-#                       folder referencing a changed Assets/Scripts/<Area>/<Class>.cs (max TEST_PR_GFX_MAX, 12).
+#                       folder referencing a changed <tests.scriptsRoot>/<Area>/<Class>.cs (max TEST_PR_GFX_MAX, 12).
 #                       No matching fixture skips Gfx. Stage timings: build/test-stages.log.
 #                       Every test command: when all failures of a pass are in Tools/ship/known-flakes.txt, they rerun
 #                       once (<pass>-retry.xml) and a green rerun passes. The noise revert and --keep work as in open.
@@ -610,11 +610,12 @@ test_pr() {
   return $rc
 }
 
-# Class names tagged [Category("RenderTool")] under Assets/Tests (one per line).
+# Class names tagged [Category("RenderTool")] under tests.root (one per line).
 render_tool_classes() {
-  [ -d "$PROJECT/Assets/Tests" ] || return 0
-  local f
-  { grep -rl --include='*.cs' 'Category("RenderTool")' "$PROJECT/Assets/Tests" 2>/dev/null || true; } | while IFS= read -r f; do
+  local f tests_root
+  tests_root="$(ship_config_get '.tests.root // "Assets/Tests"')" || return
+  [ -d "$PROJECT/$tests_root" ] || return 0
+  { grep -rl --include='*.cs' 'Category("RenderTool")' "$PROJECT/$tests_root" 2>/dev/null || true; } | while IFS= read -r f; do
     awk '/Category\("RenderTool"\)/ { want = 1 }
       want && match($0, /class [A-Za-z0-9_]+/) { print substr($0, RSTART + 6, RLENGTH - 6); want = 0 }' "$f"
   done

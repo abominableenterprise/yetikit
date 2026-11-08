@@ -6,6 +6,18 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
+## [Unreleased]
+
+### Added
+- Optional test and code roots for Ship's PR Gfx selection, area tests and
+  RenderTool discovery.
+
+### Adapter changes
+- Optional; set `tests.root`, `tests.editModeRoot`, `tests.scriptsRoot` and
+  `tests.editorRoot` if your tests aren't under `Assets/Tests` or code uses a
+  nonstandard layout. Defaults preserve existing selection; `editModeRoot`
+  defaults to `<tests.root>/EditMode`.
+
 ## [0.1.0] - 2026-11-05
 
 ### Added

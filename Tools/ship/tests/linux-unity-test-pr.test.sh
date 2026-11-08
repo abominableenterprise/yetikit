@@ -242,4 +242,71 @@ check "test pr prints selection size and estimate before pure starts" \
 check "test editmode still runs full Gfx (no -testFilter)" \
   '[ "$(wc -l < "$tmp/runs")" = 2 ] && gfx_run | grep -q -- "-testCategory Gfx" && ! grep -q -- -testFilter "$tmp/runs"'
 
+# --- nonstandard consumer roots (only runtime source changed) ----------------------------------------------------------
+mkdir -p "$proj/Assets/_Project"
+mv "$proj/Assets/Tests" "$proj/Assets/_Project/Tests"
+mv "$proj/Assets/Scripts" "$proj/Assets/_Project/Scripts"
+mv "$proj/Assets/Editor" "$proj/Assets/_Project/Editor"
+t="$proj/Assets/_Project/Tests/EditMode"
+mkdir -p "$t/Custom" "$proj/Assets/_Project/Scripts/Custom"
+gfx "$t/Custom/XTests.cs" Example.Custom.Tests XTests Gfx
+printf '// X\n' >> "$t/Custom/XTests.cs"
+echo 'class X {}' > "$proj/Assets/_Project/Scripts/Custom/X.cs"
+commit custom-layout
+echo '// changed' >> "$proj/Assets/_Project/Scripts/Custom/X.cs"
+pr HEAD
+check "nonstandard layout without root keys selects no Gfx fixtures" \
+  '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/runs")" = 1 ]'
+jq '.tests += {root:"./Assets//_Project/Tests/", scriptsRoot:"./Assets/_Project/Scripts/", editorRoot:"Assets/_Project/Editor/"}' \
+  "$proj/yetikit.json" > "$tmp/config.json"
+mv "$tmp/config.json" "$proj/yetikit.json"
+pr HEAD
+check "configured roots select the Gfx fixture referencing changed runtime source" \
+  '[ "$rc" = 0 ] && [ "$(filter)" = Example.Custom.Tests.XTests ]'
+git -C "$proj" checkout -q -- Assets/_Project/Scripts/Custom/X.cs
+printf '// changed test\n' >> "$t/Custom/XTests.cs"
+pick
+check "changed tests use the EditMode root derived from the canonical test root" \
+  '[ "$(< "$tmp/picked")" = Example.Custom.Tests.XTests ]'
+git -C "$proj" checkout -q -- Assets/_Project/Tests/EditMode/Custom/XTests.cs
+echo '// changed builder' >> "$proj/Assets/_Project/Editor/World/Court/CourtBuilder.cs"
+pick
+check "configured editor root searches all configured tests for builder references" \
+  '[ "$(< "$tmp/picked")" = ExampleGame.Park.Tests.HoopTests ]'
+git -C "$proj" checkout -q -- Assets/_Project/Editor/World/Court/CourtBuilder.cs
+jq '.tests.builderFixtures["Assets/_Project/Editor/World/Walkers/BabySetup.cs"] = ["ExampleGame.Park.Tests.CourtTests"]' \
+  "$proj/yetikit.json" > "$tmp/config.json"
+mv "$tmp/config.json" "$proj/yetikit.json"
+echo '// changed builder' >> "$proj/Assets/_Project/Editor/World/Walkers/BabySetup.cs"
+pick
+check "explicit builder dependencies resolve Gfx tags and fixture sources under tests.root" \
+  '[ "$(< "$tmp/picked")" = ExampleGame.Park.Tests.CourtTests ]'
+git -C "$proj" checkout -q -- Assets/_Project/Editor/World/Walkers/BabySetup.cs
+# An independent EditMode root and asmdef fallback work without prefix assumptions.
+mv "$t" "$proj/Assets/_Project/Edit Tests"
+jq '.tests.editModeRoot = "./Assets//_Project/Edit Tests/"' "$proj/yetikit.json" > "$tmp/config.json"
+mv "$tmp/config.json" "$proj/yetikit.json"
+# Gfx eligibility still comes from tests.root, so include the independent folder there.
+jq '.tests.root = "Assets/_Project"' "$proj/yetikit.json" > "$tmp/config.json"
+mv "$tmp/config.json" "$proj/yetikit.json"
+commit explicit-editmode-layout
+echo '// changed' >> "$proj/Assets/_Project/Scripts/Characters/Person.cs"
+pick
+check "explicit EditMode root supports spaces and the asmdef fallback" \
+  '[ "$(< "$tmp/picked")" = ExampleGame.Characters.Tests.PersonTests ]'
+(
+  cd "$proj"; . "$script"
+  printf '%s\n' Assets/_Project/Scripts/Custom/X.cs | pr_test_files > "$tmp/test-files"
+  printf 'Court\n' | pr_area_tests > "$tmp/area-tests"
+  gfx_file="$PROJECT/Assets/_Project/ToolCapture.cs"
+  printf 'namespace Example.Tools\n{\n [Category("RenderTool")]\n public class Capture {}\n}\n' > "$gfx_file"
+  render_tool_classes > "$tmp/render-tools"
+)
+check "pr_test_files uses the configured scripts and EditMode roots" \
+  'grep -Fxq "Assets/_Project/Edit Tests/Custom/XTests.cs" "$tmp/test-files"'
+check "area tags are discovered under the configured test root" \
+  'grep -Fxq ExampleGame.Park.Tests.HoopTests "$tmp/area-tests"'
+check "RenderTool discovery uses the configured test root" \
+  'grep -Fxq Capture "$tmp/render-tools"'
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
