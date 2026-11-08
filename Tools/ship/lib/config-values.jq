@@ -29,6 +29,10 @@
   [".scene.steps[]", ([.scene.steps[]?] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".setup.craneArchive // empty", ([.setup.craneArchive // empty] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".tests.builderFixtures // {} | to_entries[] | .key as $path | .value[] | [$path, .] | @tsv", ([.tests.builderFixtures // {} | to_entries[] | .key as $path | .value[] | [$path, .] | @tsv] | map(if type == "string" then . else tostring end) | join("\n"))],
+  [".tests.root // \"Assets/Tests\"", .tests.root // "Assets/Tests"],
+  [".tests.editModeRoot // ((.tests.root // \"Assets/Tests\") + \"/EditMode\")", .tests.editModeRoot // ((.tests.root // "Assets/Tests") + "/EditMode")],
+  [".tests.scriptsRoot // \"Assets/Scripts\"", .tests.scriptsRoot // "Assets/Scripts"],
+  [".tests.editorRoot // \"Assets/Editor\"", .tests.editorRoot // "Assets/Editor"],
   [".unityVersion", ([.unityVersion] | map(if type == "string" then . else tostring end) | join("\n"))],
   ["has(\"scene\")", ([has("scene")] | map(if type == "string" then . else tostring end) | join("\n"))]
 ][] | .[0], "\u0000", .[1], "\u0000"

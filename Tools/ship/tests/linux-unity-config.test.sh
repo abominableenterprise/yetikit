@@ -52,6 +52,11 @@ done <<'EOF'
 .tests.builderFixtures = []|tests.builderFixtures
 .tests.builderFixtures = {"Assets/Editor/Builder.cs": [42]}|tests.builderFixtures
 EOF
+for key in root editModeRoot scriptsRoot editorRoot; do
+  for value in '"/outside"' '"Assets/../outside"' '42' 'null' '""'; do
+    invalid ".tests.$key = $value" "tests.$key"
+  done
+done
 printf '{broken\n' > "$proj/yetikit.json"
 run cache-key
 check 'malformed JSON has a clear diagnostic' '[ "$rc" != 0 ] && grep -q "invalid JSON" "$tmp/err"'
