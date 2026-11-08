@@ -12,6 +12,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
+## [0.1.3] - 2026-11-08
+
+### Added
+- None.
+
+### Fixed
 - Cleanup and `stop` keep shared Unity memory while an editor from another Unity installation is running.
 - `test-all.sh --changed` now selects tests when Ship is vendored under another directory, instead of passing with no tests.
 - The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
