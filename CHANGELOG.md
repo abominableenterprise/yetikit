@@ -6,6 +6,11 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
+## [Unreleased]
+
+### Fixed
+- `test-all.sh --changed` now selects tests when Ship is vendored under another directory, instead of passing with no tests.
+
 ## [0.1.1] - 2026-11-08
 
 ### Added
