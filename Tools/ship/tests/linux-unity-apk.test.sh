@@ -221,7 +221,8 @@ case "\$2" in *-android-3) tar -c -C "$img/android" opt/unity ;; *-base-3) tar -
 EOF
 printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/dpkg"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/ldd"
 chmod +x "$tmp/bin/crane" "$tmp/bin/dpkg" "$tmp/bin/ldd"
-setup() { : > "$tmp/crane-calls"; env -u UNITY_IMAGE UNITY_ROOT="$tmp/root/unity" BIN_DIR="$tmp/bin" "$@" bash "$script" setup ${SETUP_ARGS:-} >"$tmp/setup-out" 2>&1; }
+ship_fixture_process_view "$tmp/process-view"
+setup() { : > "$tmp/crane-calls"; env -u UNITY_IMAGE -u SHIP_FIXTURE_PIDS PATH="$tmp/process-view:$PATH" UNITY_ROOT="$tmp/root/unity" BIN_DIR="$tmp/bin" "$@" bash "$script" setup ${SETUP_ARGS:-} >"$tmp/setup-out" 2>&1; }
 check "setup (no flag) still installs the base image" \
   'setup env && grep -qx "export unityci/editor:ubuntu-6000.6.6f1-base-3 -" "$tmp/crane-calls" && [ ! -e "$tmp/root/unity/Editor/Data/PlaybackEngines/AndroidPlayer" ]'
 check "setup again: editor already there, no pull" 'setup env && grep -q "editor already" "$tmp/setup-out" && [ ! -s "$tmp/crane-calls" ]'

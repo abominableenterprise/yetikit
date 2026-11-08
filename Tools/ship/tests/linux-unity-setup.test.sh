@@ -16,6 +16,8 @@ trap cleanup EXIT
 fails=0
 . "$(dirname "$0")/lib/fixture.sh"
 ship_fixture "$tmp"
+ship_fixture_process_view "$tmp/process-view"
+export PATH="$tmp/process-view:$PATH"
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 
 # Fake image contents: opt/unity with the editor binary and the licensing client.
@@ -181,6 +183,7 @@ shm_fixture="$SHM_DIR/udsMem-setup-fixture"
 touch "$shm_fixture" "$tmp/Temp/UnityLockfile"
 env -u LINUX_UNITY_RUN "$replace_root/Editor/Unity" 120 & editor=$!
 editor_pids+=("$editor")
+export SHIP_FIXTURE_PIDS="$editor"
 editor_ready() { [ "$(readlink "/proc/$editor/exe" 2>/dev/null)" = "$replace_root/Editor/Unity" ]; }
 ship_wait_until editor_ready
 downloads_before="$(wc -l < "$tmp/download-calls")"
@@ -208,6 +211,7 @@ for spelling in "$replace_root/" "$tmp/replace-alias/unity" "${replace_root#/}";
   cp -a "$alias_root/." "$replace_root/"
   env -u LINUX_UNITY_RUN "$replace_root/Editor/Unity" 120 & editor=$!
   editor_pids+=("$editor")
+  export SHIP_FIXTURE_PIDS="$editor"
   ship_wait_until editor_ready
   touch "$shm_fixture" "$tmp/Temp/UnityLockfile"
   replace_rc=0
@@ -248,6 +252,7 @@ for inspection_fail in 0 1; do
   printf 'keep installation data\n' > "$replace_root/resource"
   env -u LINUX_UNITY_RUN "$replace_root/Editor/Unity" 120 & editor=$!
   editor_pids+=("$editor")
+  export SHIP_FIXTURE_PIDS="$editor"
   ship_wait_until editor_ready
   downloads_before="$(wc -l < "$tmp/download-calls")"
   replace_rc=0
@@ -263,6 +268,7 @@ mkdir -p "$replace_root/Editor"
 cp /usr/bin/sleep "$replace_root/Editor/Unity"
 touch "$replace_root/.install-complete"
 printf 'keep installation data\n' > "$replace_root/resource"
+unset SHIP_FIXTURE_PIDS
 mkdir -p "$img/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" \
   "$img/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/NDK"
 check "Android replacement succeeds after the foreign editor exits" \
