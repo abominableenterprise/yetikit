@@ -44,7 +44,7 @@ qr_wait_verdict() {
   case "$cmd" in
     gate) [ "$(cat "$s/gate_result" 2>/dev/null)" = passed ]; return $? ;;
     prepare|build|verify|cleanup) return 0 ;;
-    launch) ! grep -q '^CRASH' "$s/launch" 2>/dev/null; return $? ;;
+    launch) ! grep -qE '^(CRASH|INFRA):' "$s/launch" 2>/dev/null; return $? ;;
     rollback) label=rollback ;;
     all|install) ;;
     *) return 1 ;;
@@ -53,7 +53,7 @@ qr_wait_verdict() {
   case "$install" in
     "$label ok ("*CHANGED*) return 1 ;;
     "$label ok ("*)
-      [ "$cmd" != all ] || ! grep -q '^CRASH' "$s/launch" 2>/dev/null
+      [ "$cmd" != all ] || ! grep -qE '^(CRASH|INFRA):' "$s/launch" 2>/dev/null
       return $? ;;
     *) return 1 ;;
   esac

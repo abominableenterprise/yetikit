@@ -8,9 +8,23 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+### Added
+- None.
+
 ### Fixed
 - `test-all.sh --changed` now selects tests when Ship is vendored under another directory, instead of passing with no tests.
 - The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
+- Distinguish launch infrastructure failures from confirmed package crashes so
+  failed device, adb, activity-start or logcat checks cannot downgrade a healthy
+  installed build. Process probes preserve transport and remote exit status.
+
+### Behaviour changes
+- Launch infra errors are reported as `INFRA` and never trigger rollback;
+  rollback in `all` no longer implies `--force`. Standalone `launch` returns
+  0 for success, 1 for a confirmed crash, and 3 for infrastructure errors.
+
+### Adapter changes
+- None.
 
 ## [0.1.2] - 2026-11-08
 
