@@ -32,6 +32,25 @@ fixture_clears_swap_state() (
 )
 check 'standalone fake fixture clears inherited swap cleanup ownership' 'fixture_clears_swap_state'
 
+# A controlled process view must exclude the host without hiding tracked failures.
+cat > "$tmp/host-bin/readlink" <<'EOF'
+#!/bin/sh
+case "$1" in
+  /proc/12345/exe) printf '/fixture/editor\n' ;;
+  /proc/12346/exe) exit 1 ;;
+  *) printf 'delegated:%s\n' "$1" ;;
+esac
+EOF
+chmod +x "$tmp/host-bin/readlink"
+export SHIP_FIXTURE_PIDS='12345 12346'
+check 'opt-in process view excludes host processes but retains tracked inspection failures' '
+  ship_fixture_process_view "$tmp/view-bin" &&
+  [ "$(PATH="$tmp/view-bin:$PATH" readlink /proc/12345/exe)" = /fixture/editor ] &&
+  ! PATH="$tmp/view-bin:$PATH" readlink /proc/12346/exe &&
+  [ "$(PATH="$tmp/view-bin:$PATH" readlink /proc/1/exe)" = /fixture/host-process ] &&
+  [ "$(PATH="$tmp/view-bin:$PATH" readlink ordinary-link)" = delegated:ordinary-link ]'
+unset SHIP_FIXTURE_PIDS
+
 mkdir -p "$tmp/non-gnu"
 cat > "$tmp/non-gnu/timeout" <<'EOF'
 #!/bin/sh

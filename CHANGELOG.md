@@ -12,7 +12,21 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - Optional test and code roots for Ship's PR Gfx selection, area tests and
   RenderTool discovery.
 
+### Fixed
+- Editor cleanup only signals editors and helpers carrying the current runner's
+  ownership marker, protecting editors started outside that run
+  ([#28](https://github.com/abominableenterprise/yetikit/issues/28)).
+
+### Behaviour changes
+- Foreign editors are no longer killed by runner cleanup. Shared-memory and
+  project lockfile removal is skipped with a warning while an editor under the
+  configured installation remains. Android setup refuses to replace that
+  installation until its remaining editors and helpers exit. Installation paths
+  are canonicalized, and replacement uses a privileged read-only process scan;
+  failed inspection refuses replacement without removing shared resources.
+
 ### Adapter changes
+- None for cleanup ownership changes.
 - Optional; set `tests.root`, `tests.editModeRoot`, `tests.scriptsRoot` and
   `tests.editorRoot` if your tests aren't under `Assets/Tests` or code uses a
   nonstandard layout. Defaults preserve existing selection; `editModeRoot`

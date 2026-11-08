@@ -10,6 +10,25 @@ ship_wait_until() {
     /bin/sleep 0.02
   done
 }
+# Opt-in controlled executable view for replacement fixtures without real sudo.
+# Only explicitly tracked synthetic PIDs use real inspection (including failures).
+# Host processes are outside this model; strict scanner failure tests do not use it.
+ship_fixture_process_view() {
+  local bin="$1" real_readlink
+  real_readlink="$(command -v readlink)"
+  mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\nreal_readlink=%q\n' "$real_readlink" > "$bin/readlink"
+  cat >> "$bin/readlink" <<'EOF'
+if [[ "${1:-}" =~ ^/proc/([0-9]+)/exe$ ]]; then
+  case " ${SHIP_FIXTURE_PIDS:-} " in
+    *" ${BASH_REMATCH[1]} "*) exec "$real_readlink" "$@" ;;
+    *) printf '/fixture/host-process\n'; exit 0 ;;
+  esac
+fi
+exec "$real_readlink" "$@"
+EOF
+  chmod +x "$bin/readlink"
+}
 ship_fixture() {
   local project="$1" variant="${2:-scene}" file
   mkdir -p "$project/Tools/ship" "$project/.ship-test-bin"

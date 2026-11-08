@@ -4,8 +4,10 @@
 # Run: bash Tools/ship/tests/linux-unity-setup.test.sh
 set -euo pipefail
 script="$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh"
-tmp="$(mktemp -d)"; setup_pids=()
+tmp="$(mktemp -d)"; setup_pids=(); editor_pids=()
 cleanup() {
+  for pid in "${editor_pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  for pid in "${editor_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
   touch "$tmp/extract-release"
   for pid in "${setup_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
   rm -rf "$tmp"
@@ -14,6 +16,8 @@ trap cleanup EXIT
 fails=0
 . "$(dirname "$0")/lib/fixture.sh"
 ship_fixture "$tmp"
+ship_fixture_process_view "$tmp/process-view"
+export PATH="$tmp/process-view:$PATH"
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 
 # Fake image contents: opt/unity with the editor binary and the licensing client.
@@ -167,5 +171,107 @@ check "a pre-existing install of another version is refused, not marked" \
 touch "$tmp/older/unity/.install-complete"
 check "a marked install with another version is refused" \
   '! run env UNITY_ROOT="$tmp/older/unity" && grep -q "not Unity 6000.6.6f1" "$tmp/out"'
+
+# Android replacement must not delete a preserved foreign editor's installation.
+replace_root="$tmp/replace/unity"
+export SHM_DIR="$tmp/replace-shm"
+mkdir -p "$replace_root/Editor" "$tmp/Temp" "$SHM_DIR"
+cp /usr/bin/sleep "$replace_root/Editor/Unity"
+touch "$replace_root/.install-complete"
+printf 'keep installation data\n' > "$replace_root/resource"
+shm_fixture="$SHM_DIR/udsMem-setup-fixture"
+touch "$shm_fixture" "$tmp/Temp/UnityLockfile"
+env -u LINUX_UNITY_RUN "$replace_root/Editor/Unity" 120 & editor=$!
+editor_pids+=("$editor")
+export SHIP_FIXTURE_PIDS="$editor"
+editor_ready() { [ "$(readlink "/proc/$editor/exe" 2>/dev/null)" = "$replace_root/Editor/Unity" ]; }
+ship_wait_until editor_ready
+downloads_before="$(wc -l < "$tmp/download-calls")"
+setup_args=(--android --no-creds)
+replace_rc=0
+run env UNITY_ROOT="$replace_root" || replace_rc=$?
+check "Android replacement refuses an installation still in use" \
+  '[ "$replace_rc" != 0 ] && grep -qF "cannot replace $replace_root while Unity processes remain" "$tmp/out"'
+check "refused replacement preserves the foreign editor and installation" \
+  'kill -0 "$editor" && cmp -s /usr/bin/sleep "$replace_root/Editor/Unity" && [ "$(cat "$replace_root/resource")" = "keep installation data" ] && [ -e "$replace_root/.install-complete" ]'
+check "refused replacement leaves shared resources and does not extract" \
+  '[ -e "$shm_fixture" ] && [ -e "$tmp/Temp/UnityLockfile" ] && [ "$(wc -l < "$tmp/download-calls")" = "$downloads_before" ]'
+kill "$editor" 2>/dev/null || true; wait "$editor" 2>/dev/null || true
+editor_pids=()
+
+# Each spelling must identify the same installation before checking process ownership.
+ln -s "$tmp/replace" "$tmp/replace-alias"
+for spelling in "$replace_root/" "$tmp/replace-alias/unity" "${replace_root#/}"; do
+  alias_root="$tmp/alias-case/unity"
+  mkdir -p "$alias_root/Editor"
+  cp /usr/bin/sleep "$alias_root/Editor/Unity"
+  touch "$alias_root/.install-complete"
+  printf 'keep installation data\n' > "$alias_root/resource"
+  # Restore the original fixture if a failing implementation deleted it.
+  cp -a "$alias_root/." "$replace_root/"
+  env -u LINUX_UNITY_RUN "$replace_root/Editor/Unity" 120 & editor=$!
+  editor_pids+=("$editor")
+  export SHIP_FIXTURE_PIDS="$editor"
+  ship_wait_until editor_ready
+  touch "$shm_fixture" "$tmp/Temp/UnityLockfile"
+  replace_rc=0
+  if [ "$spelling" = "${replace_root#/}" ]; then
+    (cd / && run env UNITY_ROOT="$spelling") || replace_rc=$?
+  else
+    run env UNITY_ROOT="$spelling" || replace_rc=$?
+  fi
+  check "replacement refuses alternate root spelling: $spelling" \
+    '[ "$replace_rc" != 0 ] && grep -qF "cannot replace $replace_root while Unity processes remain" "$tmp/out" && kill -0 "$editor" && cmp -s /usr/bin/sleep "$replace_root/Editor/Unity" && [ -e "$replace_root/resource" ] && [ -e "$shm_fixture" ] && [ -e "$tmp/Temp/UnityLockfile" ]'
+  kill "$editor" 2>/dev/null || true; wait "$editor" 2>/dev/null || true
+  editor_pids=()
+  rm -rf "$replace_root" "$alias_root"
+done
+
+# Model /proc's cross-UID visibility boundary without requiring root or passwordless sudo:
+# the editor's exe is unreadable to the invoking UID, but readable inside sudo.
+for c in id readlink; do
+  real_cmd="$(real "$c")"
+  cat > "$tmp/bin/$c" <<EOF
+#!/bin/bash
+if [ -n "\${FAKE_CROSS_USER_PID:-}" ]; then
+  if [ "$c" = id ] && [ "\$*" = -u ]; then echo 1001; exit; fi
+  if [ "$c" = readlink ] && [ "\$1" = "/proc/\$FAKE_CROSS_USER_PID/exe" ]; then
+    [ "\${FAKE_PRIVILEGED:-0}" = 1 ] && [ "\${FAKE_INSPECTION_FAIL:-0}" != 1 ] || exit 1
+  fi
+fi
+exec "$real_cmd" "\$@"
+EOF
+  chmod +x "$tmp/bin/$c"
+done
+printf '#!/bin/sh\nexec env FAKE_PRIVILEGED=1 "$@"\n' > "$tmp/bin/sudo"
+chmod +x "$tmp/bin/sudo"
+for inspection_fail in 0 1; do
+  mkdir -p "$replace_root/Editor"
+  cp /usr/bin/sleep "$replace_root/Editor/Unity"
+  touch "$replace_root/.install-complete" "$shm_fixture" "$tmp/Temp/UnityLockfile"
+  printf 'keep installation data\n' > "$replace_root/resource"
+  env -u LINUX_UNITY_RUN "$replace_root/Editor/Unity" 120 & editor=$!
+  editor_pids+=("$editor")
+  export SHIP_FIXTURE_PIDS="$editor"
+  ship_wait_until editor_ready
+  downloads_before="$(wc -l < "$tmp/download-calls")"
+  replace_rc=0
+  run env UNITY_ROOT="$replace_root" FAKE_CROSS_USER_PID="$editor" FAKE_INSPECTION_FAIL="$inspection_fail" || replace_rc=$?
+  if [ "$inspection_fail" = 0 ]; then reason="while Unity processes remain"; else reason="cannot inspect processes"; fi
+  check "cross-user replacement refuses safely (inspection failure=$inspection_fail)" \
+    '[ "$replace_rc" != 0 ] && grep -qF "$reason" "$tmp/out" && kill -0 "$editor" && cmp -s /usr/bin/sleep "$replace_root/Editor/Unity" && [ -e "$replace_root/resource" ] && [ -e "$shm_fixture" ] && [ -e "$tmp/Temp/UnityLockfile" ] && [ "$(wc -l < "$tmp/download-calls")" = "$downloads_before" ]'
+  kill "$editor" 2>/dev/null || true; wait "$editor" 2>/dev/null || true
+  editor_pids=()
+  rm -rf "$replace_root"
+done
+mkdir -p "$replace_root/Editor"
+cp /usr/bin/sleep "$replace_root/Editor/Unity"
+touch "$replace_root/.install-complete"
+printf 'keep installation data\n' > "$replace_root/resource"
+unset SHIP_FIXTURE_PIDS
+mkdir -p "$img/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" \
+  "$img/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/NDK"
+check "Android replacement succeeds after the foreign editor exits" \
+  'run env UNITY_ROOT="$replace_root" && grep -q "setup ok" "$tmp/out" && [ ! -e "$replace_root/resource" ] && [ -d "$replace_root/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" ] && [ -e "$replace_root/.install-complete" ] && [ ! -e "$shm_fixture" ] && [ ! -e "$tmp/Temp/UnityLockfile" ]'
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

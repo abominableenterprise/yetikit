@@ -80,7 +80,8 @@ APK_MIN_FREE_GB_WARM="${APK_MIN_FREE_GB_WARM:-4}"
 APK_SWAP_GB="${APK_SWAP_GB:-3}"
 APK_SWAP_BELOW_GB="${APK_SWAP_BELOW_GB:-12}"
 APK_SWAP_DIR="${APK_SWAP_DIR:-$([ -d /.fly-upper-layer ] && echo /.fly-upper-layer || echo /var/tmp)}"
-UNITY_ROOT="${UNITY_ROOT:-/opt/unity}"
+# Match /proc's canonical executable paths, including aliases and not-yet-created install roots.
+UNITY_ROOT="$(realpath -m -- "${UNITY_ROOT:-/opt/unity}")"
 BIN_REL="Editor/Unity"
 LC_REL="Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"
 UNITY_BIN="$UNITY_ROOT/$BIN_REL"
@@ -181,15 +182,51 @@ lock_unity() {
   chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
 }
 
-# Kill editor helpers left by a crashed or timed-out run. A stale Unity.DataStore shared-memory
-# segment makes the next run fail with "Error loading the file 'VirtualArtifacts/...'".
+# Read-only installation scan. Replacement runs this as root in strict mode: an unreadable live
+# userspace process is not evidence of absence. Kernel threads, zombies and exited processes have no exe.
+unity_pids() {
+  local p exe status stat flags
+  local -r PF_KTHREAD=2097152 # Linux task flag (0x00200000), available before Kthread: in status.
+  for p in /proc/[0-9]*; do
+    if exe="$(readlink "$p/exe" 2>/dev/null)"; then
+      case "$exe" in "$UNITY_ROOT"/*) printf ' %s' "${p#/proc/}" ;; esac
+    elif [ "${1:-}" = strict ]; then
+      [ -d "$p" ] || continue
+      status="$(cat "$p/status" 2>/dev/null)" || { [ ! -d "$p" ] && continue; return 1; }
+      case "$status" in
+        *$'\nKthread:\t1'*) continue ;;
+        *$'\nState:\tZ '*|*$'\nState:\tX '*) continue ;;
+      esac
+      # Older kernels omit Kthread: from status; stat field 9 still exposes PF_KTHREAD.
+      if stat="$(cat "$p/stat" 2>/dev/null)"; then
+        read -r _ _ _ _ _ _ flags _ <<< "${stat##*) }"
+        if [[ "$flags" =~ ^[0-9]+$ ]] && (( (flags & PF_KTHREAD) != 0 )); then continue; fi
+      fi
+      [ ! -d "$p" ] || return 1
+    fi
+  done
+  return 0
+}
+
+# Kill only this run's editor helpers. A stale Unity.DataStore shared-memory segment makes the next run fail
+# with "Error loading the file 'VirtualArtifacts/...'", but a foreign editor may still own those files.
 cleanup_unity() {
   lock_unity
-  local p
-  for p in /proc/[0-9]*; do
-    case "$(readlink "$p/exe" 2>/dev/null)" in "$UNITY_ROOT"/*) kill -9 "${p#/proc/}" 2>/dev/null || true ;; esac
-  done
+  local p remaining="" run="${LINUX_UNITY_RUN:-}"
+  if [ -n "$run" ]; then
+    for p in $(marked "$run"); do
+      case "$(readlink "/proc/${p%%:*}/exe" 2>/dev/null)" in
+        "$UNITY_ROOT"/*) same_proc "$p" "$run" && kill -KILL "${p%%:*}" 2>/dev/null || true ;;
+      esac
+    done
+  fi
   sleep 2
+  # Read-only scan: never signal an unmarked editor, another run's editor, or an unreadable owner.
+  remaining="$(unity_pids)"
+  if [ -n "$remaining" ]; then
+    log "warning: Unity processes remain (PIDs:$remaining); skipping shared-memory and UnityLockfile cleanup"
+    return 0
+  fi
   rm -f "$SHM_DIR"/udsMem* "$SHM_DIR"/sem.udsMem* "$PROJECT/Temp/UnityLockfile"
 }
 
