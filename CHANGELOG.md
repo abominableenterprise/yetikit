@@ -6,11 +6,12 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
-## [Unreleased]
+## [0.1.1] - 2026-11-08
 
 ### Added
 - Optional test and code roots for Ship's PR Gfx selection, area tests and
-  RenderTool discovery.
+  RenderTool discovery
+  ([#27](https://github.com/abominableenterprise/yetikit/issues/27)).
 
 ### Fixed
 - Editor cleanup only signals editors and helpers carrying the current runner's
