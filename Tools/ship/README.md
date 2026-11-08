@@ -86,12 +86,29 @@ file while a run is active.
 | `stop` | Stop only this runner's recorded process tree/marked descendants, never a broad process-name kill. |
 | `all` | Setup, activate, open, EditMode tests; retain the licence even on failure. Return once afterward. |
 
+### Test evidence
+
+Test commands reject forwarded `-quit`, `-testResults` and `-logFile` before
+starting an editor: the runner owns test execution, result paths and log paths.
+Each pass, including a known-flake retry, must write parseable result XML with
+a `test-run` root and numeric `total`, `passed`, `failed` and `skipped` counts.
+Missing/empty/invalid XML, zero total, or no passed/failed tests fails the pass.
+The only zero-total exception is the implicit Gfx pass of plain `test editmode`
+(no caller `-testCategory` or `-testFilter`) and the Gfx pass of `test pr`:
+projects may have no selected Gfx tests. These log `no tests selected (Gfx
+categories); treated as empty`. This never excuses missing/invalid XML, all
+skipped tests, or an empty retry. Pure, PlayMode and explicitly selected passes
+must execute tests. A later evidence-only failure preserves an earlier editor's
+nonzero exit status. Evidence validation uses Python 3's standard library.
+
 For an explicit category, EditMode runs a single graphics-enabled pass; Gfx
 gets its own timeout. A RenderTool class filter runs alone with `RenderTool`.
 Known flakes are one fully qualified test or fixture per line, with `#` comments.
 Only a pass consisting entirely of known failures reruns once. Both result XMLs
 are retained and a successful retry prints `flaky-passed`, not an unqualified
-first-pass success. Missing results/crashes are never flakes.
+first-pass success. Every original failed fullname, including each parameterized
+case, must explicitly pass on retry; skipped or missing cases do not clear the
+failure. Missing results/crashes are never flakes.
 
 Every editor command (`open`, `test`, `apk`, `scene`, `lab`) cleans newly
 introduced noise even after editor failure. Run cleanup covers material keyword,

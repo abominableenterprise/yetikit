@@ -40,6 +40,16 @@ FAKE_FAILS="$ballers" EDITMODE_GFX=0 run editmode -testFilter X.Tests -logLevel 
 check "the rerun replaces the caller's -testFilter and keeps its other args" \
   '[ "$rc" = 0 ] && [ "$(retry_filter)" = "$ballers" ] && [ "$(grep -- -retry.xml "$tmp/runs" | grep -o -- -testFilter | wc -l)" = 1 ] && grep -- -retry.xml "$tmp/runs" | grep -q -- "-logLevel x"'
 
+for missing in "$flick2" "$ballers"; do
+  if [ "$missing" = "$ballers" ]; then passes="$flick1;$flick2"; else passes="$ballers;$flick1"; fi
+  FAKE_FAILS="$ballers;$flick1;$flick2" FAKE_RETRY_PASSES="$passes" FAKE_RETRY_SKIPS="$missing" EDITMODE_GFX=0 run editmode
+  check "a retry with a skipped original failure ($missing) stays failed" \
+    '[ "$rc" = 2 ] && [ "$(wc -l < "$tmp/runs")" = 2 ] && ! grep -q flaky-passed "$tmp/err"'
+done
+FAKE_FAILS="$ballers;$flick1;$flick2" FAKE_RETRY_PASSES="$ballers;$flick1" EDITMODE_GFX=0 run editmode
+check "a retry missing one original parameterized case stays failed" \
+  '[ "$rc" = 2 ] && ! grep -q flaky-passed "$tmp/err"'
+
 # --- real failures still fail --------------------------------------------------------------------------------------------
 FAKE_FAILS="$ballers;X.Tests.Real.Broken" EDITMODE_GFX=0 run editmode
 check "a failure not in the list: exit nonzero, no rerun" \
