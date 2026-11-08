@@ -6,7 +6,7 @@
 # --fast omits all slow-tagged files.
 set -euo pipefail
 export LC_ALL=C
-ci_dir="$(cd "$(dirname "$0")" && pwd)"
+ci_dir="$(cd "$(dirname "$0")" && pwd -P)"
 shopt -s nullglob
 tests=("$ci_dir"/tests/*.test.sh)
 if ((${#tests[@]} == 0)); then
@@ -69,7 +69,10 @@ else
 fi
 
 if ((changed)); then
-  repo="$(git -C "$ci_dir" rev-parse --show-toplevel 2>/dev/null)" || repo="$(cd "$ci_dir/../.." && pwd)"
+  repo="$(git -C "$ci_dir" rev-parse --show-toplevel 2>/dev/null)" || repo="$(cd "$ci_dir/../.." && pwd -P)"
+  repo="$(cd "$repo" && pwd -P)" || {
+    echo 'ERROR: cannot determine tool directory relative to repository' >&2; exit 1;
+  }
   case "$ci_dir" in
     "${repo%/}/"*) tool_prefix="${ci_dir#"${repo%/}/"}" ;;
     *) echo 'ERROR: cannot determine tool directory relative to repository' >&2; exit 1 ;;

@@ -120,6 +120,16 @@ done
 unset EXPECTED_PREFIX
 echo 'ok   vendored runner selects tool and own-test changes at any depth'
 
+ln -s "$tmp" "$tmp-linked"
+# Keep the sibling link out of the temp tree to avoid recursive copies.
+trap 'rm -f "$tmp-linked"; rm -rf "$tmp"' EXIT
+runner="$tmp-linked/Tools/ship/test-all.sh"
+printf 'Tools/ship/helper.sh\n' > "$CHANGED_PATHS"
+check $'quick\n' --changed
+: > "$CHANGED_PATHS"
+check '' --changed
+echo 'ok   symlinked checkout paths map to the physical repository root'
+
 runner="$tmp/Tools/ship/test-all.sh"
 printf 'Tools/ship/helper.sh\n' > "$CHANGED_PATHS"
 export FAKE_REV_PARSE_FAIL=1
