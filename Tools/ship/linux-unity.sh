@@ -181,15 +181,27 @@ lock_unity() {
   chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
 }
 
-# Kill editor helpers left by a crashed or timed-out run. A stale Unity.DataStore shared-memory
-# segment makes the next run fail with "Error loading the file 'VirtualArtifacts/...'".
+# Kill only this run's editor helpers. A stale Unity.DataStore shared-memory segment makes the next run fail
+# with "Error loading the file 'VirtualArtifacts/...'", but a foreign editor may still own those files.
 cleanup_unity() {
   lock_unity
-  local p
-  for p in /proc/[0-9]*; do
-    case "$(readlink "$p/exe" 2>/dev/null)" in "$UNITY_ROOT"/*) kill -9 "${p#/proc/}" 2>/dev/null || true ;; esac
-  done
+  local p remaining="" run="${LINUX_UNITY_RUN:-}"
+  if [ -n "$run" ]; then
+    for p in $(marked "$run"); do
+      case "$(readlink "/proc/${p%%:*}/exe" 2>/dev/null)" in
+        "$UNITY_ROOT"/*) same_proc "$p" "$run" && kill -KILL "${p%%:*}" 2>/dev/null || true ;;
+      esac
+    done
+  fi
   sleep 2
+  # Read-only scan: never signal an unmarked editor, another run's editor, or an unreadable owner.
+  for p in /proc/[0-9]*; do
+    case "$(readlink "$p/exe" 2>/dev/null)" in "$UNITY_ROOT"/*) remaining+=" ${p#/proc/}" ;; esac
+  done
+  if [ -n "$remaining" ]; then
+    log "warning: Unity processes remain (PIDs:$remaining); skipping shared-memory and UnityLockfile cleanup"
+    return 0
+  fi
   rm -f "$SHM_DIR"/udsMem* "$SHM_DIR"/sem.udsMem* "$PROJECT/Temp/UnityLockfile"
 }
 

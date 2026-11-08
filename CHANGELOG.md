@@ -6,6 +6,23 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
+## [Unreleased]
+
+### Added
+- None.
+
+### Fixed
+- Editor cleanup only signals editors and helpers carrying the current runner's
+  ownership marker, protecting editors started outside that run
+  ([#28](https://github.com/abominableenterprise/yetikit/issues/28)).
+
+### Behaviour changes
+- Foreign editors are no longer killed by runner cleanup. Shared-memory and
+  project lockfile removal is skipped with a warning while any editor remains.
+
+### Adapter changes
+- None.
+
 ## [0.1.0] - 2026-11-05
 
 ### Added

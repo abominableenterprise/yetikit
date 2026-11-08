@@ -49,7 +49,7 @@ export PATH="$tmp/bin:$PATH" PROJECT="$proj" UNITY_ROOT="$root" ULF="$tmp/ulf/Un
 mkdir -p "$tmp/ulf"
 unset THEROBOTS_HUB_URL THEROBOTS_TASK_ID THEROBOTS_TASK_TOKEN   # never reach the real hub
 unset UNITY_USERNAME UNITY_PASSWORD USERNAME PASSWORD UNITY_RETURN_ON_EXIT
-trap 'kill "$(cat "$tmp/stale.pid" 2>/dev/null)" 2>/dev/null || true; rm -rf "$tmp"' EXIT
+trap 'if [ -f "$tmp/stale.pid" ]; then kill "$(cat "$tmp/stale.pid")" 2>/dev/null || true; wait "$(cat "$tmp/stale.pid")" 2>/dev/null || true; fi; rm -rf "$tmp"' EXIT
 lu() { UNITY_USERNAME="${UNITY_USERNAME-u}" UNITY_PASSWORD="${UNITY_PASSWORD-p}" bash "$script" "$@" 2>"$tmp/err"; }
 creds() { UNITY_USERNAME=u UNITY_PASSWORD=p "$@"; }
 
@@ -95,14 +95,21 @@ check "open (ensure_licence): a ULF truncated inside <Signature with credentials
   'creds lu open && grep -q "is truncated.*re-activating once" "$tmp/err" && grep -q "</Signature>" "$ULF"'
 good_ulf > "$ULF"
 
-# --- #47: open runs the same preflight cleanup as test --------------------------------------------------------------
+# Open preserves an unmarked helper and its files; a later open with no foreign helper wipes stale files.
 cp /bin/sleep "$root/Editor/Data/Unity.DataStore"
-"$root/Editor/Data/Unity.DataStore" 300 & echo $! > "$tmp/stale.pid"; disown
+env -u LINUX_UNITY_RUN "$root/Editor/Data/Unity.DataStore" 300 & stale=$!; echo "$stale" > "$tmp/stale.pid"
+helper_ready() { [ "$(readlink "/proc/$stale/exe" 2>/dev/null)" = "$root/Editor/Data/Unity.DataStore" ]; }
+ship_wait_until helper_ready
 : > "$tmp/shm/udsMem1234"; : > "$tmp/shm/sem.udsMem1234"; : > "$proj/Temp/UnityLockfile"; : > "$tmp/shm/other"
-check "open succeeds" 'lu open'
+check "open succeeds with a foreign helper" 'lu open'
+check "open: foreign shared memory and the lockfile remain at editor launch" \
+  'grep -q udsMem1234 "$tmp/at-launch" && grep -qx lockfile "$tmp/at-launch" && grep -qx other "$tmp/at-launch"'
+check "open: an unmarked Unity.DataStore helper survives with a warning" \
+  'kill -0 "$stale" && grep -qx datastore "$tmp/at-launch" && grep -q "PIDs:.*$stale.*skipping" "$tmp/err"'
+kill "$stale"; wait "$stale" 2>/dev/null || true; rm -f "$tmp/stale.pid"
+check "open succeeds without a foreign helper" 'lu open'
 check "open: stale shared memory and the lockfile are gone before the editor starts" \
   '! grep -qE "udsMem|lockfile" "$tmp/at-launch" && grep -qx other "$tmp/at-launch"'
-check "open: a stale Unity.DataStore helper is killed before the editor starts" '! grep -q datastore "$tmp/at-launch"'
 
 # --- #120: a filter-only run of a RenderTool class goes through the single Xvfb pass --------------------------------
 printf 'namespace ExampleGame.Park.Tests {\n  [Category("RenderTool")]\n  public class CourtStripCapture {}\n}\n' > "$proj/Assets/Tests/Park/CourtStripCapture.cs"

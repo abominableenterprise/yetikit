@@ -42,7 +42,7 @@ fixtures
 cleanup_unity 2> "$tmp/unmarked.log"
 unmarked_survives() {
   kill -0 "$unmarked" 2>/dev/null && fixtures_present &&
-    [ "$(wc -l < "$tmp/unmarked.log")" = 1 ] && grep -w "$unmarked" "$tmp/unmarked.log"
+    [ "$(grep -c '^\[linux-unity\]' "$tmp/unmarked.log")" = 1 ] && grep -w "$unmarked" "$tmp/unmarked.log"
 }
 check unmarked_survives
 kill "$unmarked" 2>/dev/null || true; wait "$unmarked" 2>/dev/null || true
@@ -59,7 +59,7 @@ fixtures
 cleanup_unity 2> "$tmp/foreign.log"
 other_live_run_survives() {
   kill -0 "$peer" && kill -0 "$foreign" 2>/dev/null && ! kill -0 "$owned" 2>/dev/null &&
-    fixtures_present && [ "$(wc -l < "$tmp/foreign.log")" = 1 ] && grep -w "$foreign" "$tmp/foreign.log"
+    fixtures_present && [ "$(grep -c '^\[linux-unity\]' "$tmp/foreign.log")" = 1 ] && grep -w "$foreign" "$tmp/foreign.log"
 }
 check other_live_run_survives
 wait "$owned" 2>/dev/null || true
