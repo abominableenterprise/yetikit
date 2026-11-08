@@ -80,7 +80,8 @@ APK_MIN_FREE_GB_WARM="${APK_MIN_FREE_GB_WARM:-4}"
 APK_SWAP_GB="${APK_SWAP_GB:-3}"
 APK_SWAP_BELOW_GB="${APK_SWAP_BELOW_GB:-12}"
 APK_SWAP_DIR="${APK_SWAP_DIR:-$([ -d /.fly-upper-layer ] && echo /.fly-upper-layer || echo /var/tmp)}"
-UNITY_ROOT="${UNITY_ROOT:-/opt/unity}"
+# Match /proc's canonical executable paths, including aliases and not-yet-created install roots.
+UNITY_ROOT="$(realpath -m -- "${UNITY_ROOT:-/opt/unity}")"
 BIN_REL="Editor/Unity"
 LC_REL="Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"
 UNITY_BIN="$UNITY_ROOT/$BIN_REL"
@@ -181,11 +182,22 @@ lock_unity() {
   chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
 }
 
-# Read-only installation scan shared by cleanup and destructive installation replacement.
+# Read-only installation scan. Replacement runs this as root in strict mode: an unreadable live
+# userspace process is not evidence of absence. Kernel threads, zombies and exited processes have no exe.
 unity_pids() {
-  local p
+  local p exe status
   for p in /proc/[0-9]*; do
-    case "$(readlink "$p/exe" 2>/dev/null)" in "$UNITY_ROOT"/*) printf ' %s' "${p#/proc/}" ;; esac
+    if exe="$(readlink "$p/exe" 2>/dev/null)"; then
+      case "$exe" in "$UNITY_ROOT"/*) printf ' %s' "${p#/proc/}" ;; esac
+    elif [ "${1:-}" = strict ]; then
+      [ -d "$p" ] || continue
+      status="$(cat "$p/status" 2>/dev/null)" || { [ ! -d "$p" ] && continue; return 1; }
+      case "$status" in
+        *$'\nKthread:\t1'*) continue ;;
+        *$'\nState:\tZ '*|*$'\nState:\tX '*) continue ;;
+      esac
+      [ ! -d "$p" ] || return 1
+    fi
   done
   return 0
 }

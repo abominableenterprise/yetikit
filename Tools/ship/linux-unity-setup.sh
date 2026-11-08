@@ -103,9 +103,12 @@ replace_base_editor() {
   [ "$UNITY_MODULES" = android ] && [ -x "$UNITY_BIN" ] && ! has_android || return 0
   as_root test -e "$UNITY_ROOT/$DONE_MARK" || return 0
   log "replacing the editor at $UNITY_ROOT (no Android module) with $UNITY_IMAGE"
-  cleanup_unity
-  local remaining; remaining="$(unity_pids)"
+  # Establish visibility with deletion's privileges before even wiping shared resources.
+  local remaining
+  remaining="$(as_root env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids strict")" \
+    || die "cannot inspect processes safely; refusing to replace $UNITY_ROOT"
   [ -z "$remaining" ] || die "cannot replace $UNITY_ROOT while Unity processes remain (PIDs:$remaining); close them and re-run setup"
+  cleanup_unity
   as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 }
 
