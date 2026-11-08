@@ -10,15 +10,23 @@ QR_RE_UNITY_ERR='(^|[[:space:]])E(/|[[:space:]]+)Unity'
 QR_RE_FATAL='FATAL|Fatal signal|AndroidRuntime'
 QR_RE_CRASH='FATAL|Fatal signal|(^|[[:space:]])[EF](/|[[:space:]]+)AndroidRuntime'
 
+# Public launch outcomes: only a confirmed crash may authorize rollback.
+QR_LAUNCH_OK=0
+QR_LAUNCH_CRASH=1
+QR_LAUNCH_INFRA=3
+
 qr_adb() { adb -s "$QUEST_SERIAL" "$@"; }
 qr_adb_shell() { qr_adb shell "$@" 2>/dev/null | tr -d '\r'; }
 
 # Prints why the Quest cannot be used and returns 1, or prints its state and returns 0. Read-only (doctor uses it).
 qr_device_status() {
   local state maker
-  state="$(qr_adb get-state 2>/dev/null | tr -d '\r')"
+  state="$(qr_adb get-state 2>/dev/null)" || { echo "Quest $QUEST_SERIAL: adb get-state failed"; return 1; }
+  state="${state//$'\r'/}"
   [ "$state" = device ] || { echo "Quest $QUEST_SERIAL is not connected (adb state '${state:-none}')"; return 1; }
-  maker="$(qr_adb_shell getprop ro.product.manufacturer)"
+  maker="$(qr_adb shell getprop ro.product.manufacturer 2>/dev/null)" \
+    || { echo "Quest $QUEST_SERIAL: adb manufacturer query failed"; return 1; }
+  maker="${maker//$'\r'/}"
   [ "$maker" = Oculus ] || { echo "device $QUEST_SERIAL is made by '${maker:-unknown}', not Oculus: refusing"; return 1; }
   echo "Quest $QUEST_SERIAL: adb state device, manufacturer Oculus"
 }
@@ -220,16 +228,51 @@ qr_start_activity() {
   qr_adb shell "$command"
 }
 
-qr_launch() { qr_device_locked qr_launch_locked "$@"; }
+qr_launch_infra() {
+  qr_set launch "INFRA: $*"
+  qr_log "launch: infrastructure: $*"
+  exit "$QR_LAUNCH_INFRA"
+}
+
+# Keep remote pidof's status separate from adb's transport status. The trailer
+# also detects truncated output or older shells that cannot execute the probe.
+# Only status 1 with no PIDs confirms absence; malformed/failed probes fail closed.
+qr_launch_pid() {
+  local out status pids
+  out="$(qr_adb shell "pidof '$QR_PKG'; qr_pid_rc=\$?; printf '\\nqr_pid_rc=%s\\n' \"\$qr_pid_rc\"" 2>/dev/null)" || return "$QR_LAUNCH_INFRA"
+  out="${out//$'\r'/}"
+  status="${out##*$'\n'qr_pid_rc=}"
+  pids="${out%$'\n'qr_pid_rc=*}"
+  pids="${pids%$'\n'}"
+  case "$status" in
+    0) [[ "$pids" =~ ^[0-9]+([[:space:]][0-9]+)*$ ]] || return "$QR_LAUNCH_INFRA" ;;
+    1) [ -z "$pids" ] || return "$QR_LAUNCH_INFRA" ;;
+    *) return "$QR_LAUNCH_INFRA" ;;
+  esac
+  printf '%s\n' "$pids"
+}
+
+qr_launch() (
+  local rc=0
+  # Replace stale success/crash even if the device lock refuses before launch.
+  qr_set launch "INFRA: launch did not complete (device lock or setup failed; see release.log)"
+  qr_device_locked qr_launch_locked "$@" || rc=$?
+  case "$rc" in
+    "$QR_LAUNCH_OK") return "$QR_LAUNCH_OK" ;;
+    "$QR_LAUNCH_CRASH")
+      case "$(qr_get launch)" in CRASH:*) return "$QR_LAUNCH_CRASH" ;; esac ;;
+  esac
+  return "$QR_LAUNCH_INFRA"
+)
 
 qr_launch_locked() {
   local cat="$QR_RUN_DIR/launch-logcat.txt" fps errs fatal alive=no pid start_pid findings crash=0 crashes
   local early="$QR_RUN_DIR/launch-early-logcat.txt" warnings="$QR_RUN_DIR/launch-shell-warnings.txt" shell_count=0
-  qr_await_device
-  qr_adb logcat -c || qr_die "launch: adb logcat -c failed"
-  qr_start_activity > "$QR_RUN_DIR/launch-am.log" 2>&1 \
-    || qr_die "launch: am start failed (launch-am.log)"
-  start_pid="$(qr_adb_shell pidof "$QR_PKG")"
+  ( qr_await_device ) || qr_launch_infra "device check/wait failed (see release.log)"
+  qr_adb logcat -c || qr_launch_infra "adb logcat -c failed"
+  ( qr_start_activity ) > "$QR_RUN_DIR/launch-am.log" 2>&1 \
+    || qr_launch_infra "am start failed (launch-am.log)"
+  start_pid="$(qr_launch_pid)" || qr_launch_infra "initial pidof probe failed"
   qr_log "launch: started $QR_ACTIVITY; waiting ${QR_LAUNCH_WAIT}s"
   : > "$early"
   if [ "$QR_LAUNCH_WAIT" -gt 30 ]; then
@@ -240,17 +283,16 @@ qr_launch_locked() {
         qr_log "WARN: Quest shell still tracks a loading/launch failure for $QR_PKG (30s check; see launch-shell-warnings.txt)"
       fi
     else
-      qr_log "WARN: launch: early adb logcat -d failed; keeping the final launch check"
-      : > "$early"
+      qr_launch_infra "early adb logcat -d failed"
     fi
     sleep "$((QR_LAUNCH_WAIT - 30))"
   else
     sleep "$QR_LAUNCH_WAIT"
   fi
-  qr_adb logcat -d > "$cat" 2>&1 || qr_die "launch: adb logcat -d failed"
+  qr_adb logcat -d > "$cat" 2>&1 || qr_launch_infra "adb logcat -d failed"
   qr_launch_shell_lines -h "$early" "$cat" > "$warnings"
   shell_count="$(wc -l < "$warnings" | tr -d ' ')"
-  pid="$(qr_adb_shell pidof "$QR_PKG")"
+  pid="$(qr_launch_pid)" || qr_launch_infra "final pidof probe failed"
   [ -n "$pid" ] && alive=yes
   fps="$(qr_launch_fps "$cat")"
   errs="$(grep -cE "$QR_RE_UNITY_ERR" "$cat")"
@@ -272,5 +314,6 @@ qr_launch_locked() {
   [ "$shell_count" = 0 ] || findings="$findings, WARN shell launch warnings $shell_count"
   [ "$crash" = 1 ] && findings="CRASH: $findings"
   qr_set launch "$findings"
-  [ "$crash" = 0 ]
+  [ "$crash" = 0 ] || return "$QR_LAUNCH_CRASH"
+  return "$QR_LAUNCH_OK"
 }

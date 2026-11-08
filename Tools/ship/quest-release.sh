@@ -15,6 +15,7 @@
 #   rollback <apk> [--force]
 #                     same checks with install -r -d; never uninstall or clear data
 #   launch            start Unity GameActivity, bounded logcat capture and crash check
+#                     exit 0 OK, 1 confirmed crash, 3 infrastructure/unverified
 #   cleanup           remove release worktrees only when safe
 #   summary           print the current run summary
 #   wait [minutes]    read-only, default 45; exit 0 success, 1 failure, 124 timeout
@@ -102,15 +103,19 @@ qr_all() {
   ( qr_verify "$apk" ) || { qr_set install "skipped: verify failed"; return 1; }
   # shellcheck disable=SC2086 # $force is empty or --force
   ( qr_install "$apk" $force ) || return 1
-  if ! ( qr_launch ); then
-    rc=1
-    if [ -n "$rollback" ]; then
-      qr_log "launch shows a crash: rolling back to $rollback"
-      ( qr_rollback "$rollback" --force ) || qr_log "rollback failed"
-    else
-      qr_log "launch shows a crash and no --rollback <apk> was given"
-    fi
-  fi
+  ( qr_launch ) || rc=$?
+  case "$rc" in
+    "$QR_LAUNCH_OK") ;;
+    "$QR_LAUNCH_CRASH")
+      if [ -n "$rollback" ]; then
+        qr_log "launch shows a crash: rolling back to $rollback"
+        # shellcheck disable=SC2086 # $force is empty or the user's --force
+        ( qr_rollback "$rollback" $force ) || qr_log "rollback failed"
+      else
+        qr_log "launch shows a crash and no --rollback <apk> was given"
+      fi ;;
+    *) qr_log "launch could not be verified (infrastructure): not rolling back" ;;
+  esac
   ( qr_cleanup ) || true
   return "$rc"
 }
@@ -143,7 +148,15 @@ qr_main() {
   # Publish invocation identity and install traps before discovery: an early failure must replace old success.
   case "$cmd" in
     all|install|rollback|launch)
-      qr_select_device || { qr_lock_result "$cmd" 1; return 1; } ;;
+      if ! qr_select_device; then
+        rc=1
+        if [ "$cmd" = launch ]; then
+          rc="$QR_LAUNCH_INFRA"
+          qr_set launch "INFRA: device selection failed (see release.log)"
+          qr_summary
+        fi
+        qr_lock_result "$cmd" "$rc"; return "$rc"
+      fi ;;
   esac
   # verify's apksigner and the keystore preflight need Java: find it before any prepare, gate or build work.
   case "$cmd" in all|build|verify) qr_java_setup || { qr_lock_result "$cmd" 1; return 1; } ;; esac
