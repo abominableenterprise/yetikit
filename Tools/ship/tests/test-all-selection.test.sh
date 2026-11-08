@@ -7,15 +7,26 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/Tools/ship/tests" "$tmp/bin"
 cp "$ci_dir/test-all.sh" "$tmp/Tools/ship/test-all.sh"
 export RUN_LOG="$tmp/runs" CHANGED_PATHS="$tmp/changed" UNTRACKED_PATHS="$tmp/untracked"
+export FAKE_REPO="$tmp"
+runner="$tmp/Tools/ship/test-all.sh"
 : > "$UNTRACKED_PATHS"
 cat > "$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = -C ] || exit 2
 shift 2
 case "$1" in
+  rev-parse)
+    [ "$2" = --show-toplevel ] || exit 2
+    [ -z "${FAKE_REV_PARSE_FAIL:-}" ] || exit 1
+    printf '%s\n' "$FAKE_REPO" ;;
   merge-base) echo fixture-base ;;
-  diff) cat "$CHANGED_PATHS" ;;
-  ls-files) cat "$UNTRACKED_PATHS" ;;
+  diff|ls-files)
+    command=$1
+    while [ "$1" != -- ]; do shift; done
+    shift
+    [ "$1" = "${EXPECTED_PREFIX:-Tools/ship}/" ] || exit 2
+    [ "$2" = .github/workflows/ship.yml ] || exit 2
+    if [ "$command" = diff ]; then cat "$CHANGED_PATHS"; else cat "$UNTRACKED_PATHS"; fi ;;
   *) exit 2 ;;
 esac
 EOF
@@ -26,7 +37,7 @@ check() {
   local expected=$1
   shift
   : > "$RUN_LOG"
-  TEST_JOBS=1 bash "$tmp/Tools/ship/test-all.sh" "$@" > "$tmp/out" 2>&1 || {
+  TEST_JOBS=1 bash "$runner" "$@" > "$tmp/out" 2>&1 || {
     cat "$tmp/out"; fail "runner failed: $*"
   }
   printf '%s' "$expected" > "$tmp/expected"
@@ -87,3 +98,49 @@ check "$slow" --all linux-unity
 check $'quick\n' --all --fast
 check '' --all --fast linux-unity
 echo 'ok   --all and filtered runs retain slow tests; --fast skips all slow tags'
+
+# A consumer can vendor the same bytes at a different depth and directory name.
+for prefix in Tools/yetikit Tools/vendor/yetikit; do
+  export EXPECTED_PREFIX="$prefix"
+  mkdir -p "$tmp/$prefix"
+  cp -R "$tmp/Tools/ship/"* "$tmp/$prefix/"
+  runner="$tmp/$prefix/test-all.sh"
+  printf '%s/helper.sh\n' "$prefix" > "$CHANGED_PATHS"
+  check $'quick\n' --changed
+  printf '%s/tests/legacy.test.sh\n' "$prefix" > "$CHANGED_PATHS"
+  check $'legacy\n' --changed
+  : > "$CHANGED_PATHS"
+  printf '%s/helper.sh\n' "$prefix" > "$UNTRACKED_PATHS"
+  check $'quick\n' --changed
+  : > "$UNTRACKED_PATHS"
+  check '' --changed
+  printf '.github/workflows/ship.yml\n' > "$CHANGED_PATHS"
+  check $'quick\n' --changed
+done
+unset EXPECTED_PREFIX
+echo 'ok   vendored runner selects tool and own-test changes at any depth'
+
+ln -s "$tmp" "$tmp-linked"
+# Keep the sibling link out of the temp tree to avoid recursive copies.
+trap 'rm -f "$tmp-linked"; rm -rf "$tmp"' EXIT
+runner="$tmp-linked/Tools/ship/test-all.sh"
+printf 'Tools/ship/helper.sh\n' > "$CHANGED_PATHS"
+check $'quick\n' --changed
+: > "$CHANGED_PATHS"
+check '' --changed
+echo 'ok   symlinked checkout paths map to the physical repository root'
+
+runner="$tmp/Tools/ship/test-all.sh"
+printf 'Tools/ship/helper.sh\n' > "$CHANGED_PATHS"
+export FAKE_REV_PARSE_FAIL=1
+check $'quick\n' --changed
+unset FAKE_REV_PARSE_FAIL
+export FAKE_REPO="$tmp/outside"
+if bash "$runner" --changed > "$tmp/out" 2>&1; then
+  fail 'unmappable tool prefix must fail instead of selecting nothing'
+fi
+grep -q 'ERROR: cannot determine tool directory relative to repository' "$tmp/out" || {
+  cat "$tmp/out"; fail 'missing prefix diagnostic'
+}
+check $'quick\n' --all --fast
+echo 'ok   root lookup falls back; unmappable prefix fails only for changed selection'

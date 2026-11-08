@@ -6,11 +6,11 @@
 # --fast omits all slow-tagged files.
 set -euo pipefail
 export LC_ALL=C
-ci_dir="$(cd "$(dirname "$0")" && pwd)"
+ci_dir="$(cd "$(dirname "$0")" && pwd -P)"
 shopt -s nullglob
 tests=("$ci_dir"/tests/*.test.sh)
 if ((${#tests[@]} == 0)); then
-  echo 'ERROR: no *.test.sh files in Tools/ship/tests/' >&2
+  echo "ERROR: no *.test.sh files in $ci_dir/tests/" >&2
   exit 1
 fi
 
@@ -69,25 +69,32 @@ else
 fi
 
 if ((changed)); then
-  repo="$(cd "$ci_dir/../.." && pwd)"
+  repo="$(git -C "$ci_dir" rev-parse --show-toplevel 2>/dev/null)" || repo="$(cd "$ci_dir/../.." && pwd -P)"
+  repo="$(cd "$repo" && pwd -P)" || {
+    echo 'ERROR: cannot determine tool directory relative to repository' >&2; exit 1;
+  }
+  case "$ci_dir" in
+    "${repo%/}/"*) tool_prefix="${ci_dir#"${repo%/}/"}" ;;
+    *) echo 'ERROR: cannot determine tool directory relative to repository' >&2; exit 1 ;;
+  esac
   merge_base="$(git -C "$repo" merge-base "$base" HEAD)" || {
     echo "ERROR: cannot find merge-base with $base" >&2; exit 1;
   }
-  changed_paths="$(git -C "$repo" diff --name-only "$merge_base" -- Tools/ship/ .github/workflows/ship.yml)" || exit 1
-  untracked="$(git -C "$repo" ls-files --others --exclude-standard -- Tools/ship/ .github/workflows/ship.yml)" || exit 1
+  changed_paths="$(git -C "$repo" diff --name-only "$merge_base" -- "$tool_prefix/" .github/workflows/ship.yml)" || exit 1
+  untracked="$(git -C "$repo" ls-files --others --exclude-standard -- "$tool_prefix/" .github/workflows/ship.yml)" || exit 1
   affected=()
   for test in ${selected[@]+"${selected[@]}"}; do
     while IFS= read -r path; do
       case "$path" in
-        Tools/ship/tests/*.test.sh)
-          if [ "$path" = "Tools/ship/tests/${test##*/}" ]; then affected+=("$test"); break; fi
+        "$tool_prefix"/tests/*.test.sh)
+          if [ "$path" = "$tool_prefix/tests/${test##*/}" ]; then affected+=("$test"); break; fi
           ;;
-        Tools/ship/*|.github/workflows/ship.yml)
+        "$tool_prefix"/*|.github/workflows/ship.yml)
           # Keep broad tooling/workflow coverage for quick tests. Slow fixtures
           # opt in only to named shell/Python scripts, including lib/ helpers.
           if ! is_slow "$test"; then affected+=("$test"); break; fi
           case "$path" in
-            Tools/ship/*.sh|Tools/ship/*.py)
+            "$tool_prefix"/*.sh|"$tool_prefix"/*.py)
               if slow_references_script "$test" "${path##*/}"; then affected+=("$test"); break; fi
               ;;
           esac
