@@ -17,6 +17,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - Test passes and known-flake retries now require result evidence instead of
   trusting a successful editor exit alone
   ([#34](https://github.com/abominableenterprise/yetikit/issues/34), Part 1).
+- Shared Unity memory and the project lockfile are kept when a running process can't be inspected (for example another user's editor), instead of being treated as absent.
 - Distinguish launch infrastructure failures from confirmed package crashes so
   failed device, adb, activity-start or logcat checks cannot downgrade a healthy
   installed build. Process probes preserve transport and remote exit status.

@@ -13,6 +13,8 @@ finish() {
 }
 trap finish EXIT
 ship_fixture "$tmp/project"
+ship_fixture_process_view "$tmp/process-view"
+export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''
 export UNITY_ROOT="$tmp/unity" SHM_DIR="$tmp/shm"
 mkdir -p "$UNITY_ROOT/Editor" "$SHM_DIR" "$PROJECT/Temp"
 cp /usr/bin/sleep "$UNITY_ROOT/Editor/Unity"
@@ -35,6 +37,7 @@ fixtures_absent() {
 
 # No inherited marker: this editor was opened outside the recorded run.
 env -u LINUX_UNITY_RUN "$UNITY_BIN" 300 & foreign=$!; pids+=("$foreign")
+export SHIP_FIXTURE_PIDS="${pids[*]}"
 ship_wait_until editor_ready "$foreign"
 for scenario in foreign alone; do
   # A synthetic recorded runner with a real executable child, no editor or licence required.
@@ -49,6 +52,7 @@ for scenario in foreign alone; do
   ' _ "$script" "$tmp/owned.pid" >"$tmp/runner.log" 2>&1 & runner=$!; pids+=("$runner")
   ship_wait_until test -s "$tmp/owned.pid"
   owned="$(cat "$tmp/owned.pid")"; pids+=("$owned")
+  export SHIP_FIXTURE_PIDS="${pids[*]}"
   ship_wait_until editor_ready "$owned"
   touch "$SHM_DIR/udsMem-fixture" "$SHM_DIR/sem.udsMem-fixture" "$PROJECT/Temp/UnityLockfile"
   rc=0; bash "$script" stop 2>"$tmp/$scenario.log" || rc=$?
