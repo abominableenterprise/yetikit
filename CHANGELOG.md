@@ -15,18 +15,25 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - Cleanup and `stop` keep shared Unity memory while an editor from another Unity installation is running.
 - `test-all.sh --changed` now selects tests when Ship is vendored under another directory, instead of passing with no tests.
 - The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
+- Test passes and known-flake retries now require result evidence instead of
+  trusting a successful editor exit alone
+  ([#34](https://github.com/abominableenterprise/yetikit/issues/34), Part 1).
 - Shared Unity memory and the project lockfile are kept when a running process can't be inspected (for example another user's editor), instead of being treated as absent.
 - Distinguish launch infrastructure failures from confirmed package crashes so
   failed device, adb, activity-start or logcat checks cannot downgrade a healthy
   installed build. Process probes preserve transport and remote exit status.
 
 ### Behaviour changes
+- A pass with no executed tests or no result XML now fails; `-quit`,
+  `-testResults` and `-logFile` are rejected as forwarded test arguments.
+  Only the implicit, unfiltered EditMode Gfx pass and PR Gfx pass may select
+  zero tests with valid XML; retries must always execute tests.
 - Launch infra errors are reported as `INFRA` and never trigger rollback;
   rollback in `all` no longer implies `--force`. Standalone `launch` returns
   0 for success, 1 for a confirmed crash, and 3 for infrastructure errors.
 
 ### Adapter changes
-- None.
+- Remove any forwarded `-quit`/`-testResults`/`-logFile` from test invocations.
 
 ## [0.1.2] - 2026-11-08
 

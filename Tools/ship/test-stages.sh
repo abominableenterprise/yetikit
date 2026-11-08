@@ -113,6 +113,7 @@ test_editor_end() {
 cmd_test() {
   parse_keep "$@"
   set -- ${RUN_ARGS[@]+"${RUN_ARGS[@]}"}
+  validate_test_args "$@"
   local before rc=0 nrc=0 f
   mkdir -p "$OUT_DIR"
   if [ -z "${TEST_STAGES_LOG:-}" ]; then test_stages_begin; fi

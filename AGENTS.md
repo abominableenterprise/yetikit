@@ -50,6 +50,6 @@ shared packages, documentation and a minimal Unity test Host, not game code.
 
 hub-merge: on
 hub-merge-requires: checknorris
-hub-secret-limit: login.unity.com=2
-hub-secret-limit: Unity=2
+hub-secret-limit: Unity Seat A=2
+hub-secret-limit: Unity Seat B=2
 hub-secret-lease: per-run
