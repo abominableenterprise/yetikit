@@ -272,6 +272,10 @@ qr_launch_locked() {
   qr_adb logcat -c || qr_launch_infra "adb logcat -c failed"
   ( qr_start_activity ) > "$QR_RUN_DIR/launch-am.log" 2>&1 \
     || qr_launch_infra "am start failed (launch-am.log)"
+  # am can print a start/resolution error yet return 0 through adb shell.
+  if grep -Eq '^[[:space:]]*(Error([[:space:]:]|$)|Exception([[:space:]:]|$)|[[:alnum:]_.$]+Exception:)' "$QR_RUN_DIR/launch-am.log"; then
+    qr_launch_infra "am start reported an error (launch-am.log)"
+  fi
   start_pid="$(qr_launch_pid)" || qr_launch_infra "initial pidof probe failed"
   qr_log "launch: started $QR_ACTIVITY; waiting ${QR_LAUNCH_WAIT}s"
   : > "$early"

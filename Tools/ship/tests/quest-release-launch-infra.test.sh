@@ -52,7 +52,9 @@ adb() {
             [ "$fault" != maker-transport ] || { echo Oculus; return 1; }
           fi
           echo Oculus ;;
-        'am start '*) [ "$fault" != start ] || return 1 ;;
+        'am start '*)
+          [ "$fault" != start ] || return 1
+          [ "$fault" != start-output ] || echo 'Error: Activity not started, unable to resolve Intent' ;;
         'pidof '*)
           # Exercise the actual remote command (including its status trailer),
           # or return an adb transport failure, even with misleading stdout.
@@ -60,7 +62,7 @@ adb() {
           if [ "$fault" = pidof-final ] && [ -f "$tmp/probed" ]; then return 1; fi
           if [ "$fault" = pidof-malformed ]; then echo invalid; return 0; fi
           : > "$tmp/probed"
-          ( pidof() { [ "$fault" != gone ] || return 1; echo 4242; }; eval "$*" ) ;;
+          ( pidof() { case "$fault" in gone|start-output) return 1 ;; esac; echo 4242; }; eval "$*" ) ;;
         'dumpsys activity activities'|'dumpsys window windows'|'dumpsys power'|'dumpsys vrpowermanager')
           if [ "$busy" = 1 ] && [ -f "$tmp/installed" ]; then
             fixture=game-mounted
@@ -85,7 +87,7 @@ run() {
 no_rollback() { [ "$(wc -l < "$tmp/installed")" = 1 ] && ! grep -q 'install -r -d' "$tmp/adb.log"; }
 infra() { [ "$rc" = 3 ] && grep -q '^launch:      INFRA:' "$summary"; }
 fault=healthy busy=0
-for fault in logcat--d logcat--c start pidof-transport pidof-final pidof-malformed disconnect maker maker-transport; do
+for fault in logcat--d logcat--c start start-output pidof-transport pidof-final pidof-malformed disconnect maker maker-transport; do
   run all --rollback "$tmp/old.apk"
   check "all $fault is INFRA, never rollback" 'infra && no_rollback && grep -q "launch could not be verified (infrastructure): not rolling back" "$tmp/err"'
   wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
