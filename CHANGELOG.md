@@ -9,7 +9,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
-- None.
+- Optional test and code roots for Ship's PR Gfx selection, area tests and
+  RenderTool discovery.
 
 ### Fixed
 - Editor cleanup only signals editors and helpers carrying the current runner's
@@ -25,7 +26,11 @@ notes. Chunk and tuning schema changes count as breaking changes too.
   failed inspection refuses replacement without removing shared resources.
 
 ### Adapter changes
-- None.
+- None for cleanup ownership changes.
+- Optional; set `tests.root`, `tests.editModeRoot`, `tests.scriptsRoot` and
+  `tests.editorRoot` if your tests aren't under `Assets/Tests` or code uses a
+  nonstandard layout. Defaults preserve existing selection; `editModeRoot`
+  defaults to `<tests.root>/EditMode`.
 
 ## [0.1.0] - 2026-11-05
 

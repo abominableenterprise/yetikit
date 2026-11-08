@@ -178,6 +178,10 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `noise.fontAssetPaths` | Optional list of exact repository-relative static font asset paths (default empty). Revert any newly introduced serialization change at these paths, never deletions or `.meta` files; dirty-before/staged and `--keep` protections still apply. Only opt in fonts whose editor changes are disposable. |
 | `noise.propsDir` | Prop sources directory; default `Assets/Art/Props`. |
 | `noise.repackRegex` | Optional eligible prop mesh/prefab path ERE (capture group 1 labels the prop); disabled if omitted. |
+| `tests.root` | Optional relative test discovery root; default `Assets/Tests`. Used for Gfx eligibility, area tags and RenderTool discovery. |
+| `tests.editModeRoot` | Optional relative EditMode root for changed tests and scripts-area lookup; default `<tests.root>/EditMode`. Keep it within `tests.root` so Gfx tags can be discovered. |
+| `tests.scriptsRoot` | Optional relative runtime code root; default `Assets/Scripts`. Changes under `<scriptsRoot>/<Area>/` search that area's EditMode fixtures. |
+| `tests.editorRoot` | Optional relative editor code root; default `Assets/Editor`. Builder changes search all fixtures under `tests.root` for references. |
 | `tests.builderFixtures` | Optional object mapping exact builder paths to arrays of fully qualified fixture names. |
 
 Configuration paths are normalized once on load: `./`, repeated separators,
@@ -186,9 +190,24 @@ Standalone cleanup includes `scene.keepPaths` as well as CLI `--keep` paths.
 Paths used as outputs cannot be absolute or contain `..` components. Strings
 cannot be empty or contain control characters. Regex values are trusted project
 policy: keep them anchored and narrow, especially the repack eligibility rule.
-The conventional `Assets/Scripts`, `Assets/Editor`, and `Assets/Tests/EditMode`
-layout and the `Gfx`, `MacOnly`, `RenderTool`, and `Area:<name>` NUnit categories
-are shared runner conventions, not generated game content.
+Test/code roots must also be relative strings without `..` components. Omit
+all four keys to preserve the conventional layout. For a nested consumer layout:
+
+```json
+{
+  "tests": {
+    "root": "Assets/_Project/Tests",
+    "editModeRoot": "Assets/_Project/Tests/EditMode",
+    "scriptsRoot": "Assets/_Project/Scripts",
+    "editorRoot": "Assets/_Project/Editor",
+    "builderFixtures": {}
+  }
+}
+```
+
+The `Gfx`, `MacOnly`, `RenderTool`, and `Area:<name>` NUnit categories remain
+shared runner conventions, not generated game content. These roots affect test
+selection only; scene cleanup's `noise.codeRegex` policy is unchanged.
 
 ## Test without Unity
 

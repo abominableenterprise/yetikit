@@ -56,24 +56,27 @@ pr_changed_paths() {
   git ls-files --others --exclude-standard
 }
 
-# The EditMode test folder of Assets/Scripts/<Area>: Assets/Tests/EditMode/<Area> when it exists, otherwise the folder
+# The configured EditMode test folder for a scripts area, otherwise the folder
 # holding *.<Area>.Tests.asmdef (only its own files, not tests in subdirectories).
 area_test_files() {
-  local area="$1" asm
-  if [ -d "Assets/Tests/EditMode/$area" ]; then find "Assets/Tests/EditMode/$area" -name '*.cs'; return; fi
-  asm="$(find Assets/Tests/EditMode -name "*.$area.Tests.asmdef" 2>/dev/null | head -n1)"
+  local area="$1" asm edit_root
+  edit_root="$(ship_config_get '.tests.editModeRoot // ((.tests.root // "Assets/Tests") + "/EditMode")')" || return
+  if [ -d "$edit_root/$area" ]; then find "$edit_root/$area" -name '*.cs'; return; fi
+  asm="$(find "$edit_root" -name "*.$area.Tests.asmdef" 2>/dev/null | head -n1)"
   [ -n "$asm" ] && find "$(dirname "$asm")" -maxdepth 1 -name '*.cs'
   return 0
 }
 
-# Test files a change set (stdin, one path per line) touches: changed files under Assets/Tests/EditMode, and every test
-# file of a changed Assets/Scripts/<Area>.
+# Test files a change set (stdin, one path per line) touches: changed EditMode files,
+# and every test file of a changed scripts area, using the configured roots.
 pr_test_files() {
-  local p areas=""
+  local p areas="" edit_root scripts_root
+  edit_root="$(ship_config_get '.tests.editModeRoot // ((.tests.root // "Assets/Tests") + "/EditMode")')" || return
+  scripts_root="$(ship_config_get '.tests.scriptsRoot // "Assets/Scripts"')" || return
   while IFS= read -r p; do
     case "$p" in
-      Assets/Tests/EditMode/*.cs) echo "$p" ;;
-      Assets/Scripts/*/*) areas="$areas ${p#Assets/Scripts/}" ;;
+      "$edit_root/"*.cs) echo "$p" ;;
+      "$scripts_root/"*/*) areas="$areas ${p#"$scripts_root/"}" ;;
     esac
   done
   for p in $(printf '%s\n' $areas | sed 's#/.*##' | sort -u); do area_test_files "$p"; done
@@ -94,26 +97,31 @@ pr_builder_tests() {
 # nor scene assets expand to whole areas. Resolve Gfx tags globally so partial classes retain their eligibility.
 pr_gfx_fixtures() {
   local tagged rows selected p name area files f fixture reason count max="${TEST_PR_GFX_MAX:-12}"
-  local ranked stamp dirty newest latest_dirty source rest
+  local ranked stamp dirty newest latest_dirty source rest tests_root edit_root scripts_root editor_root
+  tests_root="$(ship_config_get '.tests.root // "Assets/Tests"')" || return
+  edit_root="$(ship_config_get '.tests.editModeRoot // ((.tests.root // "Assets/Tests") + "/EditMode")')" || return
+  scripts_root="$(ship_config_get '.tests.scriptsRoot // "Assets/Scripts"')" || return
+  editor_root="$(ship_config_get '.tests.editorRoot // "Assets/Editor"')" || return
   case "$max" in ''|*[!0-9]*) echo "test pr: invalid TEST_PR_GFX_MAX=$max; using 12" >&2; max=12 ;; esac
   # Normalise decimal values (including 0 and leading zeroes) without shell octal interpretation.
   max="$(awk -v n="$max" 'BEGIN { printf "%.0f", n }')"
-  tagged="$(find Assets/Tests -name '*.cs' 2>/dev/null | sort | cs_classes 1)"
+  tagged="$(find "$tests_root" -name '*.cs' 2>/dev/null | sort | cs_classes 1)"
   [ -n "$tagged" ] || return 0
   rows="$( { while IFS= read -r p; do
     files=""; reason=""
     case "$p" in
-      Assets/Tests/EditMode/*.cs) files="$p"; reason="changed test $p" ;;
-      Assets/Scripts/*/*.cs)
-        area="${p#Assets/Scripts/}"; area="${area%%/*}"
+      "$edit_root/"*.cs) files="$p"; reason="changed test $p" ;;
+      # Editor folders can be nested under scripts; builders search all tests.
+      "$editor_root/"*.cs)
+        name="${p##*/}"; name="${name%.cs}"
+        files="$(grep -rlw --include='*.cs' -- "$name" "$tests_root" 2>/dev/null || true)"
+        reason="references builder $name from $p" ;;
+      "$scripts_root/"*/*.cs)
+        area="${p#"$scripts_root/"}"; area="${area%%/*}"
         name="${p##*/}"; name="${name%.cs}"
         name="$( { printf '%s\n' "$name"; cs_declared_types "$p"; } | sort -u | paste -sd '|' -)"
         files="$(while IFS= read -r f; do grep -Elw -- "$name" "$f" || true; done < <(area_test_files "$area"))"
         reason="references $name from $p" ;;
-      Assets/Editor/*.cs)
-        name="${p##*/}"; name="${name%.cs}"
-        files="$(grep -rlw --include='*.cs' -- "$name" Assets/Tests 2>/dev/null || true)"
-        reason="references builder $name from $p" ;;
     esac
     [ -n "$files" ] || continue
     while IFS= read -r f; do
@@ -130,7 +138,7 @@ pr_gfx_fixtures() {
     while IFS= read -r f; do
       cs_classes 0 <<< "$f" | grep -Fxq -- "$fixture" || continue
       printf '%s\t%s\t%s\n' "$fixture" "$f" 'configured builder dependency'
-    done < <(find Assets/Tests -name '*.cs' 2>/dev/null | sort)
+    done < <(find "$tests_root" -name '*.cs' 2>/dev/null | sort)
   done < <(pr_changed_paths "$1" | pr_builder_tests)
   } | sort -u)"
   [ -n "$rows" ] || return 0
@@ -207,10 +215,11 @@ pr_areas() {
 }
 
 # The test classes (Ns.Class, one per line) of the areas on stdin: classes tagged [Category("Area:<Area>")] (on the
-# class or one of its tests) anywhere under Assets/Tests.
+# class or one of its tests) anywhere under the configured test root.
 pr_area_tests() {
-  local area files
-  files="$(find Assets/Tests -name '*.cs' 2>/dev/null | sort)"
+  local area files tests_root
+  tests_root="$(ship_config_get '.tests.root // "Assets/Tests"')" || return
+  files="$(find "$tests_root" -name '*.cs' 2>/dev/null | sort)"
   [ -n "$files" ] || return 0
   while IFS= read -r area; do
     [ -n "$area" ] && cs_classes "Area:$area" <<< "$files"
