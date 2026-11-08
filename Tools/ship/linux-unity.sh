@@ -185,7 +185,8 @@ lock_unity() {
 # Read-only installation scan. Replacement runs this as root in strict mode: an unreadable live
 # userspace process is not evidence of absence. Kernel threads, zombies and exited processes have no exe.
 unity_pids() {
-  local p exe status
+  local p exe status stat flags
+  local -r PF_KTHREAD=2097152 # Linux task flag (0x00200000), available before Kthread: in status.
   for p in /proc/[0-9]*; do
     if exe="$(readlink "$p/exe" 2>/dev/null)"; then
       case "$exe" in "$UNITY_ROOT"/*) printf ' %s' "${p#/proc/}" ;; esac
@@ -196,6 +197,11 @@ unity_pids() {
         *$'\nKthread:\t1'*) continue ;;
         *$'\nState:\tZ '*|*$'\nState:\tX '*) continue ;;
       esac
+      # Older kernels omit Kthread: from status; stat field 9 still exposes PF_KTHREAD.
+      if stat="$(cat "$p/stat" 2>/dev/null)"; then
+        read -r _ _ _ _ _ _ flags _ <<< "${stat##*) }"
+        if [[ "$flags" =~ ^[0-9]+$ ]] && (( (flags & PF_KTHREAD) != 0 )); then continue; fi
+      fi
       [ ! -d "$p" ] || return 1
     fi
   done
