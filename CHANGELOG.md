@@ -10,6 +10,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ### Fixed
 - `test-all.sh --changed` now selects tests when Ship is vendored under another directory, instead of passing with no tests.
+- The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
 
 ## [0.1.2] - 2026-11-08
 
