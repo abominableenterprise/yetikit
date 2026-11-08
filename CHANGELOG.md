@@ -13,6 +13,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ### Fixed
 - Android setup re-checks for running editors after cleanup and refuses replacement if an editor started during the cleanup delay or process inspection is incomplete.
+- Cleanup and `stop` keep shared Unity memory while an editor from another Unity installation is running.
 - `test-all.sh --changed` now selects tests when Ship is vendored under another directory, instead of passing with no tests.
 - The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
 - Test passes and known-flake retries now require result evidence instead of
