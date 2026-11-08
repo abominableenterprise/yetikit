@@ -30,6 +30,9 @@ cat > "$PROJECT/yetikit.json" <<'JSON'
 }
 JSON
 source "$tool_dir/linux-unity.sh"
+. "$tool_dir/tests/lib/fixture.sh"
+ship_fixture_process_view "$tmp/process-view"
+export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''
 failures=0
 check() {
   if "$@"; then printf 'PASS: %s\n' "$1"; else printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); fi
@@ -100,6 +103,7 @@ serialization() {
     cp /usr/bin/sleep "$UNITY_ROOT/Editor/Unity"
     "$UNITY_ROOT/Editor/Unity" 60 &
     editor=$!
+    export SHIP_FIXTURE_PIDS="$editor"
     trap 'kill "$editor" 2>/dev/null || true; wait "$editor" 2>/dev/null || true' EXIT
     (
       eval "exec ${UNITY_CLEANUP_FD}>&-"

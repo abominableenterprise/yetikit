@@ -15,6 +15,8 @@ proj="$tmp/proj"; root="$tmp/unity"; lcdir="$root/Editor/Data/Resources/Licensin
 mkdir -p "$proj/Library" "$proj/Temp" "$proj/Assets/Tests/Park" "$lcdir" "$tmp/bin" "$tmp/shm"
 . "$(dirname "$0")/lib/fixture.sh"
 ship_fixture "$proj"
+ship_fixture_process_view "$tmp/process-view"
+export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''
 export PIDFILE_FALLBACK="$tmp/fallback.pid"
 good_ulf() { printf '<root><License id="Terms"><StopDate Value="%s" /></License><Signature>x</Signature></root>\n' "${1:-}"; }
 
@@ -98,6 +100,7 @@ good_ulf > "$ULF"
 # Open preserves an unmarked helper and its files; a later open with no foreign helper wipes stale files.
 cp /bin/sleep "$root/Editor/Data/Unity.DataStore"
 env -u LINUX_UNITY_RUN "$root/Editor/Data/Unity.DataStore" 300 & stale=$!; echo "$stale" > "$tmp/stale.pid"
+export SHIP_FIXTURE_PIDS="$stale"
 helper_ready() { [ "$(readlink "/proc/$stale/exe" 2>/dev/null)" = "$root/Editor/Data/Unity.DataStore" ]; }
 ship_wait_until helper_ready
 : > "$tmp/shm/udsMem1234"; : > "$tmp/shm/sem.udsMem1234"; : > "$proj/Temp/UnityLockfile"; : > "$tmp/shm/other"
