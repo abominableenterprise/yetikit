@@ -9,6 +9,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Fixed
+- The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
 - Test passes and known-flake retries now require result evidence instead of
   trusting a successful editor exit alone
   ([#34](https://github.com/abominableenterprise/yetikit/issues/34), Part 1).

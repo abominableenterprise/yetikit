@@ -7,6 +7,7 @@
 #                       It writes a line to -logFile. FAKE_NO_XML=1 writes no XML and exits 1 (a crash). FAKE_SLEEP=n sleeps n seconds first.
 #                       FAKE_XML_MODE=no-file|empty|garbage|zero|skipped simulates exit-0 evidence failures.
 #                       FAKE_GFX_XML_MODE and FAKE_RETRY_XML_MODE override that mode for Gfx and retry runs.
+#                       FAKE_RETRY_PASSES overrides retry passed fullnames; FAKE_RETRY_SKIPS adds skipped cases.
 #   bin/xvfb-run        drops its options and runs the command (FAKE_XVFB=1 also starts a fake Xvfb child)
 #   bin/nohup           no-op: never launches a real detached idle-return watcher
 # and exports PATH, UNITY_ROOT, ULF, OUT_DIR, SHM_DIR, TASK_CACHE, NOISE_BASE and fake credentials.
@@ -53,16 +54,22 @@ case "$mode" in
 esac
 fails="${FAKE_FAILS:-}"; [[ "$res" == *-retry.xml ]] && fails="${FAKE_RETRY_FAILS:-}"
 case_xml() { local n="${1//&/&amp;}"; n="${n//\"/&quot;}"; printf '<test-case id="1" name="%s" fullname="%s" result="%s" />\n' "${n##*.}" "$n" "$2"; }
-body="" passed=0 failed=0 IFS=';'
-for n in ${filter:-ExampleGame.Fake.Tests.Ok}; do body="$body$(case_xml "$n" Passed)"$'\n'; passed=$((passed + 1)); done
+pass_names="${filter:-ExampleGame.Fake.Tests.Ok}"; skips=""
+if [[ "$res" == *-retry.xml ]]; then
+  pass_names="${FAKE_RETRY_PASSES-${FAKE_FAILS:-$pass_names}}"
+  skips="${FAKE_RETRY_SKIPS:-}"
+fi
+body="" passed=0 failed=0 skipped=0 IFS=';'
+for n in $pass_names; do body="$body$(case_xml "$n" Passed)"$'\n'; passed=$((passed + 1)); done
+for n in $skips; do body="$body$(case_xml "$n" Skipped)"$'\n'; skipped=$((skipped + 1)); done
 for n in $fails; do body="$body$(case_xml "$n" Failed)"$'\n'; failed=$((failed + 1)); done
 for n in ${FAKE_SUITE_FAILS:-}; do
   body="$body<test-suite type=\"TestFixture\" fullname=\"$n\" result=\"Failed\" site=\"TearDown\"></test-suite>"$'\n'; failed=$((failed + 1))
 done
 unset IFS
 mkdir -p "$(dirname "$res")"
-printf '<?xml version="1.0" encoding="utf-8"?>\n<test-run id="2" total="%d" passed="%d" failed="%d" skipped="0">\n%s</test-run>\n' \
-  $((passed + failed)) "$passed" "$failed" "$body" > "$res"
+printf '<?xml version="1.0" encoding="utf-8"?>\n<test-run id="2" total="%d" passed="%d" failed="%d" skipped="%d">\n%s</test-run>\n' \
+  $((passed + failed + skipped)) "$passed" "$failed" "$skipped" "$body" > "$res"
 [ "$failed" = 0 ] || exit 2
 exit "${FAKE_UNITY_RC:-0}"
 EOF
@@ -84,7 +91,7 @@ export FAKE_TMP="$tmp" PATH="$tmp/bin:$PATH" PROJECT="$proj" UNITY_ROOT="$tmp/un
   PIDFILE_FALLBACK="$tmp/fallback.pid" SHM_DIR="$tmp/shm" TASK_CACHE=no-task-cache NOISE_BASE=HEAD UNITY_USERNAME=u UNITY_PASSWORD=p
 # Never reach the real hub (a task VM exports these): the seat lease is tested with a fake curl.
 unset THEROBOTS_HUB_URL THEROBOTS_TASK_ID THEROBOTS_TASK_TOKEN
-unset FAKE_FAILS FAKE_SUITE_FAILS FAKE_RETRY_FAILS FAKE_MUTATE FAKE_NO_XML FAKE_XML_MODE FAKE_GFX_XML_MODE FAKE_RETRY_XML_MODE FAKE_SLEEP FAKE_EDITOR_GATE FAKE_XVFB FAKE_UNITY_RC EDITMODE_GFX KNOWN_FLAKES PIDFILE APK_SWAPFILE
+unset FAKE_FAILS FAKE_SUITE_FAILS FAKE_RETRY_FAILS FAKE_RETRY_PASSES FAKE_RETRY_SKIPS FAKE_MUTATE FAKE_NO_XML FAKE_XML_MODE FAKE_GFX_XML_MODE FAKE_RETRY_XML_MODE FAKE_SLEEP FAKE_EDITOR_GATE FAKE_XVFB FAKE_UNITY_RC EDITMODE_GFX KNOWN_FLAKES PIDFILE APK_SWAPFILE
 
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # A temp git repo in $proj, everything committed on main (origin/main points at it).

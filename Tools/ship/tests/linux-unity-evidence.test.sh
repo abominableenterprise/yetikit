@@ -65,6 +65,12 @@ check "PR Gfx may select zero tests with the same explanation" \
 FAKE_XML_MODE=zero EDITMODE_GFX=0 run pr
 check "PR pure pass may not select zero tests" '[ "$rc" != 0 ]'
 
+for platform in editmode pr; do
+  FAKE_FAILS=X.Tests.Broken FAKE_GFX_XML_MODE=no-file run "$platform"
+  check "$platform: a later evidence-only failure preserves editor exit 2" \
+    '[ "$rc" = 2 ] && [ "$(wc -l < "$tmp/runs")" = 2 ] && grep -q "editmode-gfx:.*missing.*XML" "$tmp/err"'
+done
+
 # Parser boundaries: only a well-formed test-run root with all four counts is evidence.
 . "$(dirname "$script")/test-evidence.sh"
 log() { printf '%s\n' "$*" >> "$tmp/parser.log"; }

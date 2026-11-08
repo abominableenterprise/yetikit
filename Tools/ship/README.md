@@ -98,14 +98,17 @@ The only zero-total exception is the implicit Gfx pass of plain `test editmode`
 projects may have no selected Gfx tests. These log `no tests selected (Gfx
 categories); treated as empty`. This never excuses missing/invalid XML, all
 skipped tests, or an empty retry. Pure, PlayMode and explicitly selected passes
-must execute tests. Evidence validation uses Python 3's standard library.
+must execute tests. A later evidence-only failure preserves an earlier editor's
+nonzero exit status. Evidence validation uses Python 3's standard library.
 
 For an explicit category, EditMode runs a single graphics-enabled pass; Gfx
 gets its own timeout. A RenderTool class filter runs alone with `RenderTool`.
 Known flakes are one fully qualified test or fixture per line, with `#` comments.
 Only a pass consisting entirely of known failures reruns once. Both result XMLs
 are retained and a successful retry prints `flaky-passed`, not an unqualified
-first-pass success. Missing results/crashes are never flakes.
+first-pass success. Every original failed fullname, including each parameterized
+case, must explicitly pass on retry; skipped or missing cases do not clear the
+failure. Missing results/crashes are never flakes.
 
 Every editor command (`open`, `test`, `apk`, `scene`, `lab`) cleans newly
 introduced noise even after editor failure. Run cleanup covers material keyword,
@@ -170,7 +173,7 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `build.releaseApkPath` | Relative release output path; defaults to `build.apkPath`. |
 | `build.profile` | Optional relative committed build-profile asset path. Uses Unity CLI `build --profile` instead of execute methods, supporting projects without a custom build API. |
 | `build.cli` | Optional executable for profile builds; default `unity`. |
-| `knownFlakes` | Optional relative flakes-list path; omitted or missing file means no flakes. |
+| `knownFlakes` | Optional relative flakes-list path (Quest also accepts an absolute path); omitted or missing file means no flakes. |
 | `labMethod` | Optional fully qualified execute method for `lab`. |
 | `setup.craneArchive` | Optional download location for a crane archive; unnecessary with preinstalled crane. |
 | `scene` | Optional object. Omit entirely for projects without a generated scene. |
@@ -351,6 +354,9 @@ listed in `knownFlakes`, or exactly one failure whether listed or not, rerun
 once with the same categories and exact selected filter. Retry coverage and
 result counts must prove the selected tests actually passed. Missing results,
 crashes and empty runs fail closed. The summary labels a passing retry.
+The flakes list is read from the test worktree first, falling back to the main
+checkout if absent. Absolute config paths and absolute `QUEST_KNOWN_FLAKES`
+overrides are used as-is.
 `build` uses `build.devMethod` and `build.apkPath`; a log-growth stall kills only
 that editor, retries once, then fails. The retained APK has commit provenance.
 Notes are supplied through the configured variable names; interpreting those

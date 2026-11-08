@@ -11,6 +11,25 @@ validate_test_args() {
   done
 }
 
+# Every original failure must have explicit passing evidence, including parameterized cases.
+# $1: validated retry XML, $2: newline-separated original failed fullnames.
+retry_passed_all() {
+  python3 - "$1" "$2" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError, ValueError):
+    sys.exit(1)
+passed = {
+    node.get("fullname") for node in root.iter()
+    if node.tag in ("test-case", "test-suite") and node.get("result") == "Passed"
+}
+sys.exit(0 if set(sys.argv[2].splitlines()) <= passed else 1)
+PY
+}
+
 # $1: pass label, $2: XML, $3: allow a zero-total optional Gfx selection (never a retry).
 # Parse XML rather than searching for a tag in garbage, comments or a nested element.
 # Python's standard library is also used by the Android tooling; no third-party parser.
