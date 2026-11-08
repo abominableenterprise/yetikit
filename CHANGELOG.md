@@ -18,7 +18,9 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ### Behaviour changes
 - Foreign editors are no longer killed by runner cleanup. Shared-memory and
-  project lockfile removal is skipped with a warning while any editor remains.
+  project lockfile removal is skipped with a warning while an editor under the
+  configured installation remains. Android setup refuses to replace that
+  installation until its remaining editors and helpers exit.
 
 ### Adapter changes
 - None.

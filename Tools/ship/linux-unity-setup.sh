@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Editor/image installation and setup command. Sourced by linux-unity.sh after its configuration and helpers.
-# Uses the entry point's paths, as_root, log, die, need_creds, chain_exit_trap and cleanup_unity.
+# Uses the entry point's paths, as_root, log, die, need_creds, chain_exit_trap, cleanup_unity and unity_pids.
 
 install_crane() {
   if command -v crane >/dev/null 2>&1 || [ -x "$BIN_DIR/crane" ]; then return; fi
@@ -104,6 +104,8 @@ replace_base_editor() {
   as_root test -e "$UNITY_ROOT/$DONE_MARK" || return 0
   log "replacing the editor at $UNITY_ROOT (no Android module) with $UNITY_IMAGE"
   cleanup_unity
+  local remaining; remaining="$(unity_pids)"
+  [ -z "$remaining" ] || die "cannot replace $UNITY_ROOT while Unity processes remain (PIDs:$remaining); close them and re-run setup"
   as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 }
 

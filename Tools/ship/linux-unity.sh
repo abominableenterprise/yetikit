@@ -181,6 +181,15 @@ lock_unity() {
   chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
 }
 
+# Read-only installation scan shared by cleanup and destructive installation replacement.
+unity_pids() {
+  local p
+  for p in /proc/[0-9]*; do
+    case "$(readlink "$p/exe" 2>/dev/null)" in "$UNITY_ROOT"/*) printf ' %s' "${p#/proc/}" ;; esac
+  done
+  return 0
+}
+
 # Kill only this run's editor helpers. A stale Unity.DataStore shared-memory segment makes the next run fail
 # with "Error loading the file 'VirtualArtifacts/...'", but a foreign editor may still own those files.
 cleanup_unity() {
@@ -195,9 +204,7 @@ cleanup_unity() {
   fi
   sleep 2
   # Read-only scan: never signal an unmarked editor, another run's editor, or an unreadable owner.
-  for p in /proc/[0-9]*; do
-    case "$(readlink "$p/exe" 2>/dev/null)" in "$UNITY_ROOT"/*) remaining+=" ${p#/proc/}" ;; esac
-  done
+  remaining="$(unity_pids)"
   if [ -n "$remaining" ]; then
     log "warning: Unity processes remain (PIDs:$remaining); skipping shared-memory and UnityLockfile cleanup"
     return 0
