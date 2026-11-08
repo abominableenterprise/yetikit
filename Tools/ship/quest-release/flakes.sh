@@ -1,11 +1,18 @@
 # shellcheck shell=bash
-# quest-release `gate`: the one retry. When every failure of the gate is in Tools/ship/known-flakes.txt, or exactly one test
+# quest-release `gate`: the one retry. When every failure is in the configured list (test worktree first, main checkout
+# fallback; absolute paths are used as-is), or exactly one test
 # failed (listed or not), those tests rerun once (-testFilter, same categories; gate-retry.xml / gate-retry-unity.log)
 # and a green rerun passes the gate. The list format and matching are linux-unity.sh's (known_flakes / is_known_flake / failed_tests in
 # Tools/ship/test-passes.sh). Sourced by Tools/ship/quest-release.sh; bash 3.2 compatible.
 
-# Config resolves an optional list to an absolute path; empty means no listed flakes.
-qr_known_flakes_file() { printf '%s\n' "${QR_KNOWN_FLAKES:-}"; }
+# Prefer the list committed with the code under test; missing lists mean no listed flakes.
+qr_known_flakes_file() {
+  if [ -n "${QR_KNOWN_FLAKES_REL:-}" ] && [ -f "$1/$QR_KNOWN_FLAKES_REL" ]; then
+    printf '%s\n' "$1/$QR_KNOWN_FLAKES_REL"
+  elif [ -n "${QR_KNOWN_FLAKES:-}" ] && [ -f "$QR_KNOWN_FLAKES" ]; then
+    printf '%s\n' "$QR_KNOWN_FLAKES"
+  fi
+}
 
 # Retry XML ($1), selected filters ($2), original XML ($3). Classify fixtures using the ORIGINAL NUnit suite
 # metadata, not a dotted-name prefix. Methods require every originally failed case plus all returned matches Passed. A fixture

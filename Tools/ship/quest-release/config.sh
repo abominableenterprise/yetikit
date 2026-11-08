@@ -15,7 +15,7 @@ qr_config() {
   command -v jq >/dev/null 2>&1 || { qr_log 'error: jq is required'; return 1; }
   [ -f "$QR_CONFIG_FILE" ] || { qr_log "error: missing config $QR_CONFIG_FILE"; return 1; }
   local error root key value
-  error="$(jq -sr -f "$QR_DIR/lib/config.jq" "$QR_CONFIG_FILE")" || return 1
+  error="$(jq -sr --argjson questAbsoluteKnownFlakes true -f "$QR_DIR/lib/config.jq" "$QR_CONFIG_FILE")" || return 1
   [ -z "$error" ] || { qr_log "error: $error"; return 1; }
   QR_CONFIG_JSON="$(jq -f "$QR_DIR/lib/config-paths.jq" "$QR_CONFIG_FILE")" || return 1
   [ "$(qr_config_get 'has("quest")')" = true ] || { qr_log 'error: missing quest config block'; return 1; }
@@ -48,7 +48,11 @@ qr_config() {
   QR_GATE_TIMEOUT="${QR_GATE_TIMEOUT:-${QUEST_GATE_TIMEOUT:-1800}}"
   QR_BUILD_TIMEOUT="${QR_BUILD_TIMEOUT:-${QUEST_BUILD_TIMEOUT:-1800}}"
   QR_KNOWN_FLAKES="${QUEST_KNOWN_FLAKES:-$(qr_config_get '.knownFlakes // empty')}"
-  case "$QR_KNOWN_FLAKES" in ''|/*) ;; *) QR_KNOWN_FLAKES="$QR_REPO/$QR_KNOWN_FLAKES" ;; esac
+  QR_KNOWN_FLAKES_REL=''
+  case "$QR_KNOWN_FLAKES" in
+    ''|/*) ;;
+    *) QR_KNOWN_FLAKES_REL="$QR_KNOWN_FLAKES"; QR_KNOWN_FLAKES="$QR_REPO/$QR_KNOWN_FLAKES" ;;
+  esac
   UNITY_HUB_EDITORS="${UNITY_HUB_EDITORS:-/Applications/Unity/Hub/Editor}"
   for key in QR_LAUNCH_WAIT QR_ADB_WAIT QR_GATE_TIMEOUT QR_BUILD_TIMEOUT QR_MIN_FREE_GB; do
     value="${!key}"

@@ -6,6 +6,11 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
+## [Unreleased]
+
+### Fixed
+- The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
+
 ## [0.1.1] - 2026-11-08
 
 ### Added
