@@ -184,13 +184,29 @@ lock_unity() {
 
 # Read-only installation scan. Strict mode prints matches but returns 1 if inspection is incomplete:
 # an unreadable live userspace process is not evidence of absence. Kernel threads, zombies and exits are exempt.
+# shared-files scope additionally scans other installations, reporting executable paths with the PIDs.
 unity_pids() {
-  local p exe status stat flags incomplete=0
+  local p exe status stat flags editor unity_match incomplete=0
   local -r PF_KTHREAD=2097152 # Linux task flag (0x00200000), available before Kthread: in status.
   for p in /proc/[0-9]*; do
     case "${p#/proc/}" in "$$"|"$BASHPID") continue ;; esac
     if exe="$(readlink "$p/exe" 2>/dev/null)"; then
-      case "$exe" in "$UNITY_ROOT"/*) printf ' %s' "${p#/proc/}" ;; esac
+      unity_match=0
+      case "$exe" in "$UNITY_ROOT"/*) unity_match=1 ;; esac
+      if [ "${2:-}" = shared-files ]; then
+        # Only an Editor tree containing an executable Unity binary identifies a foreign installation.
+        # Include its nested helpers, but never infer Unity ownership from a name containing "unity".
+        editor="${exe%/*}"
+        while [ "$unity_match" = 0 ] && [ -n "$editor" ] && [ "$editor" != / ]; do
+          if [ "${editor##*/}" = Editor ] && [ -f "$editor/Unity" ] && [ -x "$editor/Unity" ]; then
+            unity_match=1
+          fi
+          editor="${editor%/*}"
+        done
+        [ "$unity_match" = 0 ] || printf ' %s (%s)' "${p#/proc/}" "${exe//$'\n'/ }"
+      else
+        [ "$unity_match" = 0 ] || printf ' %s' "${p#/proc/}"
+      fi
     elif [ "${1:-}" = strict ]; then
       [ -d "$p" ] || continue
       status="$(cat "$p/status" 2>/dev/null)" || { [ ! -d "$p" ] || incomplete=1; continue; }
@@ -229,7 +245,7 @@ cleanup_unity() {
 wipe_unity_shared_files() {
   local remaining
   # Read-only scan: never signal an unmarked editor, another run's editor, or an unreadable owner.
-  if ! remaining="$(unity_pids strict)"; then
+  if ! remaining="$(unity_pids strict shared-files)"; then
     log "warning: Unity process inspection incomplete; skipping shared-memory and UnityLockfile cleanup"
     return 0
   fi
