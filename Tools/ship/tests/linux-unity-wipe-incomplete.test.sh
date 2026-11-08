@@ -13,6 +13,8 @@ finish() {
 }
 trap finish EXIT
 ship_fixture "$tmp/project"
+ship_fixture_process_view "$tmp/process-view"
+export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''
 export UNITY_ROOT="$tmp/unity" SHM_DIR="$tmp/shm"
 mkdir -p "$UNITY_ROOT/Editor" "$SHM_DIR" "$PROJECT/Temp"
 cp /usr/bin/sleep "$UNITY_ROOT/Editor/Unity"
@@ -46,6 +48,7 @@ cat() {
 for operation in cleanup stop; do
   for scenario in live kernel old-kernel zombie absent; do
     env -u LINUX_UNITY_RUN "$UNITY_BIN" 300 & foreign=$!; pids+=("$foreign")
+    export SHIP_FIXTURE_PIDS="${pids[*]}"
     ship_wait_until editor_ready "$foreign"
     state=S; kthread=''; fixture_flags=64
     case "$scenario" in
@@ -67,6 +70,7 @@ for operation in cleanup stop; do
       ' _ "$script" "$tmp/owned.pid" >"$tmp/runner.log" 2>&1 & runner=$!; pids+=("$runner")
       ship_wait_until test -s "$tmp/owned.pid"
       owned="$(command cat "$tmp/owned.pid")"; pids+=("$owned")
+      export SHIP_FIXTURE_PIDS="${pids[*]}"
       ship_wait_until editor_ready "$owned"
     fi
     touch "$SHM_DIR/udsMem-fixture" "$SHM_DIR/sem.udsMem-fixture" "$PROJECT/Temp/UnityLockfile"

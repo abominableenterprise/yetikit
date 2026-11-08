@@ -9,6 +9,8 @@ tmp="$(mktemp -d)"
 fails=0
 proj="$tmp/proj"; mkdir -p "$proj/Temp"
 . "$(dirname "$0")/lib/fake-unity.sh"
+ship_fixture_process_view "$tmp/process-view"
+export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''
 bystander=""
 # The bystander's sleep is its child: kill both, so no stray process keeps the caller's pipe open.
 trap '[ -z "$bystander" ] || kill $(ps -o pid= --ppid "$bystander") "$bystander" 2>/dev/null || true; rm -rf "$tmp"' EXIT

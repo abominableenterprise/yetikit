@@ -13,6 +13,8 @@ finish() {
 }
 trap finish EXIT
 ship_fixture "$tmp/project"
+ship_fixture_process_view "$tmp/process-view"
+export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''
 export UNITY_ROOT="$tmp/unity" SHM_DIR="$tmp/shm"
 mkdir -p "$UNITY_ROOT/Editor" "$SHM_DIR" "$PROJECT/Temp"
 cp /usr/bin/sleep "$UNITY_ROOT/Editor/Unity"
@@ -37,6 +39,7 @@ editor_ready() { [ "$(readlink "/proc/$1/exe" 2>/dev/null)" = "$UNITY_BIN" ]; }
 
 # No inherited marker: simulate an editor opened outside the runner.
 env -u LINUX_UNITY_RUN "$UNITY_BIN" 120 & unmarked=$!; pids+=("$unmarked")
+export SHIP_FIXTURE_PIDS="${pids[*]}"
 ship_wait_until editor_ready "$unmarked"
 fixtures
 cleanup_unity 2> "$tmp/unmarked.log"
@@ -51,9 +54,11 @@ kill "$unmarked" 2>/dev/null || true; wait "$unmarked" 2>/dev/null || true
 env -u LINUX_UNITY_RUN /usr/bin/sleep 120 & peer=$!; pids+=("$peer")
 peer_marker="$peer:$(proc_start "$peer")"
 env LINUX_UNITY_RUN="$peer_marker" "$UNITY_BIN" 120 & foreign=$!; pids+=("$foreign")
+export SHIP_FIXTURE_PIDS="${pids[*]}"
 ship_wait_until editor_ready "$foreign"
 # Own editor helpers must still be killed even when a foreign editor blocks wiping.
 "$UNITY_BIN" 120 & owned=$!; pids+=("$owned")
+export SHIP_FIXTURE_PIDS="${pids[*]}"
 ship_wait_until editor_ready "$owned"
 fixtures
 cleanup_unity 2> "$tmp/foreign.log"
@@ -67,6 +72,7 @@ kill "$foreign" 2>/dev/null || true; wait "$foreign" 2>/dev/null || true
 
 # Once no foreign editor remains, kill own editors and wipe all three fixtures.
 "$UNITY_BIN" 120 & owned=$!; pids+=("$owned")
+export SHIP_FIXTURE_PIDS="${pids[*]}"
 ship_wait_until editor_ready "$owned"
 /usr/bin/sleep 120 & helper=$!; pids+=("$helper")
 fixtures
