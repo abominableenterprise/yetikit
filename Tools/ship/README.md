@@ -329,7 +329,10 @@ file extensions alone never prove disposable noise.
 worktrees with independent cloned Libraries, runs gate/build in parallel, then
 verifies, installs, launches and cleans up. A failed gate never installs; the
 built APK and failed worktrees remain for inspection. `--rollback` reinstalls the
-previous APK only after a launch crash. Standalone steps use the current run's
+previous APK only after a confirmed launch crash, never an adb, logcat or device
+failure. Rollback still checks whether the headset is idle; only the user's own
+`all --force` bypasses a known busy headset. Infrastructure failures leave the
+installed build in place and return non-zero. Standalone steps use the current run's
 state under `release-logs/current.env`. `summary` reprints the latest step results.
 
 `gate` runs Metal EditMode `Gfx;MacOnly` tests (`--full` runs all). All failures
@@ -353,7 +356,15 @@ still mandatory. `launch` captures logcat at 30 seconds (when the configured
 wait exceeds 30), then at the final deadline; it reports optional FPS, errors,
 package-attributed crashes, alive status and Quest-shell launch warnings. Shell
 warnings alone do not trigger rollback and a live process is not proof of XR
-presentation. Logs and summaries remain in `<worktreeRoot>/release-logs/`.
+presentation. `launch` exits **0** for a healthy observed process, **1** for a
+confirmed crash (`CRASH:`: package-attributed crash lines or a successful probe
+confirming the process is gone), and **3** for an infrastructure/unverified
+result (`INFRA:`). Device checks, activity start, logcat capture (including the
+early snapshot), and failed/malformed pidof probes are infrastructure errors.
+The probe checks adb's transport status separately from the remote pidof status;
+remote exit 1 with no output confirms absence, not a transport failure.
+`summary.txt` and `wait` retain the `CRASH:`/`INFRA:` distinction; `wait` returns
+1 for either failure. Logs and summaries remain in `<worktreeRoot>/release-logs/`.
 
 For detached operations, use `nohup … all > /tmp/quest-release.out 2>&1 &`, then
 `wait 28` within the caller's command timeout. `wait` takes no lock and writes

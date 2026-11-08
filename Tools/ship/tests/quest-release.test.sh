@@ -130,7 +130,7 @@ fake_shell() {
       esac
       fixture_section "POWER MANAGER" ;;
     "dumpsys package "*) echo "      android.permission.RECORD_AUDIO: granted=true, flags=[ USER_SET ]" ;;
-    "pidof "*) [ "$FAKE_ALIVE" = 1 ] && echo 4242 ;;
+    "pidof "*) ( pidof() { [ "$FAKE_ALIVE" = 1 ] && echo 4242; }; eval "$1" ) ;;
     "am start "*) echo "Starting: Intent { $1 }" ;;
     *sha256sum*)
       f="${1#*sha256sum \'}"; f="${f%%\'*}"; f="$tmp/device/${f##*/}"
@@ -457,8 +457,8 @@ check "default wait checks at 30 s, then at 60 s, preserving early-only warnings
   '[ "$rc" = 0 ] && [ "$(paste -sd, "$tmp/launch-sleeps")" = 30,30 ] && [ "$(wc -l < "$tmp/launch-snapshots")" = 2 ] && out_has "30s check" && out_has "shell launch warnings 1"'
 rm -f "$tmp/launch-sleeps" "$tmp/launch-snapshots"
 rc=0; QR_LAUNCH_WAIT=60 FAKE_EARLY_FAIL=1 launch_timing > "$tmp/out" 2> "$tmp/err" || rc=$?
-check "early snapshot failure warns but preserves the final check and exit status" \
-  '[ "$rc" = 0 ] && out_has "early adb logcat -d failed" && [ "$(wc -l < "$tmp/launch-snapshots")" = 2 ] && ! out_has "shell launch warnings"'
+check "early snapshot failure is infrastructure, not a crash" \
+  '[ "$rc" = 3 ] && out_has "early adb logcat -d failed" && [ "$(wc -l < "$tmp/launch-snapshots")" = 1 ] && out_has "launch:      INFRA:"'
 rm -f "$tmp/launch-sleeps" "$tmp/launch-snapshots"
 rc=0; QR_LAUNCH_WAIT=30 launch_timing > "$tmp/out" 2> "$tmp/err" || rc=$?
 check "a 30 s wait uses one final snapshot without an additional delay" \
