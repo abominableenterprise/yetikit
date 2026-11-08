@@ -11,6 +11,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ### Fixed
 - `test-all.sh --changed` now selects tests when Ship is vendored under another directory, instead of passing with no tests.
 
+## [0.1.2] - 2026-11-08
+
+### Added
+- None.
+
+### Fixed
+- `linux-unity.sh stop` no longer deletes shared Unity memory or the project lockfile while another editor is running.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
 ## [0.1.1] - 2026-11-08
 
 ### Added
