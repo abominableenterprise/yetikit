@@ -12,6 +12,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
+- Android setup re-checks for running editors after cleanup and refuses replacement if an editor started during the cleanup delay or process inspection is incomplete.
 - `test-all.sh --changed` now selects tests when Ship is vendored under another directory, instead of passing with no tests.
 - The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
 - Test passes and known-flake retries now require result evidence instead of
@@ -23,6 +24,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
   installed build. Process probes preserve transport and remote exit status.
 
 ### Behaviour changes
+- None for the setup replacement re-check.
 - A pass with no executed tests or no result XML now fails; `-quit`,
   `-testResults` and `-logFile` are rejected as forwarded test arguments.
   Only the implicit, unfiltered EditMode Gfx pass and PR Gfx pass may select
@@ -32,6 +34,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
   0 for success, 1 for a confirmed crash, and 3 for infrastructure errors.
 
 ### Adapter changes
+- None for the setup replacement re-check.
 - Remove any forwarded `-quit`/`-testResults`/`-logFile` from test invocations.
 
 ## [0.1.2] - 2026-11-08
