@@ -11,6 +11,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ### Fixed
 - The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
 
+## [0.1.2] - 2026-11-08
+
+### Added
+- None.
+
+### Fixed
+- `linux-unity.sh stop` no longer deletes shared Unity memory or the project lockfile while another editor is running.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
 ## [0.1.1] - 2026-11-08
 
 ### Added
