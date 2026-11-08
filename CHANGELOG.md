@@ -8,8 +8,18 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+### Added
+- None.
+
 ### Fixed
 - The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
+- Shared Unity memory and the project lockfile are kept when a running process can't be inspected (for example another user's editor), instead of being treated as absent.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
 
 ## [0.1.2] - 2026-11-08
 

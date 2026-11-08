@@ -182,17 +182,18 @@ lock_unity() {
   chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
 }
 
-# Read-only installation scan. Replacement runs this as root in strict mode: an unreadable live
-# userspace process is not evidence of absence. Kernel threads, zombies and exited processes have no exe.
+# Read-only installation scan. Strict mode prints matches but returns 1 if inspection is incomplete:
+# an unreadable live userspace process is not evidence of absence. Kernel threads, zombies and exits are exempt.
 unity_pids() {
-  local p exe status stat flags
+  local p exe status stat flags incomplete=0
   local -r PF_KTHREAD=2097152 # Linux task flag (0x00200000), available before Kthread: in status.
   for p in /proc/[0-9]*; do
+    case "${p#/proc/}" in "$$"|"$BASHPID") continue ;; esac
     if exe="$(readlink "$p/exe" 2>/dev/null)"; then
       case "$exe" in "$UNITY_ROOT"/*) printf ' %s' "${p#/proc/}" ;; esac
     elif [ "${1:-}" = strict ]; then
       [ -d "$p" ] || continue
-      status="$(cat "$p/status" 2>/dev/null)" || { [ ! -d "$p" ] && continue; return 1; }
+      status="$(cat "$p/status" 2>/dev/null)" || { [ ! -d "$p" ] || incomplete=1; continue; }
       case "$status" in
         *$'\nKthread:\t1'*) continue ;;
         *$'\nState:\tZ '*|*$'\nState:\tX '*) continue ;;
@@ -202,10 +203,10 @@ unity_pids() {
         read -r _ _ _ _ _ _ flags _ <<< "${stat##*) }"
         if [[ "$flags" =~ ^[0-9]+$ ]] && (( (flags & PF_KTHREAD) != 0 )); then continue; fi
       fi
-      [ ! -d "$p" ] || return 1
+      [ ! -d "$p" ] || incomplete=1
     fi
   done
-  return 0
+  return "$incomplete"
 }
 
 # Kill only this run's editor helpers. A stale Unity.DataStore shared-memory segment makes the next run fail
@@ -228,7 +229,10 @@ cleanup_unity() {
 wipe_unity_shared_files() {
   local remaining
   # Read-only scan: never signal an unmarked editor, another run's editor, or an unreadable owner.
-  remaining="$(unity_pids)"
+  if ! remaining="$(unity_pids strict)"; then
+    log "warning: Unity process inspection incomplete; skipping shared-memory and UnityLockfile cleanup"
+    return 0
+  fi
   if [ -n "$remaining" ]; then
     log "warning: Unity processes remain (PIDs:$remaining); skipping shared-memory and UnityLockfile cleanup"
     return 0
