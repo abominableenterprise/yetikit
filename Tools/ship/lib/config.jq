@@ -26,7 +26,11 @@ elif (.build | has("profile") | not) and (.build.devMethod | nonempty | not) the
 elif (.build | has("profile") | not) and (.build.releaseMethod | nonempty | not) then invalid("build.releaseMethod")
 elif (.build | has("cli")) and (.build.cli | nonempty | not) then invalid("build.cli")
 elif (.build.apkPath | relpath | not) then invalid("build.apkPath")
-elif has("knownFlakes") and (.knownFlakes | relpath | not) then invalid("knownFlakes")
+elif has("knownFlakes") and
+  ((.knownFlakes | relpath) or
+   (($ARGS.named.questAbsoluteKnownFlakes // false) and
+    (.knownFlakes | if nonempty then startswith("/") else false end)) | not)
+  then invalid("knownFlakes")
 elif (.build | has("releaseApkPath")) and (.build.releaseApkPath | relpath | not) then invalid("build.releaseApkPath")
 elif has("quest") and (.quest | type) != "object" then invalid("quest")
 elif has("quest") and (.quest | has("serial")) then invalid("quest.serial (use QUEST_SERIAL environment only)")

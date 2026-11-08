@@ -156,7 +156,7 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `build.releaseApkPath` | Relative release output path; defaults to `build.apkPath`. |
 | `build.profile` | Optional relative committed build-profile asset path. Uses Unity CLI `build --profile` instead of execute methods, supporting projects without a custom build API. |
 | `build.cli` | Optional executable for profile builds; default `unity`. |
-| `knownFlakes` | Optional relative flakes-list path; omitted or missing file means no flakes. |
+| `knownFlakes` | Optional relative flakes-list path (Quest also accepts an absolute path); omitted or missing file means no flakes. |
 | `labMethod` | Optional fully qualified execute method for `lab`. |
 | `setup.craneArchive` | Optional download location for a crane archive; unnecessary with preinstalled crane. |
 | `scene` | Optional object. Omit entirely for projects without a generated scene. |
@@ -337,6 +337,9 @@ listed in `knownFlakes`, or exactly one failure whether listed or not, rerun
 once with the same categories and exact selected filter. Retry coverage and
 result counts must prove the selected tests actually passed. Missing results,
 crashes and empty runs fail closed. The summary labels a passing retry.
+The flakes list is read from the test worktree first, falling back to the main
+checkout if absent. Absolute config paths and absolute `QUEST_KNOWN_FLAKES`
+overrides are used as-is.
 `build` uses `build.devMethod` and `build.apkPath`; a log-growth stall kills only
 that editor, retries once, then fails. The retained APK has commit provenance.
 Notes are supplied through the configured variable names; interpreting those
