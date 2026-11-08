@@ -212,7 +212,7 @@ unity_pids() {
 # with "Error loading the file 'VirtualArtifacts/...'", but a foreign editor may still own those files.
 cleanup_unity() {
   lock_unity
-  local p remaining="" run="${LINUX_UNITY_RUN:-}"
+  local p run="${LINUX_UNITY_RUN:-}"
   if [ -n "$run" ]; then
     for p in $(marked "$run"); do
       case "$(readlink "/proc/${p%%:*}/exe" 2>/dev/null)" in
@@ -221,6 +221,12 @@ cleanup_unity() {
     done
   fi
   sleep 2
+  wipe_unity_shared_files
+}
+
+# Caller holds lock_unity. Never wipe shared files while a foreign editor may still own them.
+wipe_unity_shared_files() {
+  local remaining
   # Read-only scan: never signal an unmarked editor, another run's editor, or an unreadable owner.
   remaining="$(unity_pids)"
   if [ -n "$remaining" ]; then
@@ -368,8 +374,9 @@ cmd_stop() {
       done
       [ "$left" = 1 ] || break; sleep 0.1
     done
+    rm -f "$f"; exec {fd}>&-
     lock_unity
-    rm -f "$f" "$SHM_DIR"/udsMem* "$SHM_DIR"/sem.udsMem* "$PROJECT/Temp/UnityLockfile"; exec {fd}>&-
+    wipe_unity_shared_files
   done
   [ "$found" = 1 ] || log "stop: no pidfile ($PIDFILE): nothing this script started is running"
   log "stop done"
