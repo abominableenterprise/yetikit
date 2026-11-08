@@ -119,6 +119,8 @@ log() { printf '[linux-unity] %s\n' "$*" >&2; }
 . "$(dirname "${BASH_SOURCE[0]}")/scene-noise.sh"
 # shellcheck source=Tools/ship/test-passes.sh
 . "$(dirname "${BASH_SOURCE[0]}")/test-passes.sh"
+# shellcheck source=Tools/ship/test-evidence.sh
+. "$(dirname "${BASH_SOURCE[0]}")/test-evidence.sh"
 # shellcheck source=Tools/ship/test-stages.sh
 . "$(dirname "${BASH_SOURCE[0]}")/test-stages.sh"
 # shellcheck source=Tools/ship/linux-unity-seat.sh
@@ -552,6 +554,10 @@ run_pass() {
   RUN_RESULTS+=("$OUT_DIR/$stem.xml")
   unity "$@" -testResults "$OUT_DIR/$stem.xml" -logFile "$OUT_DIR/$stem.log" || rc=$?
   test_results_summary "$OUT_DIR/$stem.xml"
+  if ! test_evidence "$stem" "$OUT_DIR/$stem.xml" "${TEST_ALLOW_EMPTY:-0}"; then
+    [ "$rc" != 0 ] || rc=1
+    return "$rc"
+  fi
   [ "$rc" != 0 ] || return 0
   failed="$(failed_tests "$OUT_DIR/$stem.xml")"
   [ -n "$failed" ] || return $rc   # a crash or no results: never a flake
@@ -567,7 +573,8 @@ run_pass() {
   unity ${args[@]+"${args[@]}"} -testFilter "$filter" -testResults "$OUT_DIR/$stem-retry.xml" \
     -logFile "$OUT_DIR/$stem-retry.log" || retry_rc=$?
   test_results_summary "$OUT_DIR/$stem-retry.xml"
-  if [ "$retry_rc" = 0 ] && [ -f "$OUT_DIR/$stem-retry.xml" ] && [ -z "$(failed_tests "$OUT_DIR/$stem-retry.xml")" ]; then
+  test_evidence "$stem-retry" "$OUT_DIR/$stem-retry.xml" 0 || return "$rc"
+  if [ "$retry_rc" = 0 ] && [ -z "$(failed_tests "$OUT_DIR/$stem-retry.xml")" ]; then
     log "flaky-passed: $(tr '\n' ' ' <<< "$failed" | sed 's/ $//')"
     return 0
   fi
@@ -590,7 +597,7 @@ test_passes() {
     pr) test_pr "$@"; return ;;
     *) die "usage: test editmode|playmode|pr [base] [extra Unity args]" ;;
   esac
-  local rc=0
+  local rc=0 TEST_ALLOW_EMPTY=0
   # No -quit with -runTests.
   if [ "$platform" = PlayMode ]; then
     run_pass playmode -runTests -testPlatform PlayMode "$@" || rc=$?
@@ -618,6 +625,8 @@ test_passes() {
   # A caller's -testFilter is in "$@" and applies to both passes (the Test Framework ANDs filter and category).
   run_pass editmode -nographics -runTests -testPlatform EditMode -testCategory "$PURE_CATEGORIES" "$@" || rc=$?
   if [ "${EDITMODE_GFX:-1}" = 1 ]; then
+    # Only an unfiltered implicit Gfx selection may be empty.
+    [[ " $* " == *" -testFilter "* ]] || TEST_ALLOW_EMPTY=1
     run_gfx_pass editmode-gfx -runTests -testPlatform EditMode -testCategory "$GFX_CATEGORIES" "$@" || rc=$?
   fi
   return $rc
@@ -625,7 +634,7 @@ test_passes() {
 
 # test pr [base] [extra Unity args]: the full pure pass, then the Gfx pass for the fixtures the branch touches.
 test_pr() {
-  local base=origin/main mb fixtures areas rc=0
+  local base=origin/main mb fixtures areas rc=0 TEST_ALLOW_EMPTY=0
   if [ $# -gt 0 ] && [[ "$1" != -* ]]; then base="$1"; shift; fi
   [[ " $* " != *" -testFilter "* && " $* " != *" -testCategory "* ]] \
     || die "test pr picks the tests itself; use test editmode for -testFilter/-testCategory"
@@ -648,6 +657,7 @@ test_pr() {
   else
     log "test pr: Gfx fixtures touched since $base (${mb:0:12}):"
     printf '  %s\n' $fixtures >&2
+    TEST_ALLOW_EMPTY=1
     run_gfx_pass editmode-gfx -runTests -testPlatform EditMode -testCategory "$GFX_CATEGORIES" \
       -testFilter "$(paste -sd';' <<< "$fixtures")" "$@" || rc=$?
   fi

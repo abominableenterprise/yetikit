@@ -26,6 +26,14 @@ echo "\$*" >> "$tmp/runs"
 [ -z "\${FAKE_EDITOR_SLEEP:-}" ] || { echo \$\$ > "$tmp/editor.pid"; sleep "\$FAKE_EDITOR_SLEEP"; }
 { ls "$tmp/shm"; [ -e "$proj/Temp/UnityLockfile" ] && echo lockfile
   [ -f "$tmp/stale.pid" ] && kill -0 "\$(cat "$tmp/stale.pid")" 2>/dev/null && echo datastore; } > "$tmp/at-launch" || true
+# Successful test runs must produce evidence just like the shared fake editor.
+while [ \$# -gt 0 ]; do
+  if [ "\$1" = -testResults ]; then
+    printf '<test-run total="1" passed="1" failed="0" skipped="0" />\\n' > "\$2"
+    break
+  fi
+  shift
+done
 exit "\${FAKE_UNITY_RC:-0}"
 EOF
 # Fake Licensing Client: --activate-ulf writes $FAKE_NEW_ULF (default a valid ULF); --return-ulf exits $FAKE_RETURN_RC.

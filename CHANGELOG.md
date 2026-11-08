@@ -6,6 +6,22 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
+## [Unreleased]
+
+### Fixed
+- Test passes and known-flake retries now require result evidence instead of
+  trusting a successful editor exit alone
+  ([#34](https://github.com/abominableenterprise/yetikit/issues/34), Part 1).
+
+### Behaviour changes
+- A pass with no executed tests or no result XML now fails; `-quit`,
+  `-testResults` and `-logFile` are rejected as forwarded test arguments.
+  Only the implicit, unfiltered EditMode Gfx pass and PR Gfx pass may select
+  zero tests with valid XML; retries must always execute tests.
+
+### Adapter changes
+- Remove any forwarded `-quit`/`-testResults`/`-logFile` from test invocations.
+
 ## [0.1.2] - 2026-11-08
 
 ### Added
