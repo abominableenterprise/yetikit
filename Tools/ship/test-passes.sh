@@ -111,16 +111,17 @@ pr_gfx_fixtures() {
     files=""; reason=""
     case "$p" in
       "$edit_root/"*.cs) files="$p"; reason="changed test $p" ;;
+      # Editor folders can be nested under scripts; builders search all tests.
+      "$editor_root/"*.cs)
+        name="${p##*/}"; name="${name%.cs}"
+        files="$(grep -rlw --include='*.cs' -- "$name" "$tests_root" 2>/dev/null || true)"
+        reason="references builder $name from $p" ;;
       "$scripts_root/"*/*.cs)
         area="${p#"$scripts_root/"}"; area="${area%%/*}"
         name="${p##*/}"; name="${name%.cs}"
         name="$( { printf '%s\n' "$name"; cs_declared_types "$p"; } | sort -u | paste -sd '|' -)"
         files="$(while IFS= read -r f; do grep -Elw -- "$name" "$f" || true; done < <(area_test_files "$area"))"
         reason="references $name from $p" ;;
-      "$editor_root/"*.cs)
-        name="${p##*/}"; name="${name%.cs}"
-        files="$(grep -rlw --include='*.cs' -- "$name" "$tests_root" 2>/dev/null || true)"
-        reason="references builder $name from $p" ;;
     esac
     [ -n "$files" ] || continue
     while IFS= read -r f; do
