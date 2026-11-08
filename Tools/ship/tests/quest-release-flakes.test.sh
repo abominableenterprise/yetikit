@@ -274,6 +274,44 @@ check "one unlisted failure that fails again: gate fails after one rerun only" \
   '[ "$rc" != 0 ] && [ "$(runs)" = 2 ] && grep -q "(retried 1 unlisted failure: $real — failed again)" "$tmp/out" && grep -q "^gate fails:  $real: flaky" "$tmp/out"'
 
 # --- the list is read from the commit under test; QUEST_KNOWN_FLAKES overrides ------------------------------------------------
+worktrees=("$root"/rel-*-test)
+wt="${worktrees[0]}"
+# Commit a worktree-only list change: the main checkout must not supply these entries.
+printf '%s\n' "$real" "$real2" >> "$wt/Tools/ship/known-flakes.txt"
+git -C "$wt" add Tools/ship/known-flakes.txt && git -C "$wt" commit -qm 'Add synthetic release flakes'
+check "the committed test list differs from the main checkout" \
+  'git -C "$wt" show HEAD:Tools/ship/known-flakes.txt | grep -qF "$real" && ! grep -qF "$real" "$list"'
+FAKE_FAILS="$real;$real2" run gate
+check "the gate retries two known flakes committed only in the test worktree" \
+  '[ "$rc" = 0 ] && [ "$(runs)" = 2 ] && grep -qF "retried 2 known flakes: $real, $real2 — passed" "$tmp/out"'
+
+# A missing worktree list retains compatibility with the main checkout list.
+git -C "$wt" rm -q Tools/ship/known-flakes.txt && git -C "$wt" commit -qm 'Omit synthetic release flakes'
+FAKE_FAILS="$spray;$consistency" run gate
+check "a worktree without a list falls back to the main checkout" \
+  '[ "$rc" = 0 ] && [ "$(runs)" = 2 ] && grep -qF "retried 2 known flakes: $spray, $consistency — passed" "$tmp/out"'
+
+rc=0
+(
+  qr_config || exit 1
+  [ "$(qr_known_flakes_file "$wt")" = "$list" ] || exit 1
+  QR_KNOWN_FLAKES="$tmp/missing-list.txt"
+  [ -z "$(qr_known_flakes_file "$wt")" ]
+) || rc=$?
+check "no existing list in either checkout returns empty" '[ "$rc" = 0 ]'
+
+# An existing empty worktree list is authoritative, not a reason to fall back.
+: > "$wt/Tools/ship/known-flakes.txt"
+FAKE_FAILS="$spray;$consistency" run gate
+check "an empty worktree list does not use main-checkout entries" '[ "$rc" != 0 ] && [ "$(runs)" = 1 ]'
+
+jq --arg path "$list" '.knownFlakes = $path' "$repo/yetikit.json" > "$YETIKIT_CONFIG"
+FAKE_FAILS="$spray;$consistency" run gate
+check "an absolute config path is used as-is despite an empty worktree list" \
+  '[ "$rc" = 0 ] && [ "$(runs)" = 2 ] && grep -q "retried 2 known flakes" "$tmp/out"'
+cp "$repo/yetikit.json" "$YETIKIT_CONFIG"
+cp "$list" "$wt/Tools/ship/known-flakes.txt"
+
 : > "$tmp/empty-flakes.txt"
 rc=0; ( QUEST_KNOWN_FLAKES="$tmp/empty-flakes.txt"; FAKE_FAILS="$spray;$consistency"; rm -f "$tmp/unity.log"; qr_main gate ) > "$tmp/out" 2> "$tmp/err" || rc=$?
 check "QUEST_KNOWN_FLAKES with nothing listed: two (now unlisted) failures get no rerun" '[ "$rc" != 0 ] && [ "$(runs)" = 1 ]'

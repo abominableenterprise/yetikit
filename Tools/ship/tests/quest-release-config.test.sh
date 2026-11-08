@@ -17,6 +17,32 @@ mutate() { jq "$1" "$base" > "$YETIKIT_CONFIG"; }
 
 load
 check 'schema 1 synthetic Quest config accepted' '[ "$rc" = 0 ]'
+rc=0
+(
+  qr_config || exit 1
+  [ "$QR_KNOWN_FLAKES_REL" = Tools/ship/known-flakes.txt ] &&
+  [ "$QR_KNOWN_FLAKES" = "$QUEST_REPO/Tools/ship/known-flakes.txt" ]
+) 2> "$tmp/err" || rc=$?
+check 'relative flakes path retained alongside the main-checkout fallback' '[ "$rc" = 0 ]'
+jq --arg path "$tmp/absolute-flakes.txt" '.knownFlakes = $path' "$base" > "$YETIKIT_CONFIG"
+rc=0
+(
+  qr_config || exit 1
+  [ -z "$QR_KNOWN_FLAKES_REL" ] && [ "$QR_KNOWN_FLAKES" = "$tmp/absolute-flakes.txt" ]
+) 2> "$tmp/err" || rc=$?
+check 'absolute config list is preserved as-is for Quest' '[ "$rc" = 0 ]'
+# Other entry points still require relative config paths.
+schema_error="$(jq -sr -f "$here/../lib/config.jq" "$YETIKIT_CONFIG")"
+check 'absolute config list remains rejected outside Quest' 'printf "%s" "$schema_error" | grep -q knownFlakes'
+rc=0
+(
+  QUEST_KNOWN_FLAKES="$tmp/override.txt" qr_config || exit 1
+  [ -z "$QR_KNOWN_FLAKES_REL" ] && [ "$QR_KNOWN_FLAKES" = "$tmp/override.txt" ] || exit 1
+  qr_config || exit 1
+  [ -z "$QR_KNOWN_FLAKES_REL" ] && [ "$QR_KNOWN_FLAKES" = "$tmp/absolute-flakes.txt" ]
+) 2> "$tmp/err" || rc=$?
+check 'absolute env override wins without leaking into the next config load' '[ "$rc" = 0 ]'
+cp "$base" "$YETIKIT_CONFIG"
 for expression in '.schema = 2' 'del(.quest.package)' '.quest.package = ""' '.quest.package = "bad/package"' \
   '.quest = []' '.quest.serial = "synthetic-device"' 'del(.build.devMethod)' '.build.apkPath = "../outside.apk"' \
   '.quest.launcherChecks.permissions = "not-an-array"' '.quest.launcherChecks.assets = ["../outside"]' \

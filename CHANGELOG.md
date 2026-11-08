@@ -12,6 +12,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
+- The Quest release gate reads the known-flakes list from the commit under test, falling back to the main checkout.
 - Distinguish launch infrastructure failures from confirmed package crashes so
   failed device, adb, activity-start or logcat checks cannot downgrade a healthy
   installed build. Process probes preserve transport and remote exit status.
