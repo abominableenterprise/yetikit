@@ -39,6 +39,16 @@ elif has("quest") and (.build.devMethod | nonempty | not) then invalid("build.de
 elif has("quest") and (.quest | has("worktreeRoot")) and (.quest.worktreeRoot | nonempty | not) then invalid("quest.worktreeRoot")
 elif has("quest") and (.quest | has("apkKeepName")) and
   (.quest.apkKeepName | if nonempty then test("^[A-Za-z0-9_.{}-]+\\.apk$") and contains("{sha}") else false end | not) then invalid("quest.apkKeepName")
+elif has("quest") and (.quest | has("perf")) and (.quest.perf | type) != "object" then invalid("quest.perf")
+elif has("quest") and ([.quest.perf // {} | to_entries[] |
+  select(.key == "seconds" or .key == "warmupSeconds") |
+  select(.value | if type == "number" then floor != . or . < 0 or . > 9999999 else true end) | .key] | length) > 0 then invalid("quest.perf window seconds")
+elif has("quest") and (.quest.perf.seconds // 60) == 0 then invalid("quest.perf.seconds")
+elif has("quest") and ([.quest.perf // {} | to_entries[] |
+  select(.key == "maxStalePercent" or .key == "maxP95AppMs") |
+  select(.value | if type == "number" then . < 0 else true end) | .key] | length) > 0 then invalid("quest.perf thresholds")
+elif has("quest") and (.quest.perf // {} | has("devices")) and
+  (.quest.perf.devices | if type == "object" then all(.[]; . == "gate" or . == "report") else false end | not) then invalid("quest.perf.devices")
 elif has("quest") and (.quest | has("perfLogTag")) and (.quest.perfLogTag | nonempty | not) then invalid("quest.perfLogTag")
 elif has("quest") and (.quest | has("whatsNewEnv")) and (.quest.whatsNewEnv | envname | not) then invalid("quest.whatsNewEnv")
 elif has("quest") and (.quest | has("prevShaEnv")) and (.quest.prevShaEnv | envname | not) then invalid("quest.prevShaEnv")

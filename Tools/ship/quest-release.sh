@@ -16,11 +16,14 @@
 #                     same checks with install -r -d; never uninstall or clear data
 #   launch            start Unity GameActivity, bounded logcat capture and crash check
 #                     exit 0 OK, 1 confirmed crash, 3 infrastructure/unverified
+#   perf [--seconds N] [--warmup S]
+#                     launch installed app, exclude warm-up, capture VrApi and gate/report
+#                     exit 0 PASS/REPORT, 1 gate failed, 3 infrastructure/no data
 #   cleanup           remove release worktrees only when safe
 #   summary           print the current run summary
 #   wait [minutes]    read-only, default 45; exit 0 success, 1 failure, 124 timeout
 #
-# QUEST_SERIAL accepts a comma/whitespace list for all/install/launch/rollback.
+# QUEST_SERIAL accepts a comma/whitespace list for all/install/launch/rollback/perf.
 # Devices run sequentially in input order and continue after failures; one lock
 # at a time. Multi outcomes: crash (1) > infrastructure (3) > OK (0).
 # Multi logs: devices/<percent-encoded-serial>/; single-device paths unchanged.
@@ -59,6 +62,8 @@ QR_SHIP_DIR="$QR_DIR"
 . "$QR_DIR/quest-release/config.sh"
 # shellcheck source=Tools/ship/quest-release/multi.sh
 . "$QR_DIR/quest-release/multi.sh"
+# shellcheck source=Tools/ship/quest-release/perf.sh
+. "$QR_DIR/quest-release/perf.sh"
 
 # gate and build at once (two editors, two projects, separate -logFile and output), then wait for both.
 qr_parallel_unity() {
@@ -157,7 +162,7 @@ qr_main() {
   if [ "$cmd" = wait ]; then ( qr_wait "$@" ) || rc=$?; return "$rc"; fi
   mkdir -p "$QR_LOGS" 2>/dev/null
   case "$cmd" in
-    all|prepare|gate|build|verify|install|launch|rollback|cleanup)
+    all|prepare|gate|build|verify|install|launch|rollback|perf|cleanup)
       qr_lock_acquire || return 1 # before qr_load_state: a refused run writes no current.env
       trap 'qr_lock_release' EXIT
       trap 'qr_cancel "$cmd" HUP' HUP
@@ -167,12 +172,12 @@ qr_main() {
   esac
   # Publish invocation identity and install traps before discovery: an early failure must replace old success.
   case "$cmd" in
-    all|install|rollback|launch)
+    all|install|rollback|launch|perf)
       if ! qr_select_device; then
         rc=1
-        if [ "$cmd" = launch ]; then
+        if [ "$cmd" = launch ] || [ "$cmd" = perf ]; then
           rc="$QR_LAUNCH_INFRA"
-          qr_set launch "INFRA: device selection failed (see release.log)"
+          qr_set "$cmd" "INFRA: device selection failed (see release.log)"
           qr_summary
         fi
         qr_lock_result "$cmd" "$rc"; return "$rc"
@@ -197,6 +202,7 @@ qr_main() {
       else
         qr_run_step "qr_$cmd" "$@" || rc=$?
       fi ;;
+    perf) qr_run_step qr_perf "$@" || rc=$? ;;
     gate|build|verify|cleanup)
       qr_load_state
       qr_run_step "qr_$cmd" "$@" || rc=$? ;;

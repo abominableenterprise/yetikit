@@ -9,7 +9,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
-- None.
+- Repeatable Quest performance windows with warm-up exclusion, per-model
+  frame-time/stale-frame gates, text/JSON reports and proximity restoration.
 
 ### Fixed
 - Ship's Quest release tests no longer depend on VM speed.
@@ -19,7 +20,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Adapter changes
-- None.
+- None; optional `quest.perf`.
 
 ## [0.1.6] - 2026-11-09
 

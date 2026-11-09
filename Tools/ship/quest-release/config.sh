@@ -31,6 +31,10 @@ qr_config() {
   QR_WHATS_NEW_ENV="$(qr_config_get '.quest.whatsNewEnv // "YETIKIT_WHATS_NEW"')"
   QR_PREV_SHA_ENV="$(qr_config_get '.quest.prevShaEnv // "YETIKIT_PREV_SHA"')"
   QR_LAUNCH_ARGS="$(qr_config_get '.quest.launchArgs // []')"
+  QR_PERF_WARMUP="$(qr_config_get '.quest.perf.warmupSeconds // 10')"
+  QR_PERF_SECONDS="$(qr_config_get '.quest.perf.seconds // 60')"
+  QR_PERF_MAX_STALE="$(qr_config_get '.quest.perf.maxStalePercent // 1')"
+  QR_PERF_MAX_APP="$(qr_config_get '.quest.perf.maxP95AppMs // 13.9')"
   root="$(qr_config_get '.quest.worktreeRoot // empty')"
   root="${root:-$HOME/wt/${QR_REPO##*/}}"
   # Expand only a leading home marker; never eval project configuration.

@@ -46,6 +46,7 @@ qr_wait_verdict() {
   fi
   case "$cmd" in
     gate) [ "$(cat "$s/gate_result" 2>/dev/null)" = passed ]; return $? ;;
+    perf) [ "$(cat "$s/perf_result" 2>/dev/null)" = 0 ]; return $? ;;
     prepare|build|verify|cleanup) return 0 ;;
     launch) ! grep -qE '^(CRASH|INFRA):' "$s/launch" 2>/dev/null; return $? ;;
     rollback) label=rollback ;;
