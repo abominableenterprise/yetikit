@@ -555,7 +555,14 @@ sum(FPS frames)`. App p95 uses nearest-rank **per-second samples**, not individu
 frame telemetry. Both thresholds are inclusive. Average FPS never gates.
 Missing gate inputs in any sample make that gate unavailable (FAIL in gate
 mode); missing optional measurements say `unavailable`. No samples is INFRA,
-never PASS. CPU and GPU frame-time means are reported separately when present.
+never PASS. Captures also require the same unique app PID and resumed package
+through warm-up and each second of the window. PID-filtered epoch logcat is
+validated again while parsing, so another process cannot supply passing samples.
+Missing/replaced/backgrounded app identity is INFRA. Coverage requires at least
+N−1 samples (minimum one), a timestamp span of at least N−2 seconds, and no
+nonpositive or greater-than-2.5-second intervals. This allows boundary jitter,
+not short surviving fragments; insufficient coverage is INFRA in both modes.
+CPU and GPU frame-time means are reported separately when present.
 The stale streak counts adjacent samples with Stale > 0, resetting on an epoch
 timestamp gap greater than 1.5 seconds. No interpolation fills lost samples.
 

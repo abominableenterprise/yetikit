@@ -10,6 +10,8 @@ def gate($value; $limit):
    verdict: (if ($value | type) != "number" then (if $mode == "gate" then "FAIL" else "unavailable" end)
              elif $value <= $limit then "PASS" else "FAIL" end)};
 [split("\n")[] | select(test("\\bVrApi\\s*:")) |
+  # Validate the emitting PID even if an adb implementation ignores --pid.
+  select($pid != "" and test("^\\s*[0-9]+\\.[0-9]+\\s+" + $pid + "\\s+")) |
   . as $line |
   (sub("^.*?\\bVrApi\\s*:\\s*"; "") | split(",") |
     map(try capture("^\\s*(?<key>[^=]+)=(?<value>.*?)\\s*$") catch empty) |
@@ -21,6 +23,11 @@ def gate($value; $limit):
    levels: ($f | to_entries | map(select(.key | test("^CPU[0-9]*/GPU$"))) | .[0].value // "unavailable"),
    temp: ($f.Temp // "unavailable")}] as $rows |
 ($rows | length) as $n |
+# Allow one boundary sample of jitter, never a short surviving fragment or gap.
+([$rows[].time] | sort) as $times |
+($n >= ([$seconds - 1, 1] | max) and complete($rows; "time") and
+ ($times[-1] - $times[0]) >= ([$seconds - 2, 0] | max) and
+ all(range(1; $n); ($times[.] - $times[. - 1]) > 0 and ($times[.] - $times[. - 1]) <= 2.5)) as $covered |
 (if complete($rows; "fps") and complete($rows; "stale") and ([$rows[].fps] | add) > 0
  then ([$rows[].stale] | add) / ([$rows[].fps] | add) * 100 else "unavailable" end) as $stale |
 (if complete($rows; "app") then [$rows[].app] | p95 else "unavailable" end) as $app |
@@ -41,6 +48,7 @@ def gate($value; $limit):
    else "unavailable" end),
  stalePercent: $stale, p95AppMs: $app,
  gates: {stale: gate($stale; $maxStale), app: gate($app; $maxApp)},
- message: (if $error != "" then $error elif $n == 0 then "no VrApi samples: performance data unavailable" else "" end)} |
+ message: (if $error != "" then $error elif $n == 0 then "no target-process VrApi samples: performance data unavailable"
+           elif ($covered | not) then "incomplete VrApi capture coverage: expected once-per-second telemetry for the full window" else "" end)} |
 .overall = (if .message != "" then "INFRA" elif $mode == "report" then "REPORT"
             elif .gates.stale.verdict == "PASS" and .gates.app.verdict == "PASS" then "PASS" else "FAIL" end)

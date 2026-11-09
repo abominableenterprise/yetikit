@@ -43,8 +43,11 @@ emit_samples() {
   local profile="$1" i app stale fields base
   base="$(date +%s)"
   [ "$profile" != empty ] || return 0
-  for ((i=1; i<=20; i++)); do
-    app="$i"; [ "$i" != 20 ] || app=30
+  local count="${QR_PERF_SECONDS:-20}" pid=4242
+  case "$profile" in truncated|early-exit) count=3 ;; esac
+  [ "$profile" != foreign ] || pid=8888
+  for ((i=1; i<=count; i++)); do
+    app="$(((i - 1) % 20 + 1))"; [ "$app" != 20 ] || app=30
     stale=0
     case "$i" in 2|3|10) stale=1 ;; esac
     [ "$profile" != app-fail ] || app=30
@@ -59,7 +62,9 @@ emit_samples() {
       missing-fps:10) fields="Stale=$stale,App=${app}ms,CPU=6ms,GPU=4ms" ;;
       optional:*) fields="FPS=72,Stale=$stale,App=${app}ms" ;;
     esac
-    printf '%s.000 4242 4242 I VrApi: %s\n' "$((base + i))" "$fields"
+    [ "$profile" != mixed ] || { [ "$i" -le 3 ] || pid=8888; }
+    [ "$profile" != gapped ] || base="$((base + 2))"
+    printf '%s.000 %s %s I VrApi: %s\n' "$((base + i))" "$pid" "$pid" "$fields"
   done
   # Other tags never contribute, even when they contain familiar field names.
   printf '%s.000 4242 4242 I OtherTag: FPS=1,Stale=99,App=999ms\n' "$base"
@@ -86,7 +91,13 @@ qr_perf_sleep() {
       wait "$child"
     else
       profile="$(command cat "$state/profile")"
-      emit_samples "$profile" >> "$state/buffer"
+      local elapsed=0
+      [ ! -f "$state/elapsed" ] || elapsed="$(command cat "$state/elapsed")"
+      elapsed=$((elapsed + $1))
+      echo "$elapsed" > "$state/elapsed"
+      if [ "$elapsed" -ge "$QR_PERF_SECONDS" ]; then
+        emit_samples "$profile" >> "$state/buffer"
+      fi
     fi
   fi
 }
@@ -119,6 +130,20 @@ adb() {
       case "$*" in
         'getprop ro.product.manufacturer') echo Oculus ;;
         'getprop ro.product.model') echo 'Synthetic Quest' ;;
+        'pidof '*)
+          if [ -f "$state/elapsed" ]; then
+            case "$profile" in
+              early-exit) printf '\nqr_pid_rc=1\n'; return 0 ;;
+              replaced) printf '8888\nqr_pid_rc=0\n'; return 0 ;;
+            esac
+          fi
+          printf '4242\nqr_pid_rc=0\n' ;;
+        'dumpsys activity activities')
+          if [ "$profile" = background ] && [ -f "$state/elapsed" ]; then
+            echo 'mResumedActivity: ActivityRecord{abc u0 other.synthetic/.Main t1}'
+          else
+            printf 'mResumedActivity: ActivityRecord{abc u0 %s/.Main t1}\n' "$QR_PKG"
+          fi ;;
         'dumpsys package '*)
           [ "$fault" != package ] || return 1
           [ "$profile" = optional ] || printf 'versionName=synthetic-build\nversionCode=42 minSdk=32\n' ;;
@@ -213,7 +238,7 @@ check 'healthy hand-computed stats use nearest-rank p95, not maximum or interpol
 check 'summary retains model, CPU4/GPU levels, thermal endpoints and APK build stamp' \
   'json_is '\''.model == "Synthetic Quest" and .levels == "4/3" and .thermalStart == "35C" and .thermalEnd == "36C" and .versionName == "synthetic-build" and (.versionCode | tostring) == "42"'\'' && jq -e --arg sha "$sha" '\''.apkSha256 == $sha'\'' "$report" >/dev/null'
 check 'warm-up records are cleared after warm-up and before the capture window' \
-  '[ "$(grep -E "sleep|logcat -c" "$tmp/events" | cut -d "|" -f2-)" = "$(printf "sleep 3 warmup\nlogcat -c\nsleep 20 capture")" ] && [ "$(wc -l < "$tmp/state/a/clears")" = 1 ] && ! grep -q "VrApi: FPS=1,Stale=99,App=999" "$run_dir/perf-logcat.txt" && [ -s "$run_dir/perf-summary.txt" ]'
+  '[ "$(grep -E "sleep|logcat -c" "$tmp/events" | cut -d "|" -f2-)" = "$(printf "sleep 3 warmup\nlogcat -c\n"; printf "sleep 1 capture\n%.0s" {1..20})" ] && [ "$(wc -l < "$tmp/state/a/clears")" = 1 ] && ! grep -q "VrApi: FPS=1,Stale=99,App=999" "$run_dir/perf-logcat.txt" && [ -s "$run_dir/perf-summary.txt" ]'
 
 wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
 check 'wait succeeds for scripted perf and prints performance measurements' \
@@ -222,7 +247,7 @@ check 'wait succeeds for scripted perf and prints performance measurements' \
 reset_case
 run "$a" perf --seconds 7 --warmup 0
 check 'CLI overrides configured seconds and accepts zero warm-up' \
-  '[ "$rc" = 0 ] && json_is '\''.seconds == 7 and .warmupSeconds == 0'\'' && grep -q "sleep 0 warmup" "$tmp/events" && grep -q "sleep 7 capture" "$tmp/events"'
+  '[ "$rc" = 0 ] && json_is '\''.seconds == 7 and .warmupSeconds == 0'\'' && grep -q "sleep 0 warmup" "$tmp/events" && [ "$(grep -c "sleep 1 capture" "$tmp/events")" = 7 ]'
 
 reset_case
 configure 'del(.quest.perf.seconds, .quest.perf.warmupSeconds)'
@@ -269,6 +294,23 @@ echo stale-fail > "$tmp/state/a/profile"
 run "$a" perf
 check 'stale above one percent reports exit zero on report-only device' \
   '[ "$rc" = 0 ] && json_is '\''.overall == "REPORT" and .stalePercent > 1 and .gates.stale.verdict == "FAIL"'\'' && restored a'
+
+for profile in early-exit truncated gapped foreign mixed replaced background; do
+  reset_case
+  echo "$profile" > "$tmp/state/a/profile"
+  run "$a" perf
+  check "$profile cannot certify an incomplete or different workload" \
+    '[ "$rc" = 3 ] && json_is '\''.overall == "INFRA" and (.message | length) > 0'\'' && restored a'
+  wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
+  check "wait propagates $profile capture failure" '[ "$wrc" = 1 ]'
+done
+
+reset_case
+configure '.quest.perf.devices["Synthetic Quest"] = "report"'
+echo truncated > "$tmp/state/a/profile"
+run "$a" perf
+check 'incomplete report-only capture is also INFRA, not REPORT' \
+  '[ "$rc" = 3 ] && json_is '\''.overall == "INFRA"'\'' && restored a'
 
 reset_case
 echo restore > "$tmp/state/a/fault"

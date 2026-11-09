@@ -14,6 +14,7 @@ qr_perf_report() {
     --arg thermalStart "$perf_thermal_start" --arg thermalEnd "$perf_thermal_end" \
     --arg scene "$scene" --arg sha "$sha" --arg versionName "${version_name:-unavailable}" \
     --arg versionCode "${version_code:-unavailable}" --arg error "$perf_error" \
+    --arg pid "${perf_pid:-}" \
     -f "$QR_DIR/quest-release/perf-stats.jq" "$QR_RUN_DIR/perf-logcat.txt" \
     > "$QR_RUN_DIR/perf-summary.json" || return 3
   jq -r '
@@ -56,8 +57,44 @@ qr_perf_restore() {
   fi
 }
 
+# Fail closed if the launched process disappears/restarts or loses foreground.
+# Poll through the window, not just at its endpoints; logcat is also PID-bound.
+qr_perf_identity() {
+  local pid activity
+  pid="$(qr_launch_pid)" || return 3
+  [ -n "$pid" ] && [ "$pid" = "$perf_pid" ] || return 3
+  activity="$(qr_adb shell dumpsys activity activities 2>/dev/null)" || return 3
+  printf '%s\n' "$activity" | awk -v package="$QR_PKG" '
+    /mResumedActivity:|topResumedActivity=/ {
+      for (i = 1; i <= NF; i++) if (index($i, package "/") == 1) found = 1
+    }
+    END {exit !found}'
+}
+
+qr_perf_capture() {
+  local second
+  perf_pid="$(qr_launch_pid)" || { perf_error='initial app PID probe failed'; return; }
+  [[ "$perf_pid" =~ ^[0-9]+$ ]] || { perf_error='target app has no unique live PID'; return; }
+  qr_perf_sleep "$QR_PERF_WARMUP"
+  qr_perf_identity || { perf_error='target app identity/foreground lost during warm-up'; return; }
+  perf_thermal_start="$(qr_perf_thermal)"
+  # Clearing AFTER warm-up makes buffered warm-up samples ineligible.
+  if ! qr_adb logcat -c; then
+    perf_error='adb logcat -c failed'; return
+  fi
+  for ((second=0; second<QR_PERF_SECONDS; second++)); do
+    qr_perf_sleep 1
+    if ! qr_perf_identity; then
+      perf_error='target app identity/foreground lost during capture'; break
+    fi
+  done
+  qr_adb logcat -d -v epoch --pid="$perf_pid" -s VrApi > "$QR_RUN_DIR/perf-logcat.txt" 2> "$QR_RUN_DIR/perf-adb.err" \
+    || perf_error='adb logcat capture failed'
+  perf_thermal_end="$(qr_perf_thermal)"
+}
+
 qr_perf_locked() (
-  local perf_prox=0 perf_error='' perf_model='' perf_package='' perf_mode=report
+  local perf_prox=0 perf_error='' perf_model='' perf_package='' perf_mode=report perf_pid=''
   local perf_thermal_start=unavailable perf_thermal_end=unavailable
   : > "$QR_RUN_DIR/perf-logcat.txt"
   # This subshell's cleanup leaves qr_device_locked's lock/cancel traps intact.
@@ -84,17 +121,7 @@ qr_perf_locked() (
     elif grep -Eq '^[[:space:]]*(Error([[:space:]:]|$)|Exception([[:space:]:]|$)|[[:alnum:]_.$]+Exception:)' "$QR_RUN_DIR/perf-am.log"; then
       perf_error='am start reported an error (perf-am.log)'
     else
-      qr_perf_sleep "$QR_PERF_WARMUP"
-      perf_thermal_start="$(qr_perf_thermal)"
-      # Clearing AFTER warm-up makes buffered warm-up samples ineligible.
-      if ! qr_adb logcat -c; then
-        perf_error='adb logcat -c failed'
-      else
-        qr_perf_sleep "$QR_PERF_SECONDS"
-        qr_adb logcat -d -v epoch -s VrApi > "$QR_RUN_DIR/perf-logcat.txt" 2> "$QR_RUN_DIR/perf-adb.err" \
-          || perf_error='adb logcat capture failed'
-        perf_thermal_end="$(qr_perf_thermal)"
-      fi
+      qr_perf_capture
     fi
   fi
   qr_perf_restore || true
