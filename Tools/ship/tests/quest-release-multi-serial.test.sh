@@ -44,7 +44,13 @@ qr_parallel_unity() {
   qr_set gate 'passed'; qr_set gate_result passed
   qr_set apk "$tmp/new.apk"
 }
-qr_verify() { printf 'verify %s\n' "$1" >> "$tmp/steps"; }
+qr_verify_base="$(declare -f qr_verify)"
+eval "${qr_verify_base/qr_verify ()/qr_fixture_real_verify ()}"
+qr_verify() {
+  printf 'verify %s\n' "$1" >> "$tmp/steps"
+  # Exercise the production early missing-file failure, without SDK/device work.
+  [ -f "$1" ] || qr_fixture_real_verify "$@"
+}
 qr_backup() { printf '%s\n' "$tmp/backup-$QUEST_SERIAL"; }
 qr_cleanup() { echo cleanup >> "$tmp/steps"; }
 qr_apk_commit() { printf 'abc123456\n'; }
@@ -313,6 +319,23 @@ check 'single serial keeps its original artifact layout and summary format' \
   '[ "$rc" = 0 ] && installed_once a && no_rollback a && [ -s "$run_dir/install-adb.log" ] && [ -s "$run_dir/launch-report.txt" ] && [ ! -e "$run_dir/devices" ] && grep -q "^install: *install ok" "$summary" && grep -q "^launch: *fps .*alive yes" "$summary"'
 wait_run
 check 'single-serial wait remains successful' '[ "$wrc" = 0 ]'
+
+# Reusing a single-device run must not let a pre-device list verification
+# failure advertise the earlier install/launch successes. No adb work may start.
+for operation in install rollback; do
+  reset_case
+  run "$a" all
+  check "seed single-device success before list $operation verification failure" \
+    '[ "$rc" = 0 ] && grep -q "^install: *install ok" "$summary" && grep -q "^launch: *fps .*alive yes" "$summary"'
+  old_run="$run_dir"
+  : > "$tmp/adb.log"
+  run "$a,$b" "$operation" "$tmp/missing.apk"
+  check "list $operation verification failure replaces stale root successes" \
+    '[ "$rc" = 3 ] && [ "$run_dir" = "$old_run" ] && [ ! -s "$tmp/adb.log" ] && ! grep -Eq "^install: *install ok|^launch: *fps .*alive yes" "$summary" && grep -q "^overall: *INFRA" "$summary" && [ -z "$(command cat "$run_dir/summary/device_results")" ]'
+  wait_run
+  check "wait exposes list $operation verification failure before any device rows" \
+    '[ "$wrc" = 1 ] && grep -q "^overall: *INFRA" "$tmp/wait.out" && ! grep -Eq "^install: *install ok|^launch: *fps .*alive yes" "$tmp/wait.out"'
+done
 
 [ "$fails" = 0 ] || { echo "$fails failed"; exit 1; }
 echo 'all passed'

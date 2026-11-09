@@ -86,6 +86,11 @@ qr_multi() {
   qr_set multi_command "$cmd"
   qr_set multi_result 3
   qr_set overall 'INFRA: device work did not complete'
+  # Root device fields belong to the old single-device attempt, not this list.
+  # Invalidate them before verification can stop us without any device rows.
+  for step in idle backup install data_hash mic launch; do
+    qr_set "$step" "not run at root (list $cmd; see per-device results)"
+  done
   if [ "$cmd" = install ] || [ "$cmd" = rollback ]; then
     ( qr_java_setup && qr_verify "$apk" ) || return 3
   fi

@@ -104,7 +104,11 @@ EOF
 )"
   if [ -n "$(qr_get device_results '')" ]; then
     block="$block
-$(qr_get device_results '')
+$(qr_get device_results '')"
+  fi
+  # Pre-device failures still publish the list operation's overall verdict.
+  if [ -n "$(qr_get multi_command '')" ]; then
+    block="$block
 overall:     $(qr_get overall)"
   fi
   printf '%s\n' "$block"
