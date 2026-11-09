@@ -97,6 +97,7 @@ install:     $(qr_get install)
 data hash:   $(qr_get data_hash)
 mic:         $(qr_get mic)
 launch:      $(qr_get launch)
+perf:        $(qr_get perf)
 worktrees:   $(qr_get cleanup)
 run folder:  ${QR_RUN_DIR:--}
 ===============================

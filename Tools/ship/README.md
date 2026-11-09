@@ -516,6 +516,85 @@ publish their invocation identity before device discovery; `wait` requires that
 invocation's terminal result even when discovery fails before preparing a new
 run folder, rather than accepting an earlier release's successful summary.
 
+## Quest performance capture
+
+`Tools/ship/quest-release.sh perf [--seconds N] [--warmup S]` launches the
+installed app using the same activity/argument path as `launch` (including
+`quest.launchArgs`). It disables the proximity sensor, waits out warm-up,
+clears logcat, captures the window, then restores the sensor. Cleanup traps
+restore it on failures and cancellation too; an unreachable device is reported
+as infrastructure failure, not success. No build, install, editor or credentials
+are needed. Manual `perf start` / `perf stop` is tracked in
+[#61](https://github.com/abominableenterprise/yetikit/issues/61).
+
+Optional configuration under `quest`:
+
+```json
+{
+  "perf": {
+    "warmupSeconds": 10,
+    "seconds": 60,
+    "maxStalePercent": 1,
+    "maxP95AppMs": 13.9,
+    "devices": {
+      "Quest 2": "gate",
+      "Quest 3": "report"
+    }
+  }
+}
+```
+
+All shown numeric values are defaults. Warm-up is a nonnegative integer,
+capture seconds a positive integer, thresholds nonnegative numbers. `devices`
+is an optional model-to-`gate`/`report` map, keyed by `ro.product.model`;
+unlisted models **report only**. CLI durations override configuration.
+
+The compositor's once-per-second `VrApi` records are parsed by field name,
+tolerating reordered/optional fields. Stale percent is `100 * sum(Stale) /
+sum(FPS frames)`. App p95 uses nearest-rank **per-second samples**, not individual
+frame telemetry. Both thresholds are inclusive. Average FPS never gates.
+Missing gate inputs in any sample make that gate unavailable (FAIL in gate
+mode); missing optional measurements say `unavailable`. No samples is INFRA,
+never PASS. Captures also require the same unique app PID and resumed package
+through warm-up and each second of the window. PID-filtered epoch logcat is
+validated again while parsing, so another process cannot supply passing samples.
+Missing/replaced/backgrounded app identity is INFRA. Coverage requires at least
+N−1 samples (minimum one), a timestamp span of at least N−2 seconds, and no
+nonpositive or greater-than-2.5-second intervals. This allows boundary jitter,
+not short surviving fragments; insufficient coverage is INFRA in both modes.
+CPU and GPU frame-time means are reported separately when present.
+The stale streak counts adjacent samples with Stale > 0, resetting on an epoch
+timestamp gap greater than 1.5 seconds. No interpolation fills lost samples.
+
+Each selected `QUEST_SERIAL` receives `perf-summary.txt`, `perf-summary.json`
+and raw `perf-logcat.txt` in the current run directory (encoded `devices/`
+subfolders for lists, same as install/launch). The run's known APK SHA-256 is
+included alongside installed versionName/versionCode; absent metadata is
+unavailable. Thermal readings use first/last sample `Temp`, falling back to
+`dumpsys thermalservice` status at the capture boundaries, or unavailable. Example synthetic gate-mode summary excerpt:
+
+```text
+Quest performance: PASS
+device model: Quest 2 (gate)
+CPU/GPU levels: 4/4
+thermal start/end: 33.0C/0.0C / 34.0C/0.0C
+APK versionName/versionCode: 1.2 / 12
+scene: benchmark
+window: 60s; warm-up excluded: 10s; samples: 60
+stale frames: 0% <= 1%: PASS
+App p95 (per-second samples): 12 ms <= 13.9 ms: PASS
+average fps (report only): 72
+worst App: 13 ms
+longest consecutive stale seconds: 0
+```
+
+Overall is PASS/FAIL in gate mode, REPORT in report-only mode, or INFRA on
+capture failure. Exit codes: **0** PASS/REPORT, **1** gate failure, **3**
+infrastructure failure (including adb errors/no data). Lists continue after
+failures and reduce with the existing launch precedence **1 > 3 > 0**.
+`summary.txt` and `wait` include each device's performance summary; `wait`
+retains its existing 0-success / 1-failure contract.
+
 ### Safety
 
 - Never uninstall, clear app data, grant or revoke permissions. Installation
@@ -542,7 +621,7 @@ run folder, rather than accepting an earlier release's successful summary.
 | Variable | Default / purpose |
 | --- | --- |
 | `PROJECT`, `YETIKIT_CONFIG` | Consumer root / root `yetikit.json`; `QUEST_REPO` remains a compatibility root override. |
-| `QUEST_SERIAL` | Environment-only serial or ordered comma/whitespace list for all/install/launch/rollback; otherwise require exactly one attached device. |
+| `QUEST_SERIAL` | Environment-only serial or ordered comma/whitespace list for all/install/launch/rollback/perf; otherwise require exactly one attached device. |
 | `QUEST_CERT_SHA256` | Required expected APK signer for doctor/build/verify/install/rollback; use the release certificate with `quest.signing`. No default. |
 | `QUEST_WT_ROOT`, `QUEST_WARM_WORKTREE` | Configured worktree root / `<root>/mac-pass`. |
 | `QUEST_LOG_ROOT`, `QUEST_APK_DIR` | `<root>/release-logs` / warm worktree plus directory of `build.apkPath`. |

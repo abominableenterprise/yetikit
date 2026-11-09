@@ -189,6 +189,7 @@ qr_cancel() {
     QR_ACTIVE_STEP=""
   fi
   [ ! -f "$(qr_state_file)" ] || qr_load_state
+  [ "$cmd" != perf ] || qr_perf_cancel
   qr_summary
   qr_lock_result "$cmd" 1
   exit 1
