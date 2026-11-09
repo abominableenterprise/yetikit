@@ -9,6 +9,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
+- None.
+
+### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
+## [0.1.7] - 2026-11-09
+
+### Added
 - Repeatable Quest performance windows with warm-up exclusion, per-model
   frame-time/stale-frame gates, text/JSON reports and proximity restoration.
 
