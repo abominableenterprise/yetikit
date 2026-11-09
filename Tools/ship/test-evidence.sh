@@ -30,12 +30,13 @@ sys.exit(0 if set(sys.argv[2].splitlines()) <= passed else 1)
 PY
 }
 
-# $1: pass label, $2: XML, $3: allow a zero-total optional Gfx selection (never a retry).
+# $1: pass label, $2: XML, $3: allow zero-total optional Gfx (1) or filtered dual-pass selection.
+# Sets TEST_EXECUTED to passed + failed after validation; retries never allow empty.
 # Parse XML rather than searching for a tag in garbage, comments or a nested element.
 # Python's standard library is also used by the Android tooling; no third-party parser.
 test_evidence() {
-  local reason
-  if ! reason="$(python3 - "$2" "${3:-0}" <<'PY'
+  local evidence
+  if ! evidence="$(python3 - "$2" "${3:-0}" <<'PY'
 import os
 import re
 import sys
@@ -65,16 +66,24 @@ for key in ("total", "passed", "failed", "skipped"):
     counts.append(int(value))
 total, passed, failed, skipped = counts
 if total == 0:
-    if allow_empty == "1" and counts == [0, 0, 0, 0]:
-        print("no tests selected (Gfx categories); treated as empty")
-    else:
+    if allow_empty not in ("1", "filtered") or counts != [0, 0, 0, 0]:
         fail("no executed tests (total is 0)")
 elif passed == 0 and failed == 0:
     fail("no executed tests (all skipped or ignored)")
+print(passed + failed)
 PY
 )"; then
-    log "$1: invalid test evidence: ${reason:-could not parse result XML} ($2)"
+    log "$1: invalid test evidence: ${evidence:-could not parse result XML} ($2)"
     return 1
   fi
-  [ -z "$reason" ] || log "$1: $reason"
+  TEST_EXECUTED="$evidence"
+  if [ "$TEST_EXECUTED" = 0 ]; then
+    if [ "${3:-0}" = filtered ]; then
+      local category=pure
+      [ "$1" != editmode-gfx ] || category=Gfx
+      log "$1: -testFilter '$TEST_FILTER' matched no $category tests; pass empty"
+    else
+      log "$1: no tests selected (Gfx categories); treated as empty"
+    fi
+  fi
 }
