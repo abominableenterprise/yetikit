@@ -41,6 +41,11 @@ qr_config() {
   QR_APK_DIR="${QUEST_APK_DIR:-$QR_WARM/$(dirname "$QR_APK_REL")}"
   QR_MIN_FREE_GB="${QUEST_MIN_FREE_GB:-25}"
   QR_CERT_SHA256="${QUEST_CERT_SHA256:-}"
+  # Keep names only; prebuilt APK commands never need to resolve signing credentials.
+  QR_SIGNING_PATH_ENV="$(qr_config_get '.quest.signing.keystorePathEnv // empty')"
+  QR_SIGNING_PASS_ENV="$(qr_config_get '.quest.signing.storePassEnv // empty')"
+  QR_SIGNING_ALIAS_ENV="$(qr_config_get '.quest.signing.keyAliasEnv // empty')"
+  QR_SIGNING_KEY_PASS_ENV="$(qr_config_get '.quest.signing.keyPassEnv // empty')"
   QUEST_SERIAL="${QUEST_SERIAL:-}"
   QR_BACKUP_ROOT="${QUEST_BACKUP_ROOT:-$HOME}"
   QR_LAUNCH_WAIT="${QR_LAUNCH_WAIT:-${QUEST_LAUNCH_WAIT:-60}}"

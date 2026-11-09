@@ -238,7 +238,9 @@ qr_build_attempt() (
     chmod +x "$watch/editor" "$watch/editor-group" || return 1
     printf '%s\n' "$watch/editor"
   }
-  ANDROID_USER_HOME="$(qr_android_user_home)"; export ANDROID_USER_HOME; unset XDG_CONFIG_HOME
+  if [ -z "${QR_SIGNING_PATH_ENV:-}" ]; then
+    ANDROID_USER_HOME="$(qr_android_user_home)"; export ANDROID_USER_HOME; unset XDG_CONFIG_HOME
+  fi
   QR_UNITY_TIMEOUT="$QR_BUILD_TIMEOUT" unity "$@" &
   job=$!
   while kill -0 "$job" 2>/dev/null; do

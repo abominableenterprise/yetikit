@@ -2,7 +2,7 @@
 # Release a configured Unity project to an attached Quest from macOS.
 #
 # Usage: Tools/ship/quest-release.sh <command> [args]
-#   doctor            read-only Java, SDK, keystore, Unity, disk and headset preflight
+#   doctor            read-only Java, SDK, configured signing/debug keystore, Unity, disk and headset preflight
 #   all [<ref>] [--rollback <apk>] [--force] [--full] [--notes <file>]
 #                     prepare, gate/build in parallel, verify, install, launch, cleanup
 #   prepare [<ref>]   fetch origin and prepare two clean worktrees (default origin/main)
@@ -35,6 +35,8 @@ QR_SHIP_DIR="$QR_DIR"
 . "$QR_DIR/test-passes.sh" # failed_tests, known_flakes, is_known_flake (shared with linux-unity.sh)
 # shellcheck source=Tools/ship/quest-release/flakes.sh
 . "$QR_DIR/quest-release/flakes.sh"
+# shellcheck source=Tools/ship/quest-release/signing.sh
+. "$QR_DIR/quest-release/signing.sh"
 # shellcheck source=Tools/ship/quest-release/verify.sh
 . "$QR_DIR/quest-release/verify.sh"
 # shellcheck source=Tools/ship/quest-release/device.sh
@@ -85,7 +87,11 @@ qr_all() {
   [ -z "$rollback" ] || [ -f "$rollback" ] || qr_die "--rollback APK $rollback does not exist"
   ( qr_prepare "$ref" ) || return 1
   qr_load_state
-  ( qr_keystore_preflight ) || { qr_set install "skipped: wrong debug keystore"; return 1; }
+  ( qr_keystore_preflight ) || {
+    if [ -n "${QR_SIGNING_PATH_ENV:-}" ]; then qr_set install "skipped: signing keystore failed";
+    else qr_set install "skipped: wrong debug keystore"; fi
+    return 1
+  }
   QR_KEYSTORE_CHECKED=1
   qr_parallel_unity "$full"
   if [ "$QR_BUILD_RC" != 0 ]; then

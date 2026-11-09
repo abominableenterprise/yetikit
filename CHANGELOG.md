@@ -6,6 +6,26 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
+## [Unreleased]
+
+### Added
+- Optional `quest.signing` maps environment-variable names for release-keystore
+  certificate lookup, with PKCS12/JKS autodetection. The consumer build retains
+  responsibility for signing using its inherited environment.
+
+### Fixed
+- None.
+
+### Behaviour changes
+- None for projects without signing config; existing debug-keystore behavior
+  is unchanged.
+
+### Adapter changes
+- Optional adoption: configure `quest.signing.keystorePathEnv`, `storePassEnv`
+  and `keyAliasEnv`, plus `keyPassEnv` if needed by the consumer build. Supply
+  the mapped environment variables, set `QUEST_CERT_SHA256` to the release
+  certificate fingerprint and run `quest-release.sh doctor` before building.
+
 ## [0.1.4] - 2026-11-09
 
 ### Added

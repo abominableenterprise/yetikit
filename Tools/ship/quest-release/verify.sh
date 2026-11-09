@@ -37,8 +37,6 @@ qr_norm_hex() { printf '%s\n' "$1" | tr -d ':[:space:]' | tr 'A-F' 'a-f'; }
 # with ANDROID_USER_HOME unset AGP prefers $XDG_CONFIG_HOME/.android, a different key from a fish login shell.
 qr_android_user_home() { printf '%s\n' "${ANDROID_USER_HOME:-$HOME/.android}"; }
 
-# Debug keystore $1 against QR_CERT_SHA256: prints its androiddebugkey SHA-256 (lowercase hex) when keytool reads it,
-# never keytool's other output. Returns 0 match, 1 another certificate, 2 no keystore, 3 no keytool, 4 unreadable.
 qr_require_certificate() {
   local cert
   cert="$(qr_norm_hex "${QUEST_CERT_SHA256:-}")"
@@ -46,27 +44,24 @@ qr_require_certificate() {
   QR_CERT_SHA256="$cert"
 }
 
-qr_keystore_check() {
-  local got
-  qr_require_certificate
-  [ -f "$1" ] || return 2
-  command -v keytool >/dev/null 2>&1 || return 3
-  got="$(keytool -list -v -keystore "$1" -storepass android -alias androiddebugkey < /dev/null 2>/dev/null \
-    | sed -n 's/^[[:space:]]*SHA-\{0,1\}256:[[:space:]]*//p' | head -n1)"
-  got="$(qr_norm_hex "$got")"
-  [ -n "$got" ] || return 4
-  printf '%s\n' "$got"
-  [ "$got" = "$(qr_norm_hex "$QR_CERT_SHA256")" ] || return 1
-}
-
-# Before the long gate/build: the debug keystore must hold the certificate verify expects (the project signs with
-# signingConfigs.debug). A missing keystore, no keytool or an unreadable one only logs: verify still checks the APK.
+# Before the long gate/build: check the signing certificate the resulting APK must use.
+# Debug-only discovery failures retain the historical warning behavior; custom signing fails closed.
 qr_keystore_preflight() {
   local ks want got rc=0
   qr_require_certificate
-  ks="$(qr_android_user_home)/debug.keystore"
+  qr_signing_resolve || qr_die "keystore preflight: $QR_SIGNING_ERROR"
+  ks="$QR_KEYSTORE_LABEL"
   want="$(qr_norm_hex "$QR_CERT_SHA256")"
-  got="$(qr_keystore_check "$ks")" || rc=$?
+  got="$(qr_keystore_check "$QR_KEYSTORE_PATH" "$QR_KEYSTORE_ALIAS" "$QR_KEYSTORE_PASS_ENV")" || rc=$?
+  if [ -n "${QR_SIGNING_PATH_ENV:-}" ] && [ "$rc" != 0 ]; then
+    qr_set apk "not built: $ks failed certificate check"
+    case "$rc" in
+      1) qr_die "keystore preflight: $ks has certificate SHA-256 $got, not the expected $want (QUEST_CERT_SHA256)" ;;
+      2) qr_die "keystore preflight: file named by $QR_SIGNING_PATH_ENV is missing" ;;
+      3) qr_die "keystore preflight: $ks not checked: no keytool on PATH" ;;
+      *) qr_die "keystore preflight: keytool could not read $ks (check $QR_SIGNING_PASS_ENV and $QR_SIGNING_ALIAS_ENV)" ;;
+    esac
+  fi
   case "$rc" in
     2) qr_log "keystore preflight: no $ks yet (Gradle creates it); verify checks the APK signer"; return 0 ;;
     3) qr_log "keystore preflight: no keytool on PATH; skipped (verify checks the APK signer)"; return 0 ;;
