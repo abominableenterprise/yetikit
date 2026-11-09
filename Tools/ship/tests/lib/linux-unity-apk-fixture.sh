@@ -12,6 +12,19 @@ printf 'm_EditorVersion: 6000.6.6f1\n' > "$proj/ProjectSettings/ProjectVersion.t
 # shellcheck source=Tools/ship/tests/lib/fake-unity.sh
 . "$repo/Tools/ship/tests/lib/fake-unity.sh"
 git_init
+# APK contracts do not exercise installation-wide editor discovery; that scan
+# has dedicated process-scan/setup/foreign-process suites. Keep cleanup itself
+# real, but avoid inspecting unrelated worker processes in this fixture copy.
+python3 - "$script" "$proj" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+assert path.resolve().is_relative_to(Path(sys.argv[2]).resolve())
+source = path.read_text()
+needle = 'unity_pids() {\n'
+assert source.count(needle) == 1
+path.write_text(source.replace(needle, needle + '  return 0 # synthetic APK fixture: no foreign installation\n'))
+PY
 android="$tmp/unity/Editor/Data/PlaybackEngines/AndroidPlayer"
 lu() { bash "$script" "$@" 2>"$tmp/err"; }
 # The fake build: WorldBuild writes the APK named by the method (FAKE_APK_BYTES, default "apk"), unless FAKE_NO_APK=1.

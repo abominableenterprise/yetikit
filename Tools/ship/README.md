@@ -243,8 +243,9 @@ Normal PRs run focused files (including relevant slow regressions), plus
 Tools/ship/tests/run.sh quest-release.test.sh
 ```
 
-Pass one or more exact test basenames to the serial runner for the same isolation
-and timeout as CI. It reports elapsed seconds per file, total duration and the
+Pass one or more exact test basenames to the runner for the same isolation
+and timeout as CI. It runs two files at a time by default (`SHIP_TEST_JOBS=1`
+for serial execution, maximum 8); `# test-all: serial` files always run alone. It reports elapsed seconds per file, total duration and the
 three slowest files. Its test-only jq wrapper memoizes the three pure config
 filters by filter and input bytes; config changes invalidate entries and other
 queries run normally. The release-flow fixture also reuses immutable parsed JSON;
