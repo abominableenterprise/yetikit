@@ -12,13 +12,16 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Filtered EditMode runs no longer fail solely because the pure or Gfx pass
+  selects no tests when the other pass executes the matching tests.
 
 ### Behaviour changes
-- None.
+- Filtered two-pass EditMode runs allow per-pass empty selections with valid
+  result XML, but the combined executed count must be greater than zero.
+  Filters matching neither pass fail with a diagnostic naming the filter.
 
 ### Adapter changes
-- None.
+- None (the EDITMODE_GFX=0 workaround is no longer needed).
 
 ## [0.1.5] - 2026-11-09
 

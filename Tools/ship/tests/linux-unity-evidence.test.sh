@@ -35,8 +35,35 @@ done
 FAKE_GFX_XML_MODE=zero run editmode
 check "plain EditMode allows an implicit empty Gfx pass and explains why" \
   '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/runs")" = 2 ] && grep -q "editmode-gfx: no tests selected (Gfx categories); treated as empty" "$tmp/err"'
-FAKE_GFX_XML_MODE=zero run editmode -testFilter X.Tests.Selected
-check "a caller filter does not allow an empty Gfx pass" '[ "$rc" != 0 ]'
+FAKE_GFX_XML_MODE=zero run editmode -testFilter PureClass
+check "filtered pure tests allow an empty Gfx pass with an explanation" \
+  '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/runs")" = 2 ] && grep -q "editmode-gfx: -testFilter.*PureClass.*no Gfx tests; pass empty" "$tmp/err"'
+FAKE_XML_MODE=zero FAKE_GFX_XML_MODE=normal run editmode -testFilter GfxClass
+check "filtered Gfx tests allow an empty pure pass with an explanation" \
+  '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/runs")" = 2 ] && grep -q "editmode: -testFilter.*GfxClass.*no pure tests; pass empty" "$tmp/err"'
+FAKE_XML_MODE=zero run editmode -testFilter Nope
+check "a filter matching neither pass fails closed and names the filter" \
+  '[ "$rc" != 0 ] && [ "$(wc -l < "$tmp/runs")" = 2 ] && grep -q -- "-testFilter.*Nope.*no executed tests across.*passes" "$tmp/err"'
+for mode in no-file empty garbage skipped; do
+  FAKE_GFX_XML_MODE="$mode" run editmode -testFilter PureClass
+  check "a filter does not excuse Gfx $mode evidence" \
+    '[ "$rc" != 0 ] && grep -q "editmode-gfx:.*test evidence" "$tmp/err"'
+  FAKE_XML_MODE="$mode" FAKE_GFX_XML_MODE=normal run editmode -testFilter GfxClass
+  check "a filter does not excuse pure $mode evidence" \
+    '[ "$rc" != 0 ] && grep -q "editmode:.*test evidence" "$tmp/err"'
+done
+FAKE_XML_MODE=zero run editmode
+check "unfiltered pure pass still cannot be empty" '[ "$rc" != 0 ]'
+EDITMODE_GFX=0 run editmode -testFilter PureClass
+check "disabling Gfx still runs just the filtered pure pass" \
+  '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/runs")" = 1 ]'
+FAKE_XML_MODE=zero EDITMODE_GFX=0 run editmode -testFilter PureClass
+check "disabling Gfx still requires executed pure tests" '[ "$rc" != 0 ]'
+FAKE_FAILS=X.Tests.Flaky KNOWN_FLAKES="$tmp/flakes" FAKE_RETRY_XML_MODE=zero run editmode -testFilter PureClass
+check "filtered dual-pass retries must still execute tests" \
+  '[ "$rc" = 2 ] && grep -q "editmode-retry:.*test evidence" "$tmp/err"'
+FAKE_UNITY_RC=7 FAKE_GFX_XML_MODE=zero run editmode -testFilter PureClass
+check "an empty filtered pass does not excuse an editor failure" '[ "$rc" = 7 ]'
 FAKE_GFX_XML_MODE=zero run editmode -testCategory Gfx
 check "an explicit Gfx category must execute tests" '[ "$rc" != 0 ]'
 for mode in no-file empty garbage skipped; do
