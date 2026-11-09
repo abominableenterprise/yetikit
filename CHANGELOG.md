@@ -12,6 +12,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
+## [0.1.6] - 2026-11-09
+
+### Added
+- None.
+
+### Fixed
 - Filtered EditMode runs no longer fail solely because the pure or Gfx pass
   selects no tests when the other pass executes the matching tests.
 
