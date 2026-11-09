@@ -39,7 +39,9 @@ export QUEST_REPO="$repo" QUEST_WT_ROOT="$root" QUEST_BACKUP_ROOT="$tmp/home" QR
 mkdir -p "$HOME"
 fake_jdk() { mkdir -p "$1/bin" && printf '#!/bin/sh\n' > "$1/bin/java" && chmod +x "$1/bin/java"; }
 fake_jdk "$tmp/jdk"; export JAVA_HOME="$tmp/jdk"
-serial=synthetic-device
+# Each independent fixture has a distinct synthetic headset lock identity.
+serial="synthetic-device-${tmp##*/}"
+export QUEST_SERIAL="$serial"
 cert="00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF"
 
 # shellcheck source=Tools/ship/quest-release.sh
