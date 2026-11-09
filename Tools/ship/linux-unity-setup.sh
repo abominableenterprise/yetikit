@@ -97,18 +97,24 @@ pick_image() {
 
 has_android() { [ -d "$UNITY_ROOT/$ANDROID_REL/SDK" ] && [ -d "$UNITY_ROOT/$ANDROID_REL/NDK" ]; }
 
+# Establish process visibility with deletion's privileges; incomplete inspection refuses too.
+refuse_editor_in_use() {
+  local remaining
+  remaining="$(as_root env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids strict")" \
+    || die "cannot inspect processes safely; refusing to replace $UNITY_ROOT"
+  [ -z "$remaining" ] || die "cannot replace $UNITY_ROOT while Unity processes remain (PIDs:$remaining); close them and re-run setup"
+}
+
 # setup --android over a complete editor without the Android module: remove it (the disk cannot hold both) so
 # install_editor extracts the android image. An incomplete root is left for install_editor to refuse.
 replace_base_editor() {
   [ "$UNITY_MODULES" = android ] && [ -x "$UNITY_BIN" ] && ! has_android || return 0
   as_root test -e "$UNITY_ROOT/$DONE_MARK" || return 0
   log "replacing the editor at $UNITY_ROOT (no Android module) with $UNITY_IMAGE"
-  # Establish visibility with deletion's privileges before even wiping shared resources.
-  local remaining
-  remaining="$(as_root env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids strict")" \
-    || die "cannot inspect processes safely; refusing to replace $UNITY_ROOT"
-  [ -z "$remaining" ] || die "cannot replace $UNITY_ROOT while Unity processes remain (PIDs:$remaining); close them and re-run setup"
+  refuse_editor_in_use
   cleanup_unity
+  # Cleanup delays: an editor may have started since the first scan.
+  refuse_editor_in_use
   as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 }
 

@@ -12,7 +12,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Android setup re-checks for running editors after cleanup and refuses replacement if an editor started during the cleanup delay or process inspection is incomplete.
 
 ### Behaviour changes
 - None.
