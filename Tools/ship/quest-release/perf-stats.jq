@@ -21,7 +21,10 @@ def gate($value; $limit):
    cpu: number($f.CPU), gpu: number($f.GPU),
    time: ((try ($line | capture("^\\s*(?<t>[0-9]+\\.[0-9]+)\\s").t | tonumber) catch null) // null),
    levels: ($f | to_entries | map(select(.key | test("^CPU[0-9]*/GPU$"))) | .[0].value // "unavailable"),
-   temp: ($f.Temp // "unavailable")}] as $rows |
+   temp: ($f.Temp // "unavailable")} |
+  # Retain the raw dump for diagnostics, but never let late samples dilute a
+  # gate. Epoch boundaries come from the device, independently of host time.
+  select($windowStart == null or (.time >= $windowStart and .time < $windowEnd))] as $rows |
 ($rows | length) as $n |
 # Allow one boundary sample of jitter, never a short surviving fragment or gap.
 ([$rows[].time] | sort) as $times |

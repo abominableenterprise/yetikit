@@ -41,10 +41,13 @@ fixture_id() {
 # Use real epoch-formatted timestamps, including adjacent seconds for streaks.
 emit_samples() {
   local profile="$1" i app stale fields base
-  base="$(date +%s)"
+  base="$(command cat "$state/window-start" 2>/dev/null || command cat "$state/clock")"
   [ "$profile" != empty ] || return 0
   local count="${QR_PERF_SECONDS:-20}" pid=4242
-  case "$profile" in truncated|early-exit) count=3 ;; esac
+  case "$profile" in
+    truncated|early-exit) count=3 ;;
+    slow-probes) count=$(( $(command cat "$state/clock") - base + 20 )) ;;
+  esac
   [ "$profile" != foreign ] || pid=8888
   for ((i=1; i<=count; i++)); do
     app="$(((i - 1) % 20 + 1))"; [ "$app" != 20 ] || app=30
@@ -52,6 +55,12 @@ emit_samples() {
     case "$i" in 2|3|10) stale=1 ;; esac
     [ "$profile" != app-fail ] || app=30
     [ "$profile" != stale-fail ] || stale=2
+    # Two hitches in the requested 20 seconds fail both gates, but dilution
+    # with another 40+ healthy seconds would make both pass.
+    if [ "$profile" = slow-probes ]; then
+      app=5; stale=0
+      if [ "$i" = 2 ] || [ "$i" = 3 ]; then app=30; stale=10; fi
+    fi
     fields="FPS=72/72,Stale=$stale,App=${app}ms,CPU=6ms,GPU=4ms,CPU4/GPU=4/3,Temp=$((35 + i / 20))C"
     if [ "$i" = 4 ]; then
       fields="Temp=35C, GPU=4ms, App=${app}ms, Stale=$stale, CPU4/GPU=4/3, CPU=6ms, FPS=72/72"
@@ -64,13 +73,21 @@ emit_samples() {
     esac
     [ "$profile" != mixed ] || { [ "$i" -le 3 ] || pid=8888; }
     [ "$profile" != gapped ] || base="$((base + 2))"
-    printf '%s.000 %s %s I VrApi: %s\n' "$((base + i))" "$pid" "$pid" "$fields"
+    printf '%s.500 %s %s I VrApi: %s\n' "$((base + i - 1))" "$pid" "$pid" "$fields"
   done
   # Other tags never contribute, even when they contain familiar field names.
   printf '%s.000 4242 4242 I OtherTag: FPS=1,Stale=99,App=999ms\n' "$base"
   if [ "$profile" = diagnostic ]; then
     printf '%s.000 4242 4242 I VrApi: compositor initialized\n' "$base"
   fi
+}
+# Persist virtual elapsed time across adb command substitutions. Slow probes
+# cost one second each without making this synthetic suite wait in real time.
+qr_perf_now() { command cat "$tmp/state/$(fixture_id "$QUEST_SERIAL")/clock"; }
+advance_clock() {
+  local now
+  now="$(command cat "$state/clock")"
+  echo "$((now + $1))" > "$state/clock"
 }
 # Model the device's buffered logcat: warm-up fills it, -c empties it, and
 # capture adds its own records. A missing/misordered clear contaminates stats.
@@ -79,6 +96,7 @@ qr_perf_sleep() {
   id="$(fixture_id "$QUEST_SERIAL")" || return 99
   state="$tmp/state/$id"
   phase="$(command cat "$state/phase")"
+  advance_clock "$1"
   printf '%s|sleep %s %s\n' "$QUEST_SERIAL" "$1" "$phase" >> "$tmp/events"
   if [ "$phase" = warmup ]; then
     printf '%s.000 4242 4242 I VrApi: FPS=1,Stale=99,App=999ms\n' "$(date +%s)" >> "$state/buffer"
@@ -95,9 +113,6 @@ qr_perf_sleep() {
       [ ! -f "$state/elapsed" ] || elapsed="$(command cat "$state/elapsed")"
       elapsed=$((elapsed + $1))
       echo "$elapsed" > "$state/elapsed"
-      if [ "$elapsed" -ge "$QR_PERF_SECONDS" ]; then
-        emit_samples "$profile" >> "$state/buffer"
-      fi
     fi
   fi
 }
@@ -119,18 +134,25 @@ adb() {
         *' -c '*)
           [ "$fault" != clear ] || return 1
           : > "$state/buffer"
+          command cat "$state/clock" > "$state/window-start"
           echo cleared >> "$state/clears" ;;
         *' -d '*)
           [ "$fault" != logcat ] || return 1
+          emit_samples "$profile" >> "$state/buffer"
           command cat "$state/buffer" ;;
         *) return 99 ;;
       esac ;;
     shell)
       shift
       case "$*" in
+        'date +%s')
+          [ "$fault" != clock ] || return 1
+          if [ "$fault" = bad-clock ]; then echo invalid; return 0; fi
+          command cat "$state/clock" | tee "$state/window-start" ;;
         'getprop ro.product.manufacturer') echo Oculus ;;
         'getprop ro.product.model') echo 'Synthetic Quest' ;;
         'pidof '*)
+          [ "$profile" != slow-probes ] || advance_clock 1
           if [ -f "$state/elapsed" ]; then
             case "$profile" in
               early-exit) printf '\nqr_pid_rc=1\n'; return 0 ;;
@@ -139,6 +161,7 @@ adb() {
           fi
           printf '4242\nqr_pid_rc=0\n' ;;
         'dumpsys activity activities')
+          [ "$profile" != slow-probes ] || advance_clock 1
           if [ "$profile" = background ] && [ -f "$state/elapsed" ]; then
             echo 'mResumedActivity: ActivityRecord{abc u0 other.synthetic/.Main t1}'
           else
@@ -192,6 +215,7 @@ reset_case() {
     echo healthy > "$tmp/state/$id/profile"
     echo none > "$tmp/state/$id/fault"
     echo warmup > "$tmp/state/$id/phase"
+    echo 1700000000 > "$tmp/state/$id/clock"
     : > "$tmp/state/$id/buffer"
   done
   : > "$tmp/adb.log"; : > "$tmp/events"
@@ -254,6 +278,18 @@ configure 'del(.quest.perf.seconds, .quest.perf.warmupSeconds)'
 run "$a" perf
 check 'absent window settings use 60-second capture and 10-second warm-up defaults' \
   '[ "$rc" = 0 ] && json_is '\''.seconds == 60 and .warmupSeconds == 10'\'''
+
+reset_case
+echo slow-probes > "$tmp/state/a/profile"
+run "$a" perf
+check 'slow adb probes cannot extend the window and dilute failing hitches' \
+  '[ "$rc" = 1 ] && json_is '\''.overall == "FAIL" and .samples == 20 and .p95AppMs == 30 and .gates.app.verdict == "FAIL" and .gates.stale.verdict == "FAIL"'\'' && restored a'
+check 'elapsed deadline includes blocking probe time rather than adding it to every second' \
+  '[ "$(grep -c "sleep 1 capture" "$tmp/events")" -le 7 ]'
+# The dump deliberately includes healthy rows after the boundary. They are
+# still present in the raw artifact, but must not enter any summary statistic.
+check 'raw post-window records are excluded from the measurement' \
+  '[ "$(grep -c "I VrApi:" "$run_dir/perf-logcat.txt")" -gt 20 ] && json_is '\''.averageFps == 72 and .worstAppMs == 30'\'''
 
 for profile in app-fail stale-fail; do
   reset_case
@@ -352,7 +388,7 @@ run "$a" perf
 check 'empty log capture is INFRA with unavailable gate values and an explanation' \
   '[ "$rc" = 3 ] && json_is '\''.overall == "INFRA" and .samples == 0 and .p95AppMs == "unavailable" and .stalePercent == "unavailable" and (.message | length) > 0'\'' && restored a'
 
-for fault in clear logcat launch launch-output proximity package; do
+for fault in clear logcat clock bad-clock launch launch-output proximity package; do
   reset_case
   echo "$fault" > "$tmp/state/a/fault"
   run "$a" perf

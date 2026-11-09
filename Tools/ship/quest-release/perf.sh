@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Scripted compositor capture. Keep all device mutations inside the headset lock.
 qr_perf_sleep() { sleep "$1"; }
+qr_perf_now() { date +%s; }
 
 qr_perf_report() {
   local scene version_name version_code sha rc
@@ -15,6 +16,7 @@ qr_perf_report() {
     --arg scene "$scene" --arg sha "$sha" --arg versionName "${version_name:-unavailable}" \
     --arg versionCode "${version_code:-unavailable}" --arg error "$perf_error" \
     --arg pid "${perf_pid:-}" \
+    --argjson windowStart "${perf_start:-null}" --argjson windowEnd "${perf_end:-null}" \
     -f "$QR_DIR/quest-release/perf-stats.jq" "$QR_RUN_DIR/perf-logcat.txt" \
     > "$QR_RUN_DIR/perf-summary.json" || return 3
   jq -r '
@@ -72,7 +74,7 @@ qr_perf_identity() {
 }
 
 qr_perf_capture() {
-  local second
+  local deadline clock
   perf_pid="$(qr_launch_pid)" || { perf_error='initial app PID probe failed'; return; }
   [[ "$perf_pid" =~ ^[0-9]+$ ]] || { perf_error='target app has no unique live PID'; return; }
   qr_perf_sleep "$QR_PERF_WARMUP"
@@ -82,7 +84,16 @@ qr_perf_capture() {
   if ! qr_adb logcat -c; then
     perf_error='adb logcat -c failed'; return
   fi
-  for ((second=0; second<QR_PERF_SECONDS; second++)); do
+  # Use the device's epoch for logcat boundaries (host clocks may differ).
+  # Anchor elapsed time BEFORE the clock query so its transport cost cannot
+  # extend the requested window. Slow transports may fail coverage, never pass
+  # by diluting hitches with healthy samples collected after the deadline.
+  deadline=$(( $(qr_perf_now) + QR_PERF_SECONDS ))
+  clock="$(qr_adb shell date +%s)" || { perf_error='adb capture clock query failed'; return; }
+  clock="${clock//$'\r'/}"
+  [[ "$clock" =~ ^[0-9]+$ ]] || { perf_error='invalid adb capture clock'; return; }
+  perf_start="$clock"; perf_end=$((perf_start + QR_PERF_SECONDS))
+  while [ "$(qr_perf_now)" -lt "$deadline" ]; do
     qr_perf_sleep 1
     if ! qr_perf_identity; then
       perf_error='target app identity/foreground lost during capture'; break
@@ -95,6 +106,7 @@ qr_perf_capture() {
 
 qr_perf_locked() (
   local perf_prox=0 perf_error='' perf_model='' perf_package='' perf_mode=report perf_pid=''
+  local perf_start=null perf_end=null
   local perf_thermal_start=unavailable perf_thermal_end=unavailable
   : > "$QR_RUN_DIR/perf-logcat.txt"
   # This subshell's cleanup leaves qr_device_locked's lock/cancel traps intact.
