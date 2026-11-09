@@ -102,6 +102,11 @@ run folder:  ${QR_RUN_DIR:--}
 ===============================
 EOF
 )"
+  if [ -n "$(qr_get device_results '')" ]; then
+    block="$block
+$(qr_get device_results '')
+overall:     $(qr_get overall)"
+  fi
   printf '%s\n' "$block"
   if [ -n "${QR_RUN_DIR:-}" ] && [ -d "$QR_RUN_DIR" ]; then printf '%s\n' "$block" > "$QR_RUN_DIR/summary.txt"; fi
 }

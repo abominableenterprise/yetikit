@@ -68,7 +68,7 @@ qr_device_sha() {
 # against the device's own hash. Prints the backup folder.
 qr_backup() {
   local dir f want got
-  dir="$QR_BACKUP_ROOT/Quest-playtest-backup-$(qr_timestamp)"
+  dir="$QR_BACKUP_ROOT/Quest-playtest-backup-$(qr_timestamp)${QR_BACKUP_DEVICE_SUFFIX:-}"
   [ -e "$dir" ] && dir="$dir-$$"
   # Backups may contain credentials; never expose them through default directory permissions.
   (umask 077; mkdir "$dir") || qr_die "cannot create private backup $dir"
@@ -112,8 +112,10 @@ qr_install_apk_locked() {
   qr_set install "$label stopped before adb install (see release.log)"
   [ -f "$apk" ] || qr_die "$label: no APK at '$apk'"
   # Explicit APKs and rollbacks must pass the same launcher/signer gate as `all`.
-  qr_java_setup || exit 1
-  qr_verify "$apk" || exit 1
+  if [ "$apk" != "${QR_VERIFIED_APK:-}" ] && [ "$apk" != "${QR_VERIFIED_ROLLBACK_APK:-}" ]; then
+    qr_java_setup || exit 1
+    qr_verify "$apk" || exit 1
+  fi
   qr_await_device
   qr_idle_check "$force"
   before_file="$QR_RUN_DIR/$label-data-before.txt"
