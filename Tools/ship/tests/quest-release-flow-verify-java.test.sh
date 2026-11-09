@@ -7,7 +7,7 @@ qr_flow_build
 
 reset_logs; run verify "$apk"
 check "verify runs android-launcher.py on the APK, checks the cert and prints the APK sha256" \
-  '[ "$rc" = 0 ] && grep -q "Tools/ship/android-launcher.py --config $YETIKIT_CONFIG $apk" "$tmp/py.log" && out_has "apk sha256: $(qr_sha256 "$apk")" && grep -q "cert:        ok" "$tmp/out"'
+  '[ "$rc" = 0 ] && grep -Fq "$QR_SHIP_DIR/android-launcher.py --config $YETIKIT_CONFIG $apk" "$tmp/py.log" && out_has "apk sha256: $(qr_sha256 "$apk")" && grep -q "cert:        ok" "$tmp/out"'
 FAKE_CERT="AA:BB" run verify "$apk"
 check "verify fails on another signer certificate" '[ "$rc" != 0 ] && grep -q "cert:        MISMATCH" "$tmp/out"'
 FAKE_LAUNCHER_RC=1 run verify "$apk"

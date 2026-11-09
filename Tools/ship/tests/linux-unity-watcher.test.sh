@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Watcher retry/context/orphan regressions, using only fake clients/processes.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; orphan=''
 trap 'if [ -n "$orphan" ]; then kill "$orphan" 2>/dev/null || true; wait "$orphan" 2>/dev/null || true; fi; if [ -f "$tmp/launch-pids" ]; then while read -r p; do kill "$p" 2>/dev/null || true; done < "$tmp/launch-pids"; fi; rm -rf "$tmp"' EXIT
 fails=0; proj="$tmp/proj"; mkdir -p "$proj"
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "$0")/lib/fake-unity.sh"
 . "$script"
 IDLE_SCRIPT="$script"
 UNITY_IDLE_RETURN_MINUTES=0

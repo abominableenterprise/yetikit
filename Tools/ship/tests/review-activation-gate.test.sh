@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Focused regressions for linux-unity-seat.sh and linux-unity-license.sh.
 set -euo pipefail
+if [ ! -d /proc/self/fd ]; then
+  echo 'SKIP: activation descriptor-leak checks require /proc/self/fd'
+  exit 0
+fi
 tool_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"
 workers=()

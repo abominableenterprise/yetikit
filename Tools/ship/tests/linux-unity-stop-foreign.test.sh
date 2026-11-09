@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Stop must remove runner-private state without wiping a foreign editor's shared files.
 set -euo pipefail
+if [ ! -d /proc/self ]; then
+  echo 'SKIP: stop foreign-process checks require /proc/self'
+  exit 0
+fi
 here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/lib/fixture.sh"
 tmp="$(mktemp -d)"

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Deterministic publication/reclaim races; sourced wrappers only, never Unity.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="${PIDFILE_TEST_SCRIPT:-$repo/Tools/ship/linux-unity.sh}"
+script="${PIDFILE_TEST_SCRIPT:-$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh}"
 tmp="$(mktemp -d)"; pids=()
 cleanup() {
   touch "$tmp/proceed" "$tmp/finish"

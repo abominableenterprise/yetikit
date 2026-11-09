@@ -1,11 +1,10 @@
 # Shared isolated setup for the topical creds regressions.
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 proj="$tmp/proj"; mkdir -p "$proj/Assets"; echo x > "$proj/Assets/a.txt"
 # shellcheck source=Tools/ship/tests/lib/fake-unity.sh
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fake-unity.sh"
 git_init
 good_ulf="$(cat "$ULF")"
 good_ulf_now() { printf '%s\n' "$good_ulf" > "$ULF"; }

@@ -12,4 +12,3 @@ trap '[ -z "$bystander" ] || kill $(ps -o pid= --ppid "$bystander") "$bystander"
 alive() { kill -0 "$1" 2>/dev/null && [ "$(cut -d' ' -f3 "/proc/$1/stat" 2>/dev/null)" != Z ]; }
 # Wait for observed readiness with scheduling headroom.
 wait_for() { ship_wait_until test -s "$1"; }
-

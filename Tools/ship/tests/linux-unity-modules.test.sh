@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Guard the hub source-size ceiling and the sourced setup/licensing module boundary. Never runs Unity.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-ci="$repo/Tools/ship"
+ci="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }

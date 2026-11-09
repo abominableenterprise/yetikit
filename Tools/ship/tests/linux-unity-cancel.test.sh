@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Cancellation and APK wrapper lifecycle regressions. Stubs only; no Unity/network.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+if [ ! -d /proc/self ]; then
+  echo 'SKIP: cancellation process-state checks require /proc/self'
+  exit 0
+fi
+script="$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 proj="$tmp/proj"; mkdir -p "$proj/Packages" "$proj/ProjectSettings"
 printf '{}\n' > "$proj/Packages/manifest.json"
 printf '{}\n' > "$proj/Packages/packages-lock.json"
 echo 'm_EditorVersion: 6000.6.6f1' > "$proj/ProjectSettings/ProjectVersion.txt"
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "$0")/lib/fake-unity.sh"
 git_init
 mkdir -p "$UNITY_ROOT/Editor/Data/PlaybackEngines/AndroidPlayer/"{SDK,NDK}
 lc="$UNITY_ROOT/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"

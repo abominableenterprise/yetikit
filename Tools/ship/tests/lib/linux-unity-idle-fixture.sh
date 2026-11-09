@@ -2,12 +2,11 @@
 # Deterministic licence lifecycle/idle tests; no Unity, real hub, or wall-clock waits.
 # shellcheck disable=SC2016,SC2034
 set -euo pipefail
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0; proj="$tmp/proj"; mkdir -p "$proj/Assets"
 echo x > "$proj/Assets/a.txt"
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fake-unity.sh"
 git_init
 good="$(cat "$ULF")"
 idle_dir="$(readlink -m "$ULF").idle"

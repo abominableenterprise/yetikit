@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # #484 timing observer regressions. Shell/fake editor only; never runs Unity.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+tests="$(cd "$(dirname "$0")" && pwd)"
+script="$tests/../linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 proj="$tmp/proj"; mkdir -p "$proj"
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$tests/lib/fake-unity.sh"
 printf base > "$proj/README"
 git_init
 # A gate, not a long sleep, lets wrapper-only TERM complete even if Bash defers
@@ -22,13 +22,19 @@ while [ ! -e "$FAKE_TMP/editor-release" ]; do sleep 0.02; done
 printf '<test-run total="1" passed="1" failed="0" skipped="0" />\n' > "$res"
 EOF
 chmod +x "$UNITY_ROOT/Editor/Unity"
-python3 - "$script" <<'PY'
+python3 -B - "$script" "$tests/helpers" <<'PY'
 import os
 from pathlib import Path
 import signal
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, sys.argv[2])
+from proc_inspection import require
+
+if not require('timing observer leak regressions'):
+    raise SystemExit(0)
 
 script = sys.argv[1]
 root = Path(os.environ['FAKE_TMP'])
