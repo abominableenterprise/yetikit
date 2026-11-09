@@ -28,7 +28,9 @@
 #   test editmode|playmode [extra Unity args...]
 #                       editmode runs the pure tests with -nographics (-testCategory "!Gfx;!MacOnly"), then the
 #                       [Category("Gfx")] tests on Xvfb + Mesa llvmpipe. EDITMODE_GFX=0 skips the second pass.
-#                       A caller's -testFilter runs in both passes; a caller's -testCategory runs one pass on Xvfb.
+#                       A caller's -testFilter runs in both passes: either may select zero tests with valid XML,
+#                       but together they must execute tests. EDITMODE_GFX=0 still requires a nonempty pure pass.
+#                       A caller's -testCategory runs one pass on Xvfb.
 #                       A -testFilter naming a [Category("RenderTool")] class runs one pass on
 #                       Xvfb with -testCategory RenderTool. Every Gfx run (this second pass, a -testCategory naming
 #                       Gfx, test pr's Gfx pass) is killed after UNITY_GFX_TIMEOUT s (3600), the others after
@@ -620,6 +622,7 @@ test_passes() {
     *) die "usage: test editmode|playmode|pr [base] [extra Unity args]" ;;
   esac
   local rc=0 gfx_rc=0 TEST_ALLOW_EMPTY=0 TEST_EVIDENCE_ONLY=0
+  local TEST_EXECUTED=0 TEST_FILTER="" pure_executed=0
   # No -quit with -runTests.
   if [ "$platform" = PlayMode ]; then
     run_pass playmode -runTests -testPlatform PlayMode "$@" || rc=$?
@@ -644,16 +647,23 @@ test_passes() {
     run_pass editmode -runTests -testPlatform EditMode "$@" || rc=$?
     return $rc
   fi
-  # A caller's -testFilter is in "$@" and applies to both passes (the Test Framework ANDs filter and category).
+  # Filtered dual-pass runs may be empty per category, but must execute tests in total.
+  if [ "${EDITMODE_GFX:-1}" = 1 ] && [[ " $* " == *" -testFilter "* ]]; then
+    TEST_FILTER="$(test_filter_value "$@")"; TEST_ALLOW_EMPTY=filtered
+  fi
   run_pass editmode -nographics -runTests -testPlatform EditMode -testCategory "$PURE_CATEGORIES" "$@" || rc=$?
+  pure_executed=$TEST_EXECUTED
   if [ "${EDITMODE_GFX:-1}" = 1 ]; then
-    # Only an unfiltered implicit Gfx selection may be empty.
-    [[ " $* " == *" -testFilter "* ]] || TEST_ALLOW_EMPTY=1
+    [ "$TEST_ALLOW_EMPTY" = filtered ] || TEST_ALLOW_EMPTY=1
     run_gfx_pass editmode-gfx -runTests -testPlatform EditMode -testCategory "$GFX_CATEGORIES" "$@" || {
       gfx_rc=$?
       # Missing evidence must not hide an earlier editor failure.
       if [ "$TEST_EVIDENCE_ONLY" = 0 ] || [ "$rc" = 0 ]; then rc=$gfx_rc; fi
     }
+    if [ "$rc" = 0 ] && [ "$TEST_ALLOW_EMPTY" = filtered ] && [ "$((pure_executed + TEST_EXECUTED))" = 0 ]; then
+      log "test editmode: -testFilter '$TEST_FILTER' matched no executed tests across both passes"
+      rc=1
+    fi
   fi
   return $rc
 }

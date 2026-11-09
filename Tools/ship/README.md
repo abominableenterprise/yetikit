@@ -75,7 +75,7 @@ file while a run is active.
 | `setup [--android] [--no-creds]` | Stream the versioned GameCI base/android image into `UNITY_ROOT` (default `/opt/unity`), install libraries and the `merge.ours` Git driver. `--no-creds` provisions without activation. An Android setup replaces a complete base-only install. |
 | `activate` / `return` | Activate/reuse a Personal ULF licence; return once and release the seat. |
 | `open [--keep [path]]...` | Compile/open without graphics. A cold project restores/saves the Library cache. |
-| `test editmode [Unity args...]` | Pure pass (`!Gfx;!MacOnly`) without graphics, then Gfx on Xvfb. `EDITMODE_GFX=0` skips Gfx. |
+| `test editmode [Unity args...]` | Pure pass (`!Gfx;!MacOnly`) without graphics, then Gfx on Xvfb. A caller's `-testFilter` may match either pass, but must execute tests overall. `EDITMODE_GFX=0` skips Gfx and requires executed pure tests; it is not needed for pure-only filters. |
 | `test playmode [Unity args...]` | PlayMode tests on Xvfb. |
 | `test pr [base] [Unity args...]` | Full pure pass, then only touched Gfx fixtures (default base `origin/main`). Changed runtime types search their area's tests; editor builders search all tests. No caller `-testFilter`/`-testCategory`. |
 | `scene [--keep path]... [--area Area]...` | Run configured generated-scene steps; optionally only configured area steps, then conservative noise cleanup. Without `scene`, explain that no generated scene is configured. |
@@ -93,13 +93,21 @@ starting an editor: the runner owns test execution, result paths and log paths.
 Each pass, including a known-flake retry, must write parseable result XML with
 a `test-run` root and numeric `total`, `passed`, `failed` and `skipped` counts.
 Missing/empty/invalid XML, zero total, or no passed/failed tests fails the pass.
-The only zero-total exception is the implicit Gfx pass of plain `test editmode`
-(no caller `-testCategory` or `-testFilter`) and the Gfx pass of `test pr`:
-projects may have no selected Gfx tests. These log `no tests selected (Gfx
-categories); treated as empty`. This never excuses missing/invalid XML, all
-skipped tests, or an empty retry. Pure, PlayMode and explicitly selected passes
-must execute tests. A later evidence-only failure preserves an earlier editor's
-nonzero exit status. Evidence validation uses Python 3's standard library.
+The implicit Gfx pass of plain `test editmode` (no caller `-testCategory` or
+`-testFilter`) and the Gfx pass of `test pr` may select zero tests: projects may
+have no selected Gfx tests. These log `no tests selected (Gfx categories);
+treated as empty`.
+
+For `test editmode -testFilter <filter>` without `-testCategory`, when both
+passes run, either pass may select zero tests with valid XML. Each empty pass
+logs the filter and category it did not match. The sum of executed tests
+(`passed` + `failed`) across both passes must be greater than zero; otherwise
+the command fails and names the filter. This never excuses missing/invalid XML,
+all-skipped/ignored tests, editor failures, or an empty retry. Unfiltered pure,
+PlayMode and explicitly selected category passes still must execute tests.
+`EDITMODE_GFX=0` keeps its single-pass behaviour: filtered pure tests must execute.
+A later evidence-only failure preserves an earlier editor's nonzero exit status.
+Evidence validation uses Python 3's standard library.
 
 For an explicit category, EditMode runs a single graphics-enabled pass; Gfx
 gets its own timeout. A RenderTool class filter runs alone with `RenderTool`.
