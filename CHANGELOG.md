@@ -12,10 +12,15 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Quest performance capture waits for a cold-started app's unique PID before
+  warm-up, while retaining identity and foreground checks.
+- Proximity restoration is timeboxed during capture cleanup and cancellation;
+  failed restoration records a manual recovery warning without blocking final
+  results or lock release. Successful retries clear their matching marker.
 
 ### Behaviour changes
-- None.
+- Optional `QR_PERF_PID_WAIT` (20 seconds) bounds initial PID discovery;
+  optional `QR_PERF_RESTORE_WAIT` (10 seconds) bounds each restoration attempt.
 
 ### Adapter changes
 - None.

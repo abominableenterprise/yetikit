@@ -239,9 +239,11 @@ qr_launch_infra() {
 # Keep remote pidof's status separate from adb's transport status. The trailer
 # also detects truncated output or older shells that cannot execute the probe.
 # Only status 1 with no PIDs confirms absence; malformed/failed probes fail closed.
+# An optional command prefix lets perf timebox this probe without changing launch.
 qr_launch_pid() {
   local out status pids
-  out="$(qr_adb shell "pidof '$QR_PKG'; qr_pid_rc=\$?; printf '\\nqr_pid_rc=%s\\n' \"\$qr_pid_rc\"" 2>/dev/null)" || return "$QR_LAUNCH_INFRA"
+  [ "$#" != 0 ] || set -- qr_adb
+  out="$("$@" shell "pidof '$QR_PKG'; qr_pid_rc=\$?; printf '\\nqr_pid_rc=%s\\n' \"\$qr_pid_rc\"" 2>/dev/null)" || return "$QR_LAUNCH_INFRA"
   out="${out//$'\r'/}"
   status="${out##*$'\n'qr_pid_rc=}"
   pids="${out%$'\n'qr_pid_rc=*}"

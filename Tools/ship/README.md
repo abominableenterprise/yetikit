@@ -520,10 +520,15 @@ run folder, rather than accepting an earlier release's successful summary.
 
 `Tools/ship/quest-release.sh perf [--seconds N] [--warmup S]` launches the
 installed app using the same activity/argument path as `launch` (including
-`quest.launchArgs`). It disables the proximity sensor, waits out warm-up,
-clears logcat, captures the window, then restores the sensor. Cleanup traps
-restore it on failures and cancellation too; an unreachable device is reported
-as infrastructure failure, not success. No build, install, editor or credentials
+`quest.launchArgs`). It disables the proximity sensor, polls every 0.2 seconds
+for one live app PID (up to `QR_PERF_PID_WAIT`, default 20 seconds), then starts
+warm-up, clears logcat, captures the window and restores the sensor. Multiple
+PIDs or no PID by the deadline is INFRA. Cleanup traps restore the sensor on
+failures and cancellation too. Each restoration attempt is bounded by
+`QR_PERF_RESTORE_WAIT` (default 10 seconds); failed/timed-out restoration logs a
+WARN with a manual adb recovery command in the per-device summary. Cancellation
+still publishes its result, removes the active marker and releases run ownership;
+an unreachable device is infrastructure failure, not success. No build, install, editor or credentials
 are needed. Manual `perf start` / `perf stop` is tracked in
 [#61](https://github.com/abominableenterprise/yetikit/issues/61).
 
@@ -630,6 +635,7 @@ retains its existing 0-success / 1-failure contract.
 | `QR_GATE_TIMEOUT`, `QR_BUILD_TIMEOUT` | `1800` seconds each. Compatibility aliases: `QUEST_GATE_TIMEOUT`, `QUEST_BUILD_TIMEOUT`. |
 | `QR_BUILD_STALL_SECONDS` | `300` seconds without log growth; one retry. |
 | `QR_ADB_WAIT`, `QR_LAUNCH_WAIT` | `120` / `60` seconds. Compatibility aliases: `QUEST_ADB_WAIT`, `QUEST_LAUNCH_WAIT`. |
+| `QR_PERF_PID_WAIT`, `QR_PERF_RESTORE_WAIT` | `20` / `10` seconds (positive integers): initial perf PID discovery / each proximity restoration attempt. |
 | `QUEST_GATE_CATEGORIES` | `Gfx;MacOnly`; `--full` removes the category filter. |
 | `QUEST_KNOWN_FLAKES` | Configured `knownFlakes`, otherwise no list. |
 | `QUEST_WAIT_POLL` | `5` seconds between read-only `wait` checks. |

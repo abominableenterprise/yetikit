@@ -2,6 +2,7 @@
 # Scripted compositor capture. Keep all device mutations inside the headset lock.
 qr_perf_sleep() { sleep "$1"; }
 qr_perf_now() { date +%s; }
+qr_perf_pid_sleep() { sleep 0.2; }
 
 qr_perf_report() {
   local scene version_name version_code sha rc
@@ -37,6 +38,7 @@ qr_perf_report() {
     PASS|REPORT) rc=0 ;; FAIL) rc=1 ;; *) rc=3 ;;
   esac
   qr_set perf_result "$rc"
+  perf_reported=1
   return "$rc"
 }
 
@@ -51,12 +53,22 @@ qr_perf_thermal() {
 qr_perf_restore() {
   [ "$perf_prox" = 1 ] || return 0
   # Clear only after success: EXIT retries a failed explicit restoration.
-  if qr_adb shell am broadcast -a com.oculus.vrpowermanager.automation_disable >> "$QR_RUN_DIR/perf-prox.log" 2>&1; then
+  if QR_TIMEBOX_KILL_AFTER=1 qr_timebox "${QR_PERF_RESTORE_WAIT:-10}" adb -s "$QUEST_SERIAL" shell am broadcast -a com.oculus.vrpowermanager.automation_disable >> "$QR_RUN_DIR/perf-prox.log" 2>&1; then
     perf_prox=0
+    # EXIT retries also own cleanup, but must not clear another device's marker.
+    [ "${perf_reported:-0}" != 1 ] || qr_perf_clear_marker
   else
-    perf_error="adb proximity restoration failed (see perf-prox.log)"
+    local warning="WARN: proximity sensor may still be disabled; run: adb -s $QUEST_SERIAL shell am broadcast -a com.oculus.vrpowermanager.automation_disable"
+    perf_error="${perf_error:+$perf_error; }adb proximity restoration failed or timed out (see perf-prox.log); $warning"
+    qr_log "$warning"
     return 3
   fi
+}
+
+# Keep recovery owned until a complete summary exists, including on EXIT retry.
+qr_perf_clear_marker() {
+  local marker="$QR_PERF_RUN_ROOT/perf-active"
+  if [ "$(head -n1 "$marker" 2>/dev/null)" = "$QUEST_SERIAL" ] && [ "$(tail -n1 "$marker" 2>/dev/null)" = "$QR_RUN_DIR" ]; then rm -f "$marker"; fi
 }
 
 # Fail closed if the launched process disappears/restarts or loses foreground.
@@ -74,9 +86,29 @@ qr_perf_identity() {
 }
 
 qr_perf_capture() {
-  local deadline clock
-  perf_pid="$(qr_launch_pid)" || { perf_error='initial app PID probe failed'; return; }
-  [[ "$perf_pid" =~ ^[0-9]+$ ]] || { perf_error='target app has no unique live PID'; return; }
+  local deadline clock remaining
+  # am start may return before a cold-started process exists. Keep launch's
+  # behaviour unchanged: only perf polls, and warm-up begins after discovery.
+  deadline=$(( $(qr_perf_now) + QR_PERF_PID_WAIT ))
+  while :; do
+    remaining=$((deadline - $(qr_perf_now)))
+    if [ "$remaining" -le 0 ]; then
+      perf_error="target app has no live PID after ${QR_PERF_PID_WAIT}s"; return
+    fi
+    perf_pid="$(QR_TIMEBOX_KILL_AFTER=1 qr_launch_pid qr_timebox "$remaining" adb -s "$QUEST_SERIAL")" \
+      || { perf_error='initial app PID probe failed or timed out'; return; }
+    if [ "$(qr_perf_now)" -gt "$deadline" ]; then
+      perf_error="target app PID probe exceeded ${QR_PERF_PID_WAIT}s deadline"; return
+    fi
+    if [ -n "$perf_pid" ]; then
+      [[ "$perf_pid" =~ ^[0-9]+$ ]] || { perf_error='target app has multiple live PIDs'; return; }
+      break
+    fi
+    if [ "$(qr_perf_now)" -ge "$deadline" ]; then
+      perf_error="target app has no live PID after ${QR_PERF_PID_WAIT}s"; return
+    fi
+    qr_perf_pid_sleep
+  done
   qr_perf_sleep "$QR_PERF_WARMUP"
   qr_perf_identity || { perf_error='target app identity/foreground lost during warm-up'; return; }
   perf_thermal_start="$(qr_perf_thermal)"
@@ -105,13 +137,13 @@ qr_perf_capture() {
 }
 
 qr_perf_locked() (
-  local perf_prox=0 perf_error='' perf_model='' perf_package='' perf_mode=report perf_pid=''
+  local perf_prox=0 perf_error='' perf_model='' perf_package='' perf_mode=report perf_pid='' perf_reported=0
   local perf_start=null perf_end=null
   local perf_thermal_start=unavailable perf_thermal_end=unavailable
   : > "$QR_RUN_DIR/perf-logcat.txt"
   # This subshell's cleanup leaves qr_device_locked's lock/cancel traps intact.
   trap 'qr_perf_restore' EXIT
-  trap 'perf_error="capture cancelled"; qr_perf_restore; qr_perf_report; exit 3' HUP INT TERM
+  trap 'perf_error="capture cancelled"; qr_perf_restore; qr_perf_report; [ "$perf_prox" != 0 ] || qr_perf_clear_marker; exit 3' HUP INT TERM
   if ! ( qr_await_device ); then
     perf_error='device check/wait failed'
   else
@@ -139,7 +171,7 @@ qr_perf_locked() (
   qr_perf_restore || true
   local rc=0
   qr_perf_report || rc=$?
-  [ "$perf_prox" != 0 ] || rm -f "$QR_PERF_RUN_ROOT/perf-active"
+  [ "$perf_prox" != 0 ] || qr_perf_clear_marker
   exit "$rc"
 )
 
@@ -149,12 +181,15 @@ qr_perf_cancel() {
   local marker="$QR_RUN_DIR/perf-active" serial dir
   [ -f "$marker" ] || return 0
   serial="$(head -n1 "$marker")"; dir="$(tail -n1 "$marker")"
-  ( QUEST_SERIAL="$serial"; QR_RUN_DIR="$dir"
+  ( local QR_PERF_RUN_ROOT="$QR_RUN_DIR"
+    QUEST_SERIAL="$serial"; QR_RUN_DIR="$dir"
     local perf_prox=1 perf_error='capture cancelled' perf_model='' perf_package='' perf_mode=report
     local perf_thermal_start=unavailable perf_thermal_end=unavailable
     qr_perf_restore || true
     qr_perf_report || true
-    [ "$perf_prox" != 0 ] || rm -f "$marker"
+    # Best effort only: even failed/timed-out restoration cannot retain run
+    # ownership. The summary carries the manual recovery command instead.
+    rm -f "$marker"
   )
   qr_set perf 'INFRA: capture cancelled (see per-device performance summary)'
   qr_set perf_result 3
@@ -191,6 +226,10 @@ qr_perf() {
     esac
     shift
   done
+  QR_PERF_PID_WAIT="${QR_PERF_PID_WAIT:-20}"
+  QR_PERF_RESTORE_WAIT="${QR_PERF_RESTORE_WAIT:-10}"
+  qr_positive_seconds QR_PERF_PID_WAIT "$QR_PERF_PID_WAIT" || return 1
+  qr_positive_seconds QR_PERF_RESTORE_WAIT "$QR_PERF_RESTORE_WAIT" || return 1
   qr_positive_seconds 'perf seconds' "$QR_PERF_SECONDS" || return 1
   case "$QR_PERF_WARMUP" in 0) ;; *) qr_positive_seconds 'perf warmup' "$QR_PERF_WARMUP" || return 1 ;; esac
   QR_PERF_RUN_ROOT="$QR_RUN_DIR"
