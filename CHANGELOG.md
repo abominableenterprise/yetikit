@@ -9,6 +9,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
+- None.
+
+### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
+## [0.1.5] - 2026-11-09
+
+### Added
 - Quest release runs can install and launch the same build on several headsets,
   with ordered device steps, isolated diagnostics and crash-only rollback.
 - Optional `quest.signing` maps environment-variable names for release-keystore
