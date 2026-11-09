@@ -6,6 +6,22 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
+## [Unreleased]
+
+### Added
+- Quest release runs can install and launch the same build on several headsets,
+  with ordered device steps, isolated diagnostics and crash-only rollback.
+
+### Fixed
+- None.
+
+### Behaviour changes
+- Multi-headset runs store device artifacts in separate encoded-serial folders
+  and report each device's outcome. Single-headset paths and behavior are unchanged.
+
+### Adapter changes
+- None.
+
 ## [0.1.4] - 2026-11-09
 
 ### Added

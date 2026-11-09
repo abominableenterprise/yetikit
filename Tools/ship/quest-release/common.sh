@@ -102,6 +102,15 @@ run folder:  ${QR_RUN_DIR:--}
 ===============================
 EOF
 )"
+  if [ -n "$(qr_get device_results '')" ]; then
+    block="$block
+$(qr_get device_results '')"
+  fi
+  # Pre-device failures still publish the list operation's overall verdict.
+  if [ -n "$(qr_get multi_command '')" ]; then
+    block="$block
+overall:     $(qr_get overall)"
+  fi
   printf '%s\n' "$block"
   if [ -n "${QR_RUN_DIR:-}" ] && [ -d "$QR_RUN_DIR" ]; then printf '%s\n' "$block" > "$QR_RUN_DIR/summary.txt"; fi
 }
