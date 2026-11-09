@@ -4,18 +4,25 @@
 set -euo pipefail
 export QR_FIXTURE_REAL_SHIP="$(cd "$(dirname "$0")/.." && pwd)"
 export QR_FIXTURE_TEST_LIB="${QR_FIXTURE_TEST_LIB:-$QR_FIXTURE_REAL_SHIP/tests/lib}"
-python3 - <<'PY'
+python3 -B - <<'PY'
 import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
 
 lib = Path(os.environ['QR_FIXTURE_TEST_LIB'])
+sys.path.insert(0, str(Path(os.environ['QR_FIXTURE_REAL_SHIP']) / 'tests/helpers'))
+from proc_inspection import require
+
+inspect_processes = require('fixture-safety leak assertions')
 
 def owned(marker):
+    if not inspect_processes:
+        return []
     result = []
     for entry in Path('/proc').glob('[0-9]*/environ'):
         try:
@@ -42,10 +49,11 @@ tmp="$QR_FIXTURE_CASE"
                 rc = process.wait(timeout=15)
                 log.seek(0)
                 assert rc == expected, (label, rc, log.read())
-                deadline = time.monotonic() + 2
-                while owned(marker) and time.monotonic() < deadline:
-                    time.sleep(.02)
-                assert not owned(marker), (label, 'leaked owned processes', owned(marker))
+                if inspect_processes:
+                    deadline = time.monotonic() + 2
+                    while owned(marker) and time.monotonic() < deadline:
+                        time.sleep(.02)
+                    assert not owned(marker), (label, 'leaked owned processes', owned(marker))
                 print('ok  ', label, flush=True)
             finally:
                 # A failing-first run must not itself leak the baseline's sleep.

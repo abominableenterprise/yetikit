@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # #429 lock identity, interruptible waits and handler restoration. Stubs only.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="${FOLLOWUPS_TEST_SCRIPT:-$repo/Tools/ship/linux-unity.sh}"
+script="${FOLLOWUPS_TEST_SCRIPT:-$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh}"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 proj="$tmp/proj"; mkdir -p "$proj/Packages" "$proj/ProjectSettings"
 printf '{}\n' > "$proj/Packages/manifest.json"
 printf '{}\n' > "$proj/Packages/packages-lock.json"
 echo 'm_EditorVersion: 6000.6.6f1' > "$proj/ProjectSettings/ProjectVersion.txt"
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "$0")/lib/fake-unity.sh"
 git_init
 lc="$UNITY_ROOT/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"
 mkdir -p "$(dirname "$lc")"

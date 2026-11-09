@@ -1,7 +1,6 @@
 # Shared isolated fake-editor fixture for the topical APK tests; source before checks.
 # Keep the Android module absent until apk_module is called, so the missing-module check stays meaningful.
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 proj="$tmp/proj"
@@ -10,7 +9,7 @@ printf '{"dependencies":{}}\n' > "$proj/Packages/manifest.json"
 printf '{"dependencies":{},"lock":1}\n' > "$proj/Packages/packages-lock.json"
 printf 'm_EditorVersion: 6000.6.6f1\n' > "$proj/ProjectSettings/ProjectVersion.txt"
 # shellcheck source=Tools/ship/tests/lib/fake-unity.sh
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fake-unity.sh"
 git_init
 # APK contracts do not exercise installation-wide editor discovery; that scan
 # has dedicated process-scan/setup/foreign-process suites. Keep cleanup itself

@@ -1,7 +1,6 @@
 # Shared isolated fake editor and Licensing Client for topical command regressions.
 # Each caller gets its own project, installation, process view, pidfiles and shared-memory directory.
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"
 fails=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
@@ -9,7 +8,7 @@ check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails
 proj="$tmp/proj"; root="$tmp/unity"; lcdir="$root/Editor/Data/Resources/Licensing/Client"
 mkdir -p "$proj/Library" "$proj/Temp" "$proj/Assets/Tests/Park" "$lcdir" "$tmp/bin" "$tmp/shm"
 # shellcheck source=Tools/ship/tests/lib/fixture.sh
-. "$repo/Tools/ship/tests/lib/fixture.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fixture.sh"
 ship_fixture "$proj"
 ship_fixture_process_view "$tmp/process-view"
 export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''

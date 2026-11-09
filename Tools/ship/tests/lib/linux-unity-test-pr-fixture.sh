@@ -124,4 +124,3 @@ pr_explicit_roots_fixture() {
   mv "$tmp/config.json" "$proj/yetikit.json"
   commit explicit-editmode-layout
 }
-

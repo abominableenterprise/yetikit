@@ -1,4 +1,8 @@
 # Synthetic cross-installation process fixture and unchanged scenario/action checks.
+if [ ! -d /proc/self ]; then
+  echo 'SKIP: cross-installation process checks require /proc/self'
+  exit 0
+fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=Tools/ship/tests/lib/fixture.sh
 . "$here/lib/fixture.sh"

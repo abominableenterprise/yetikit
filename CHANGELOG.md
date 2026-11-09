@@ -12,7 +12,9 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Ship test fixtures work from a consumer-owned vendored path.
+- Process leak assertions explicitly skip when process inspection is unavailable.
+- Tooling text has no trailing whitespace or blank lines at EOF, enforced by CI.
 
 ### Behaviour changes
 - None.

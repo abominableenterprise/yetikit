@@ -1,10 +1,9 @@
 # Shared isolated setup for the topical flakes regressions.
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 proj="$tmp/proj"; mkdir -p "$proj"
-. "$(dirname "$0")/lib/fake-unity.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fake-unity.sh"
 
 flakes="$tmp/flakes.txt"
 cat > "$flakes" <<'EOF'
@@ -18,4 +17,3 @@ ballers=X.Tests.Court.TheBallersKeepPlaying
 flick1='X.Tests.Throw.AFlick(False,25f)'; flick2='X.Tests.Throw.AFlick(True,25f)'
 run() { : > "$tmp/runs"; rc=0; bash "$script" test "$@" 2>"$tmp/err" || rc=$?; }
 retry_filter() { grep -- -retry.xml "$tmp/runs" | sed -n 's/.*-testFilter \([^ ]*\).*/\1/p'; }
-
