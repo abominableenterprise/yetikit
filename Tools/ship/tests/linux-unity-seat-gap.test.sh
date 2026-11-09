@@ -2,11 +2,10 @@
 # Recheck the seat after linux-unity-license.sh reacquires the activation lock.
 # Drive the real idle watcher in seat_acquire's unlocked gap; no Unity/network.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0; proj="$tmp/project"; mkdir -p "$proj"
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "$0")/lib/fake-unity.sh"
 export THEROBOTS_HUB_URL=hub-origin THEROBOTS_TASK_ID=gap-task THEROBOTS_TASK_TOKEN=stub-token
 export GAP_SCRIPT="$script"
 cat > "$tmp/run-gap" <<'EOF'

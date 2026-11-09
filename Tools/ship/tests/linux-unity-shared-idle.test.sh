@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Shared-ULF regressions: stub clients and marked sleeping processes only, no real credentials/Unity.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="${SHARED_IDLE_TEST_SCRIPT:-$repo/Tools/ship/linux-unity.sh}"
+script="${SHARED_IDLE_TEST_SCRIPT:-$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh}"
 tmp="$(mktemp -d)"; children=()
 cleanup() {
   for p in "${children[@]}"; do kill "$p" 2>/dev/null || true; wait "$p" 2>/dev/null || true; done
@@ -13,7 +12,7 @@ cleanup() {
 }
 trap cleanup EXIT
 fails=0; proj="$tmp/a"; mkdir -p "$proj" "$tmp/b" "$tmp/licence"
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "$0")/lib/fake-unity.sh"
 mv "$ULF" "$tmp/licence/real.ulf"
 ln -s "$tmp/licence" "$tmp/licence-alias"
 export ULF="$tmp/licence/real.ulf" OUT_DIR="$tmp/a/build"

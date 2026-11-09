@@ -141,4 +141,3 @@ cmd_apk() {
   log "apk: size $size bytes ($((size / 1048576)) MB)"
   log "apk: sha256 $sum"
 }
-

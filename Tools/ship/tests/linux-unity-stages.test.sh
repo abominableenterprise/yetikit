@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Tests linux-unity.sh test / test pr timing using only a fake editor.
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 proj="$tmp/proj"; mkdir -p "$proj"

@@ -17,6 +17,9 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - Proximity restoration is timeboxed during capture cleanup and cancellation;
   failed restoration records a manual recovery warning without blocking final
   results or lock release. Successful retries clear their matching marker.
+- Ship test fixtures work from a consumer-owned vendored path.
+- Process leak assertions explicitly skip when process inspection is unavailable.
+- Tooling text has no trailing whitespace or blank lines at EOF, enforced by CI.
 
 ### Behaviour changes
 - Optional `QR_PERF_PID_WAIT` (20 seconds) bounds initial PID discovery;

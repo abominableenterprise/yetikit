@@ -210,4 +210,5 @@ if bump v1 >"$tmp/symlink.log" 2>&1; then check; fi
 cmp "$tmp/version" "$tmp/outside/VERSION" || fail 'wrote through destination symlink'
 cmp "$tmp/outside-tool" "$tmp/outside/tool.sh" || fail 'modified external target'
 [[ -f "$tmp/outside/added file.txt" ]] || fail 'deleted external target file'
+bash "$vendor/tests/ship-fixtures.sh"
 echo 'PASS: offline vendoring regressions'

@@ -1,6 +1,5 @@
 # Shared synthetic seat lease fixture; each worker owns its temporary project and fake hub.
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-script="$repo/Tools/ship/linux-unity.sh"
+script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"
 # Concurrent commands run under timeout (including their children). Open gates on
 # early exit too, then terminate/reap the bounded supervisors before removing files.
@@ -16,7 +15,7 @@ trap cleanup EXIT
 fails=0
 proj="$tmp/proj"; mkdir -p "$proj/Assets"; echo x > "$proj/Assets/a.txt"
 # shellcheck source=Tools/ship/tests/lib/fake-unity.sh
-. "$repo/Tools/ship/tests/lib/fake-unity.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fake-unity.sh"
 git_init
 good_ulf="$(cat "$ULF")"
 # Fake Licensing Client: logs its first argument; --activate-ulf writes a valid ULF unless FAKE_LC_FAIL=1 (then it
@@ -106,4 +105,3 @@ lu() {
 reset() { echo 0 > "$tmp/clock"; : > "$tmp/curl-calls"; : > "$tmp/curl-argv"; : > "$tmp/lc-calls"; : > "$tmp/sleeps"; : > "$tmp/runs"; printf '%s\n' "$@" > "$tmp/answers"; }
 calls() { grep -c "^$1 " "$tmp/curl-calls" || true; }
 no_token() { ! grep -q "$token" "$tmp/log"; }
-

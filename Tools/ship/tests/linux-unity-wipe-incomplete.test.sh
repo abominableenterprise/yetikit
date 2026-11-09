@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # An unreadable live editor must not be mistaken for an absent shared-file owner.
 set -euo pipefail
+if [ ! -d /proc/self ]; then
+  echo 'SKIP: incomplete-inspection cleanup checks require /proc/self'
+  exit 0
+fi
 here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/lib/fixture.sh"
 tmp="$(mktemp -d)"

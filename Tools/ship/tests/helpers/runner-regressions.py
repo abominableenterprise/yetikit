@@ -11,6 +11,12 @@ import tempfile
 import time
 import uuid
 
+from proc_inspection import require
+
+# These lifecycle assertions need process state and environment enumeration.
+if not require('runner lifecycle regressions'):
+    raise SystemExit(0)
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--ship-dir', type=Path, default=Path(__file__).resolve().parents[2],
                     help='runner source directory (also accepts a baseline copy)')
