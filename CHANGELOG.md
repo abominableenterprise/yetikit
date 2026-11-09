@@ -12,7 +12,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Ship's Quest release tests no longer depend on VM speed.
 
 ### Behaviour changes
 - None.

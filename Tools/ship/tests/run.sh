@@ -2,6 +2,7 @@
 # Run shell regressions serially: fake editors/clients, no network or host seats.
 # Optional arguments select test basenames for focused runs with the same CI isolation.
 set -euo pipefail
+suite_started=$SECONDS
 tests="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 test_files=("$tests"/*.test.sh)
 if [ "$#" -gt 0 ]; then
@@ -22,7 +23,10 @@ if ! timeout --version | grep -qF 'GNU coreutils'; then
   exit 1
 fi
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/bin"
+mkdir -p "$tmp/bin" "$tmp/jq-cache"
+export SHIP_TEST_REAL_JQ="$(command -v jq)" SHIP_TEST_JQ_CACHE="$tmp/jq-cache"
+export SHIP_TEST_ORIGINAL_JQ="$SHIP_TEST_REAL_JQ"
+cp "$tests/lib/config-jq-cache.py" "$tmp/bin/jq"
 for command in curl wget crane task-cache apt-get swapon swapoff mkswap fallocate; do
   printf '#!/bin/sh\nprintf "unexpected external command: %s\\n" >&2\nexit 99\n' "$command" > "$tmp/bin/$command"
 done
@@ -30,10 +34,12 @@ done
 printf '#!/bin/sh\nexec "$@"\n' > "$tmp/bin/sudo"
 chmod +x "$tmp/bin/"*
 failed=0; passed=0
+: > "$tmp/durations"
 for test in "${test_files[@]}"; do
   name="$(basename "$test")"
   mkdir -p "$tmp/$name/home" "$tmp/$name/shm"
   printf '\n=== %s ===\n' "$name"
+  test_started=$SECONDS
   if (
     for variable in ${!UNITY_@} ${!THEROBOTS_@} ${!FAKE_@} ${!APK_@} ${!NOISE_@} ${!IDLE_@} ${!SEAT_@} ${!QUEST_@} ${!QR_@}; do unset "$variable"; done
     unset PROJECT YETIKIT_CONFIG USERNAME PASSWORD ULF OUT_DIR PIDFILE PIDFILE_FALLBACK BIN_DIR \
@@ -51,6 +57,12 @@ for test in "${test_files[@]}"; do
     printf 'FAILED: %s\n' "$name" >&2
     failed=$((failed + 1))
   fi
+  elapsed=$((SECONDS - test_started))
+  printf 'Elapsed: %s (%s s)\n' "$name" "$elapsed"
+  printf '%s\t%s\n' "$elapsed" "$name" >> "$tmp/durations"
 done
 printf '\n%d test scripts passed; %d failed\n' "$passed" "$failed"
+printf 'Total duration: %s s\n' "$((SECONDS - suite_started))"
+printf 'Slowest 3 files (seconds):\n'
+sort -k1,1nr -k2,2 "$tmp/durations" | awk 'NR <= 3 {printf "  %ss %s\n", $1, $2}'
 [ "$failed" = 0 ]
