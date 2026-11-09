@@ -9,6 +9,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
+- Quest release runs can install and launch the same build on several headsets,
+  with ordered device steps, isolated diagnostics and crash-only rollback.
 - Optional `quest.signing` maps environment-variable names for release-keystore
   certificate lookup, with PKCS12/JKS autodetection. The consumer build retains
   responsibility for signing using its inherited environment.
@@ -17,6 +19,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Behaviour changes
+- Multi-headset runs store device artifacts in separate encoded-serial folders
+  and report each device's outcome. Single-headset paths and behavior are unchanged.
 - None for projects without signing config; existing debug-keystore behavior
   is unchanged.
 

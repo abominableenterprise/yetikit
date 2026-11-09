@@ -41,6 +41,9 @@ qr_wait_phase() {
 # commands sharing this run folder. all also needs an intact install and no launch crash.
 qr_wait_verdict() {
   local s="$1/summary" cmd="$2" install label=install
+  if [ "$(cat "$s/multi_command" 2>/dev/null)" = "$cmd" ]; then
+    [ "$(cat "$s/multi_result" 2>/dev/null)" = 0 ]; return $?
+  fi
   case "$cmd" in
     gate) [ "$(cat "$s/gate_result" 2>/dev/null)" = passed ]; return $? ;;
     prepare|build|verify|cleanup) return 0 ;;

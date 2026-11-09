@@ -324,7 +324,11 @@ projects must supply a development execute method for this runner).
 | `signing.keyPassEnv` | Optional name of the environment variable containing the key password. Not used for certificate lookup; remains inherited by the consumer build. |
 
 `quest.serial` is rejected: the headset serial belongs **only** in environment
-variable `QUEST_SERIAL`. If unset, the runner requires exactly one attached adb
+variable `QUEST_SERIAL`. For `install`, `launch`, `rollback` and `all`, it accepts
+an ordered comma- or whitespace-separated list, for example
+`QUEST_SERIAL='synthetic-A,synthetic-B' Tools/yetikit/quest-release.sh all`.
+A single serial keeps the existing behavior and artifact paths. If unset, the
+runner requires exactly one attached adb
 device; zero or multiple devices fail clearly instead of choosing one. Never
 commit device identity, signing fingerprints or private provenance to config.
 
@@ -413,6 +417,27 @@ failure. Rollback still checks whether the headset is idle; only the user's own
 installed build in place and return non-zero. Standalone steps use the current run's
 state under `release-logs/current.env`. `summary` reprints the latest step results.
 
+With several serials, gate/build/sign/primary APK verification run once, followed
+by each device's check, idle check, backup, install, launch and optional rollback
+before moving to the next device. Standalone install/rollback also verify their
+APK once. Devices run in the supplied order; failures do not stop later devices.
+A busy or unverified headset blocks only its own install (and therefore its
+subsequent launch in `all`). Standalone `launch` retains the existing behavior:
+connectivity/manufacturer checks, but no install idle check. Rollback targets
+only the device whose launch confirmed a crash, and still respects its idle check
+unless `all --force` was supplied. A rollback APK is verified once separately
+before any device operations.
+
+Multi-device artifacts live inside the run folder at `devices/<encoded-serial>/`:
+`install-adb.log`, `rollback-adb.log` when used, `launch-logcat.txt`,
+`launch-report.txt`, the other launch diagnostics, and a device-local `summary/`.
+Folder names preserve ASCII letters, digits, `_` and `-`; every other byte is
+percent-encoded (including `%`), so `192.168.0.5:5555` becomes
+`192%2E168%2E0%2E5%3A5555`. Top-level `summary.txt` and `wait` show
+`install[<serial>]`, `launch[<serial>]`, and any `rollback[<serial>]` lines with
+`OK`, `CRASH` or `INFRA`, plus the overall outcome. Original serials appear only
+in the report, not as raw paths. Single-device logs stay at the run root.
+
 `gate` runs Metal EditMode `Gfx;MacOnly` tests (`--full` runs all). All failures
 listed in `knownFlakes`, or exactly one failure whether listed or not, rerun
 once with the same categories and exact selected filter. Retry coverage and
@@ -441,6 +466,11 @@ result (`INFRA:`). Device checks, activity start, logcat capture (including the
 early snapshot), and failed/malformed pidof probes are infrastructure errors.
 The probe checks adb's transport status separately from the remote pidof status;
 remote exit 1 with no output confirms absence, not a transport failure.
+Multi-device exit status uses **crash (1) > infrastructure (3) > OK (0)**,
+regardless of device order. Install refusals, lock failures and busy/unknown idle
+checks are infrastructure failures (3) in list runs; only confirmed launch
+crashes count as crash (1), even after a successful rollback. Every selected
+device must succeed for exit 0. Single-device exit codes are unchanged.
 `summary.txt` and `wait` retain the `CRASH:`/`INFRA:` distinction; `wait` returns
 1 for either failure. Logs and summaries remain in `<worktreeRoot>/release-logs/`.
 
@@ -467,6 +497,8 @@ run folder, rather than accepting an earlier release's successful summary.
 - Serialize each log root with an atomic PID-aware run lock. Device operations
   additionally use a shared per-headset lock across projects/log roots under
   `/tmp/yetikit-quest-device-locks-$UID` (hashed runtime serial). Stale
+  locks are taken one at a time in input order and held across that device's
+  install/launch/optional rollback; no run holds two headset locks. Stale
   locks are reclaimed only after their owners and workers are gone; cancellation
   drains the owned process group before releasing its lock.
 - Device reconnect, Unity work, stall recovery and `wait` all have bounded waits.
@@ -477,7 +509,7 @@ run folder, rather than accepting an earlier release's successful summary.
 | Variable | Default / purpose |
 | --- | --- |
 | `PROJECT`, `YETIKIT_CONFIG` | Consumer root / root `yetikit.json`; `QUEST_REPO` remains a compatibility root override. |
-| `QUEST_SERIAL` | Environment only; otherwise require exactly one attached device. |
+| `QUEST_SERIAL` | Environment-only serial or ordered comma/whitespace list for all/install/launch/rollback; otherwise require exactly one attached device. |
 | `QUEST_CERT_SHA256` | Required expected APK signer for doctor/build/verify/install/rollback; use the release certificate with `quest.signing`. No default. |
 | `QUEST_WT_ROOT`, `QUEST_WARM_WORKTREE` | Configured worktree root / `<root>/mac-pass`. |
 | `QUEST_LOG_ROOT`, `QUEST_APK_DIR` | `<root>/release-logs` / warm worktree plus directory of `build.apkPath`. |

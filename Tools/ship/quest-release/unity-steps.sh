@@ -155,7 +155,7 @@ qr_apk_commit() {
 # APK intentionally returns empty rather than borrowing the prepared commit or an older installed baseline.
 qr_last_installed_sha() {
   local d ts sha apk
-  for d in "$QR_LOGS"/*/; do
+  for d in "$QR_LOGS"/*/ "$QR_LOGS"/*/devices/*/; do
     d="${d%/}"
     if [ -s "$d/summary/installed_at" ]; then
       ts="$(head -n1 "$d/summary/installed_at")"

@@ -20,6 +20,10 @@
 #   summary           print the current run summary
 #   wait [minutes]    read-only, default 45; exit 0 success, 1 failure, 124 timeout
 #
+# QUEST_SERIAL accepts a comma/whitespace list for all/install/launch/rollback.
+# Devices run sequentially in input order and continue after failures; one lock
+# at a time. Multi outcomes: crash (1) > infrastructure (3) > OK (0).
+# Multi logs: devices/<percent-encoded-serial>/; single-device paths unchanged.
 # Mutating commands hold a run lock; device operations also hold a headset lock.
 # Env overrides: see README.md, Quest release. Bash 3.2 compatible.
 
@@ -53,6 +57,8 @@ QR_SHIP_DIR="$QR_DIR"
 . "$QR_DIR/quest-release/wait.sh"
 
 . "$QR_DIR/quest-release/config.sh"
+# shellcheck source=Tools/ship/quest-release/multi.sh
+. "$QR_DIR/quest-release/multi.sh"
 
 # gate and build at once (two editors, two projects, separate -logFile and output), then wait for both.
 qr_parallel_unity() {
@@ -107,6 +113,14 @@ qr_all() {
     return 1
   fi
   ( qr_verify "$apk" ) || { qr_set install "skipped: verify failed"; return 1; }
+  QR_VERIFIED_APK="$apk"
+  if [ "${#QR_SERIALS[@]}" -gt 1 ]; then
+    local force_value=0
+    [ -z "$force" ] || force_value=1
+    qr_multi all "$apk" "$force_value" "$rollback" || rc=$?
+    ( qr_cleanup ) || true
+    return "$rc"
+  fi
   # shellcheck disable=SC2086 # $force is empty or --force
   ( qr_install "$apk" $force ) || return 1
   ( qr_launch ) || rc=$?
@@ -162,6 +176,14 @@ qr_main() {
           qr_summary
         fi
         qr_lock_result "$cmd" "$rc"; return "$rc"
+      fi
+      qr_serials || { qr_lock_result "$cmd" 1; return 1; } ;;
+  esac
+  # A single-device invocation following a list run must not print stale list outcomes.
+  case "$cmd" in
+    install|launch|rollback)
+      if [ "${#QR_SERIALS[@]}" = 1 ]; then
+        qr_set device_results ''; qr_set multi_command ''; qr_set overall ''
       fi ;;
   esac
   # verify's apksigner and the keystore preflight need Java: find it before any prepare, gate or build work.
@@ -169,7 +191,13 @@ qr_main() {
   case "$cmd" in
     all) qr_run_step qr_all "$@" || rc=$? ;;
     prepare) qr_run_step qr_prepare "$@" || rc=$? ;;
-    gate|build|verify|install|launch|rollback|cleanup)
+    install|launch|rollback)
+      if [ "${#QR_SERIALS[@]}" -gt 1 ]; then
+        qr_run_step qr_multi_command "$cmd" "$@" || rc=$?
+      else
+        qr_run_step "qr_$cmd" "$@" || rc=$?
+      fi ;;
+    gate|build|verify|cleanup)
       qr_load_state
       qr_run_step "qr_$cmd" "$@" || rc=$? ;;
     summary) qr_load_state ;;
