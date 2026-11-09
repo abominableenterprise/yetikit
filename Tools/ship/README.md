@@ -258,11 +258,14 @@ SDK/NDK and OpenJDK installed). Release worktrees need an APFS volume for
 worktree at `$HOME/wt/<repo name>/mac-pass` first. The editor version in
 `ProjectSettings/ProjectVersion.txt` must agree with configuration.
 
-Use the existing debug keystore at `$ANDROID_USER_HOME/debug.keystore`
-(default `$HOME/.android/debug.keystore`), not a newly generated key. Set
-`QUEST_CERT_SHA256` to the certificate fingerprint expected by the installed
-application, obtained independently with `keytool`. It has **no baked-in
-value**. Builds drop `XDG_CONFIG_HOME` so Gradle uses that same keystore.
+Without `quest.signing`, use the existing debug keystore at
+`$ANDROID_USER_HOME/debug.keystore` (default `$HOME/.android/debug.keystore`),
+not a newly generated key. This debug behavior is unchanged. For a release
+keystore, opt in with `quest.signing` as described below. Set `QUEST_CERT_SHA256`
+to the certificate fingerprint expected by the installed application, obtained
+independently with `keytool`. It has **no baked-in value**. Without signing
+config, builds drop `XDG_CONFIG_HOME` so the debug path uses that same keystore;
+custom-signing builds preserve the inherited environment.
 `doctor` checks Java, apksigner, keystore, editor, free disk, adb, idle status
 and concurrent runs, without creating logs, starting Unity or changing a device.
 No real headset or Mac is needed for the synthetic shell tests.
@@ -314,6 +317,11 @@ projects must supply a development execute method for this runner).
 | `prevShaEnv` | Previous-installed-commit environment-variable name; default `YETIKIT_PREV_SHA`. Build receives the latest successful install's commit unless already supplied. |
 | `dataFiles` | Optional array of safe basenames to back up and hash-check; default `playtest.json`, `throws.csv`. `SHA256SUMS` is reserved for backup metadata. Empty means no application-specific files. Contents never print. |
 | `launchArgs` | Optional string array appended to `adb shell am start`; default empty. No game-specific launch extras are built in. |
+| `signing` | Optional object selecting a release keystore for certificate lookup. Omit to retain identical debug-keystore behavior. |
+| `signing.keystorePathEnv` | Required when `signing` is present: name of the environment variable containing the keystore path. |
+| `signing.storePassEnv` | Required when `signing` is present: name of the environment variable containing the keystore password. |
+| `signing.keyAliasEnv` | Required when `signing` is present: name of the environment variable containing the key alias. |
+| `signing.keyPassEnv` | Optional name of the environment variable containing the key password. Not used for certificate lookup; remains inherited by the consumer build. |
 
 `quest.serial` is rejected: the headset serial belongs **only** in environment
 variable `QUEST_SERIAL`. For `install`, `launch`, `rollback` and `all`, it accepts
@@ -323,6 +331,59 @@ A single serial keeps the existing behavior and artifact paths. If unset, the
 runner requires exactly one attached adb
 device; zero or multiple devices fail clearly instead of choosing one. Never
 commit device identity, signing fingerprints or private provenance to config.
+
+### Optional release signing
+
+Add `signing` inside the existing `quest` object to map environment-variable
+names, **not** paths, aliases or passwords:
+
+```json
+{
+  "signing": {
+    "keystorePathEnv": "CONSUMER_KEYSTORE_PATH",
+    "storePassEnv": "CONSUMER_STORE_PASS",
+    "keyAliasEnv": "CONSUMER_KEY_ALIAS",
+    "keyPassEnv": "CONSUMER_KEY_PASS"
+  }
+}
+```
+
+Each configured name must match `[A-Za-z_][A-Za-z0-9_]*`. There are no fallback
+signing environment variables: when `signing` is present, supply the variables
+named by its three required fields. Omit `keyPassEnv` if the consumer build does
+not need a separate key password. The runner does not use it for certificate
+lookup, but build preflight and doctor require every named variable (including
+`keyPassEnv`, if configured) to be exported and nonempty. A missing custom
+keystore is a failure, naming `keystorePathEnv`'s variable rather than its value.
+In contrast, a missing debug keystore only warns because Gradle can create it.
+
+For example, in a private shell with tracing disabled, load passwords from your
+secret manager into the mapped variables, then inspect the release certificate:
+
+```sh
+export CONSUMER_KEYSTORE_PATH="/path/to/private/release.keystore"
+export CONSUMER_KEY_ALIAS="release"
+# Load and export CONSUMER_STORE_PASS securely; do not put its value here.
+# Also load and export CONSUMER_KEY_PASS if the consumer build needs it.
+keytool -list -v -keystore "$CONSUMER_KEYSTORE_PATH" -storepass:env CONSUMER_STORE_PASS -alias "$CONSUMER_KEY_ALIAS"
+# Set this to the release certificate's SHA-256 fingerprint from that output.
+export QUEST_CERT_SHA256="<release-certificate-sha256>"
+Tools/yetikit/quest-release.sh doctor
+```
+
+Certificate lookup passes the password with `keytool -storepass:env`, never as
+an inline password argument. PKCS12 and JKS keystores are autodetected; no store
+type setting is needed. Keep the keystore, passwords and fingerprint out of
+committed configuration. Confirm the release certificate matches the installed
+application before proceeding; changing certificates cannot update that app in
+place.
+
+The consumer's `build.devMethod` performs the actual APK signing, using the
+inherited environment. The runner's `quest.signing` mapping only selects the
+certificate to check; it does not configure Unity signing or re-sign the APK.
+Prebuilt `verify`, `install` and `rollback` require `QUEST_CERT_SHA256` but do
+not require the keystore or signing credentials: they check the APK's signer
+directly.
 
 ### Commands
 
@@ -449,7 +510,7 @@ run folder, rather than accepting an earlier release's successful summary.
 | --- | --- |
 | `PROJECT`, `YETIKIT_CONFIG` | Consumer root / root `yetikit.json`; `QUEST_REPO` remains a compatibility root override. |
 | `QUEST_SERIAL` | Environment-only serial or ordered comma/whitespace list for all/install/launch/rollback; otherwise require exactly one attached device. |
-| `QUEST_CERT_SHA256` | Required expected APK signer for build/verify/install; no default. |
+| `QUEST_CERT_SHA256` | Required expected APK signer for doctor/build/verify/install/rollback; use the release certificate with `quest.signing`. No default. |
 | `QUEST_WT_ROOT`, `QUEST_WARM_WORKTREE` | Configured worktree root / `<root>/mac-pass`. |
 | `QUEST_LOG_ROOT`, `QUEST_APK_DIR` | `<root>/release-logs` / warm worktree plus directory of `build.apkPath`. |
 | `QUEST_BACKUP_ROOT` | `$HOME`; backups contain private application data, keep them private. |
@@ -462,5 +523,6 @@ run folder, rather than accepting an earlier release's successful summary.
 | `QUEST_WAIT_POLL` | `5` seconds between read-only `wait` checks. |
 | `UNITY_HUB_EDITORS`, `UNITY_BIN` | `/Applications/Unity/Hub/Editor` / explicit editor executable. |
 | `JAVA_HOME`, `ANDROID_SDK_ROOT`, `AAPT` | Explicit tools, otherwise matching editor's Android support SDK/OpenJDK and newest build-tools. |
-| `ANDROID_USER_HOME` | `$HOME/.android`; contains `debug.keystore`. |
+| `ANDROID_USER_HOME` | `$HOME/.android`; contains `debug.keystore`, used when `quest.signing` is absent. |
+| configured signing names | Keystore path, store password and key alias for certificate lookup; optional key password is inherited by the consumer build, not used for lookup. No fallback names. |
 | configured notes / previous-SHA names | `YETIKIT_WHATS_NEW` / `YETIKIT_PREV_SHA`; environment only. |

@@ -11,6 +11,9 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ### Added
 - Quest release runs can install and launch the same build on several headsets,
   with ordered device steps, isolated diagnostics and crash-only rollback.
+- Optional `quest.signing` maps environment-variable names for release-keystore
+  certificate lookup, with PKCS12/JKS autodetection. The consumer build retains
+  responsibility for signing using its inherited environment.
 
 ### Fixed
 - None.
@@ -18,9 +21,14 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ### Behaviour changes
 - Multi-headset runs store device artifacts in separate encoded-serial folders
   and report each device's outcome. Single-headset paths and behavior are unchanged.
+- None for projects without signing config; existing debug-keystore behavior
+  is unchanged.
 
 ### Adapter changes
-- None.
+- Optional adoption: configure `quest.signing.keystorePathEnv`, `storePassEnv`
+  and `keyAliasEnv`, plus `keyPassEnv` if needed by the consumer build. Supply
+  the mapped environment variables, set `QUEST_CERT_SHA256` to the release
+  certificate fingerprint and run `quest-release.sh doctor` before building.
 
 ## [0.1.4] - 2026-11-09
 

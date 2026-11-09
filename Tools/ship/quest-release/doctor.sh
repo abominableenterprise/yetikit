@@ -63,9 +63,23 @@ qr_doctor_keystore() {
     qr_doctor_line FAIL keystore "QUEST_CERT_SHA256 must supply the expected signer SHA-256 (64 hex digits)"
     return 1
   fi
-  ks="$(qr_android_user_home)/debug.keystore"
+  if ! qr_signing_resolve; then
+    qr_doctor_line FAIL keystore "$QR_SIGNING_ERROR"
+    return 1
+  fi
+  ks="$QR_KEYSTORE_LABEL"
   want="$(qr_norm_hex "$QR_CERT_SHA256")"
-  got="$(qr_keystore_check "$ks" 2>/dev/null)" || rc=$?
+  got="$(qr_keystore_check "$QR_KEYSTORE_PATH" "$QR_KEYSTORE_ALIAS" "$QR_KEYSTORE_PASS_ENV" 2>/dev/null)" || rc=$?
+  if [ -n "${QR_SIGNING_PATH_ENV:-}" ]; then
+    case "$rc" in
+      0) qr_doctor_line ok keystore "$ks matches the expected certificate (${got:0:16}...)" ;;
+      1) qr_doctor_line FAIL keystore "$ks has certificate ${got:0:16}..., expected ${want:0:16}... (QUEST_CERT_SHA256)" ;;
+      2) qr_doctor_line FAIL keystore "file named by $QR_SIGNING_PATH_ENV is missing" ;;
+      3) qr_doctor_line FAIL keystore "$ks not checked: no keytool on PATH" ;;
+      *) qr_doctor_line FAIL keystore "keytool could not read $ks (check $QR_SIGNING_PASS_ENV and $QR_SIGNING_ALIAS_ENV)" ;;
+    esac
+    return 0
+  fi
   case "$rc" in
     0) qr_doctor_line ok keystore "$ks matches the expected certificate (${got:0:16}...)" ;;
     1) qr_doctor_line FAIL keystore "$ks has certificate ${got:0:16}..., expected ${want:0:16}... (set ANDROID_USER_HOME to the folder with the right debug.keystore)" ;;
@@ -77,7 +91,7 @@ qr_doctor_keystore() {
   [ -n "${XDG_CONFIG_HOME:-}" ] || return 0
   xks="$XDG_CONFIG_HOME/.android/debug.keystore"
   [ "$xks" != "$ks" ] && [ -f "$xks" ] || return 0
-  rc=0; got="$(qr_keystore_check "$xks" 2>/dev/null)" || rc=$?
+  rc=0; got="$(qr_keystore_check "$xks" "$QR_KEYSTORE_ALIAS" "$QR_KEYSTORE_PASS_ENV" 2>/dev/null)" || rc=$?
   [ "$rc" = 1 ] && qr_doctor_line warn keystore "XDG_CONFIG_HOME is set and $xks has another certificate (${got:0:16}...): the build ignores it, but a Unity or Gradle started by hand from this shell would sign with it"
   return 0
 }

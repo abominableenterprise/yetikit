@@ -287,8 +287,8 @@ check "no keytool: the preflight logs and continues" '[ "$rc" = 0 ] && out_has "
 reset_logs; FAKE_KEYSTORE_CERT="6F:0A:D4:16:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB" run build
 check "a debug keystore with another certificate stops build before Unity runs, naming the keystore" \
   '[ "$rc" != 0 ] && [ ! -f "$tmp/unity.log" ] && out_has "$HOME/.android/debug.keystore" && out_has "6f0ad416" && grep -q "apk:         not built" "$tmp/out"'
-check "the preflight reads the debug alias with storepass android and prints only the fingerprint" \
-  'grep -q -- "-keystore $HOME/.android/debug.keystore -storepass android -alias androiddebugkey" "$tmp/keytool.log" && ! grep -q "PrivateKeyEntry\|Android Debug\|SHA1" "$tmp/out" "$tmp/err"'
+check "the preflight reads the debug alias with an env password source and prints only the fingerprint" \
+  'grep -q -- "-keystore $HOME/.android/debug.keystore -storepass:env QR_DEBUG_STORE_PASS -alias androiddebugkey" "$tmp/keytool.log" && ! grep -q "PrivateKeyEntry\|Android Debug\|SHA1" "$tmp/out" "$tmp/err"'
 reset_logs; run build
 check "a debug keystore with the expected certificate: the build runs" \
   '[ "$rc" = 0 ] && [ -f "$tmp/unity.log" ] && [ -f "$tmp/keytool.log" ] && out_has "keystore preflight: .*matches"'
