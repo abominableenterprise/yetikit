@@ -1,6 +1,6 @@
 {
   "name": "com.abominable.yetikit.core",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "unity": "6000.6",
   "displayName": "YetiKit Core",
   "description": "Build identity, release notes, profiler counters and lightweight utilities without XR dependencies.",

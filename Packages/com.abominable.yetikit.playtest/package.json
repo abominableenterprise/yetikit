@@ -6,6 +6,6 @@
   "description": "Planned dev-only capture, durable recording and optional upload.",
   "license": "MIT",
   "dependencies": {
-    "com.abominable.yetikit.core": "0.1.3"
+    "com.abominable.yetikit.core": "0.1.4"
   }
 }
