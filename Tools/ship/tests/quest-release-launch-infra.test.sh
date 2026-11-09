@@ -6,7 +6,7 @@ set -u
 . "$(dirname "$0")/lib/quest-release-config.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 qr_test_config "$tmp/config"
-export QUEST_REPO="$tmp" QUEST_WT_ROOT="$tmp/wt" QUEST_BACKUP_ROOT="$tmp" QUEST_SERIAL=synthetic-device
+export QUEST_REPO="$tmp" QUEST_WT_ROOT="$tmp/wt" QUEST_BACKUP_ROOT="$tmp" QUEST_SERIAL="synthetic-launch-infra-${tmp##*/}"
 export QR_LAUNCH_WAIT=1 QR_ADB_WAIT=1 QUEST_WAIT_GRACE=0
 mkdir -p "$tmp/wt"
 printf 'new\n' > "$tmp/new.apk"; printf 'old\n' > "$tmp/old.apk"

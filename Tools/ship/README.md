@@ -236,20 +236,45 @@ selection only; scene cleanup's `noise.codeRegex` policy is unchanged.
 
 ## Test without Unity
 
+Normal PRs run focused files (including relevant slow regressions), plus
+`Tools/ship/test-all.sh --changed` and `Tools/vendor/tests/run.sh`:
+
+```sh
+Tools/ship/tests/run.sh quest-release.test.sh
+```
+
+Pass one or more exact test basenames to the runner for the same isolation
+and timeout as CI. It defaults to one worker per available CPU, capped at eight
+(`SHIP_TEST_JOBS=1` for sequential execution); `# test-all: serial` files run alone after the parallel
+batch. Each file has isolated temporary and home directories. Output is grouped
+per completed file, including elapsed seconds, total duration and the five slowest
+files. Its test-only jq wrapper memoizes the three pure config
+filters by filter and input bytes; config changes invalidate entries and other
+queries run normally. The release-flow fixture also reuses immutable parsed JSON;
+config validation/mutation is exercised separately. Production scripts are unchanged. Run the full suite locally only for release PRs (version
+bump/tag) or shared test-infrastructure changes (`tests/lib/`, `tests/run.sh`,
+fixtures):
+
 ```sh
 Tools/ship/tests/run.sh
 ```
 
 The [Ship CI workflow](../../.github/workflows/ship.yml) is path-filtered to
-Ship and its workflow. The local aggregate runner defaults to changed Ship
-files since `origin/main`, including working-tree changes; unrelated changes
-select no tests. Shared tooling, fixtures, or workflow changes select all quick
-tests. Slow tests tagged `# test-all: slow [script-basename ...]` require a change
-to their own file or a script explicitly named in the tag; incidental references
-do not opt them in. `--fast` omits all slow-tagged tests. Use
-`Tools/ship/test-all.sh --changed <base>` for another comparison base, or
-`Tools/ship/test-all.sh --all` to explicitly run unchanged tests, including slow
-ones. The serial command above always runs the full suite for repeatability checks.
+Ship and its workflow, and always runs the full suite when triggered.
+
+The local aggregate runner `Tools/ship/test-all.sh` defaults to changed Ship
+files since the merge-base with `origin/main`, including staged, unstaged and
+untracked changes; unrelated changes select no tests. This is broad quick-test
+selection, not a precise dependency graph: a changed `*.test.sh` selects itself;
+other Ship paths (including docs, shared tooling and fixtures) or the Ship
+workflow select all quick tests. Slow tests tagged
+`# test-all: slow [script-basename ...]` require a change to their own file or a
+shell/Python script explicitly named in the tag; incidental references do not
+opt them in. `--fast` omits all slow-tagged tests. Use
+`Tools/ship/test-all.sh --changed <base>` for another comparison base. Positional
+basename-substring filters intersect changed selection; use, for example,
+`Tools/ship/test-all.sh --all quest-release` to run matching tests regardless of
+changes. Unfiltered `--all` runs the full suite, including slow tests.
 
 Part B adds the offline shell tests and CI entry point. No editor, account,
 network, activation or seat is needed. Generated-scene and no-scene fixtures

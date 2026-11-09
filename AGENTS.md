@@ -33,6 +33,10 @@ shared packages, documentation and a minimal Unity test Host, not game code.
 - Small, modular code: one job per file; no source file over ~800 lines / 50 KB; new features in new modules.
 - Small PRs: one area, about 500 changed lines or fewer (tests and pure moves excluded). Split bigger work into parts
   ("Part of #N"). Never widen a PR during review. Push after every commit. Bug fixes come with a failing-first test.
+- Normal PRs run focused tests (including relevant slow files), `Tools/ship/test-all.sh --changed`, and
+  `Tools/vendor/tests/run.sh`. Changed selection is broad quick-test coverage, not a precise dependency graph.
+  Run `Tools/ship/tests/run.sh` locally only for release PRs (version bump/tag) or shared test-infrastructure
+  changes (`tests/lib/`, `tests/run.sh`, fixtures). CI still runs the full suite.
 - Reviewer: Check Norris (`checknorrisbot[bot]`, status `checknorris`, green only at 5/5). It reviews ~10 quiet minutes
   after the last push (never push empty commits to trigger it). Commands: `@checknorrisbot review`,
   `@checknorrisbot re-review`, `@checknorrisbot rescore`.

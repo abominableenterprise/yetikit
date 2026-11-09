@@ -12,7 +12,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Ship's Quest release tests no longer depend on VM speed.
+- Filtered EditMode runs no longer fail solely because one pass selects no tests.
 
 ### Behaviour changes
 - None.

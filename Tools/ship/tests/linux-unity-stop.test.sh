@@ -1,22 +1,8 @@
 #!/usr/bin/env bash
-# Exercises a sandbox-local pidfile fallback also scanned by stop.
-# Tests `linux-unity.sh stop`: it kills the editor run (script, xvfb-run, Xvfb, editor) this script started, from the
-# pidfile it writes under $OUT_DIR (or /tmp), and nothing else. Fake editor and Xvfb; never runs Unity.
-# Run: bash Tools/ship/tests/linux-unity-stop.test.sh
+# Stop a running editor and verify pidfile ownership, fallback and cleanup.
+# Synthetic editor/process fixtures only; never runs Unity.
 set -euo pipefail
-script="$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh"
-tmp="$(mktemp -d)"
-fails=0
-proj="$tmp/proj"; mkdir -p "$proj/Temp"
-. "$(dirname "$0")/lib/fake-unity.sh"
-ship_fixture_process_view "$tmp/process-view"
-export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''
-bystander=""
-# The bystander's sleep is its child: kill both, so no stray process keeps the caller's pipe open.
-trap '[ -z "$bystander" ] || kill $(ps -o pid= --ppid "$bystander") "$bystander" 2>/dev/null || true; rm -rf "$tmp"' EXIT
-alive() { kill -0 "$1" 2>/dev/null && [ "$(cut -d' ' -f3 "/proc/$1/stat" 2>/dev/null)" != Z ]; }
-# Wait for observed readiness with scheduling headroom.
-wait_for() { ship_wait_until test -s "$1"; }
+. "$(dirname "$0")/lib/linux-unity-stop-fixture.sh"
 
 # An unrelated "Unity" process (same name as the editor, not started by the script): stop must leave it alone.
 cp "$tmp/unity/Editor/Unity" "$tmp/Unity"
@@ -75,88 +61,5 @@ check "stop skips an unopenable primary lock and stops the fallback run" '[ "$rc
 if alive "$runner"; then PIDFILE="$fallback" bash "$script" stop 2>/dev/null; fi
 wait "$runner" 2>/dev/null || true
 chmod 755 "$tmp/readonly"
-
-# --- before any editor runs: a slow cache restore of a cold open ---------------------------------------------------------
-printf '#!/bin/sh\necho $$ > "%s/cache.pid"; exec sleep 300\n' "$tmp" > "$tmp/bin/slow-cache"; chmod +x "$tmp/bin/slow-cache"
-rm -f "$tmp/runs"; rm -rf "$proj/Library"; mkdir -p "$proj/Packages" "$proj/ProjectSettings"
-echo '{}' > "$proj/Packages/manifest.json"; echo '{}' > "$proj/Packages/packages-lock.json"
-echo 'm_EditorVersion: 6000.6.6f1' > "$proj/ProjectSettings/ProjectVersion.txt"
-TASK_CACHE=slow-cache bash "$script" open >/dev/null 2>&1 & runner=$!
-wait_for "$tmp/cache.pid"; cache="$(cat "$tmp/cache.pid")"
-check "the pidfile exists during the cache restore, before any editor" \
-  '[ "$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")" = "$runner" ] && [ ! -e "$tmp/runs" ]'
-bash "$script" stop 2>"$tmp/err"; wait "$runner" 2>/dev/null || true
-check "stop during the cache restore kills the script and the restore; no editor starts" \
-  '! alive "$runner" && ! alive "$cache" && grep -q "stop: killing $runner" "$tmp/err" && ! grep -q "nothing this script started" "$tmp/err" && [ ! -e "$tmp/runs" ]'
-# --- #180 review: an overlapping command, a tree that keeps forking, a child that ignores TERM -------------------------
-rm -f "$tmp/unity.pid"   # left by earlier cases: wait for this run's editor
-FAKE_SLEEP=300 bash "$script" open >/dev/null 2>&1 & runner=$!
-wait_for "$tmp/unity.pid"
-rc=0; bash "$script" open --bad 2>"$tmp/err" || rc=$?
-check "a second command while a run is live fails and leaves the live run's pidfile" \
-  '[ "$rc" != 0 ] && { grep -qF "another run (pid $runner," "$tmp/err" || grep -qF "another Unity run owns $SHM_DIR;" "$tmp/err"; } && alive "$runner" && [ "$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")" = "$runner" ]'
-bash "$script" stop 2>"$tmp/err"; wait "$runner" 2>/dev/null || true
-check "stop still finds and kills that live run" '! alive "$runner" && grep -q "stop: killing $runner" "$tmp/err"'
-# A cache restore that forks a new sleep every 20 ms (at most 500), and one child that ignores TERM.
-cat > "$tmp/bin/fork-cache" <<EOF
-#!/usr/bin/env bash
-bash -c 'trap "" TERM; echo \$\$ > "$tmp/stubborn.pid"; while :; do sleep 1; done' &
-for i in \$(seq 500); do sleep 300 & echo \$! >> "$tmp/forked"; sleep 0.02; done; wait
-EOF
-chmod +x "$tmp/bin/fork-cache"; rm -rf "$proj/Library" "$tmp/forked" "$tmp/stubborn.pid"
-TASK_CACHE=fork-cache bash "$script" open >/dev/null 2>&1 & runner=$!
-wait_for "$tmp/stubborn.pid"; wait_for "$tmp/forked"
-bash "$script" stop 2>"$tmp/err"; wait "$runner" 2>/dev/null || true
-survivors=""; for p in $(cat "$tmp/forked") "$(cat "$tmp/stubborn.pid")"; do alive "$p" && survivors="$survivors $p"; done
-[ -z "$survivors" ] || kill -9 $survivors 2>/dev/null || true
-check "stop freezes the tree first: nothing the run forks while stop works survives" '! alive "$runner" && [ -z "$survivors" ]'
-check "a child that ignores TERM is still killed (KILL after the start-time check)" '! alive "$(cat "$tmp/stubborn.pid")"'
-
-# #180 review: an editor that forks on TERM, inside `timeout`'s own process group, in a run piped into tee (no setsid,
-# no group): the late child carries the run's marker and dies; the pipeline peer is not signalled.
-mkdir -p "$tmp/unity2/Editor"
-printf '#!/bin/sh\necho $$ > "$FAKE_TMP/late.pid"; exec sleep 300 >/dev/null 2>&1\n' > "$tmp/bin/late-child"
-cat > "$tmp/unity2/Editor/Unity" <<'EOF'
-#!/usr/bin/env bash
-trap 'late-child & wait' TERM
-echo $$ > "$FAKE_TMP/unity2.pid"; while :; do sleep 0.2; done
-EOF
-chmod +x "$tmp/unity2/Editor/Unity" "$tmp/bin/late-child"; rm -f "$tmp/late.pid" "$tmp/unity2.pid"
-( UNITY_ROOT="$tmp/unity2" bash "$script" open 2>&1 | { echo $BASHPID > "$tmp/tee.pid"; exec tee "$tmp/tee.log" >/dev/null; } ) &
-pipe=$!
-wait_for "$tmp/unity2.pid"; wait_for "$tmp/tee.pid"; runner="$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")"
-bash "$script" stop 2>"$tmp/err"; wait "$pipe" 2>/dev/null || true
-late="$(cat "$tmp/late.pid" 2>/dev/null || true)"
-check "a child the editor forks on TERM (in timeout's process group) is killed too" \
-  '[ -n "$late" ] && ! alive "$late" && ! alive "$(cat "$tmp/unity2.pid")" && ! alive "$runner"'
-[ -z "$late" ] || ! alive "$late" || kill -9 "$late"
-check "a pipeline peer (| tee) is not killed: it ends on EOF with the log" \
-  'grep -q "\[linux-unity\]" "$tmp/tee.log" && ! grep -q "stop: killing $(cat "$tmp/tee.pid")" "$tmp/err"'
-
-# #180 review (cn-1d5388e628r): marked() lists pid:start, and stop re-checks the start time and this run's marker right
-# before each KILL, so a pid reused between the listing and the KILL survives. marked is stubbed (the script sourced)
-# to also list a process with a stale start time and one with the right start time but no marker; real marked ones die.
-proc_start() { local s; s="$(cat "/proc/$1/stat")"; set -- ${s##*) }; echo "${20}"; }
-sleep 300 & run=$!; run_id="$run:$(proc_start "$run")"
-echo "${run_id/:/ }" > "$OUT_DIR/linux-unity.pid"
-LINUX_UNITY_RUN="$run_id" sleep 300 & mark1=$!
-LINUX_UNITY_RUN="$run_id" sleep 300 & mark2=$!
-sleep 300 & stale=$!; sleep 300 & unmarked=$!
-ship_wait_until grep -qzx "LINUX_UNITY_RUN=$run_id" "/proc/$mark1/environ"
-ship_wait_until grep -qzx "LINUX_UNITY_RUN=$run_id" "/proc/$mark2/environ"
-STALE="$stale:1" UNMARKED="$unmarked:$(proc_start "$unmarked")" bash -c '
-  . "$1"; eval "real_$(declare -f marked)"
-  # In the format the script lists (bare pids before the fix, so this fails on the old script).
-  declare -F same_proc >/dev/null || { STALE="${STALE%%:*}"; UNMARKED="${UNMARKED%%:*}"; }
-  marked() { real_marked "$@"; echo "$STALE"; echo "$UNMARKED"; }
-  cmd_stop' _ "$script" 2>"$tmp/err"
-for i in $(seq 50); do alive "$run" || alive "$mark1" || alive "$mark2" || break; sleep 0.1; done
-check "stop KILLs every real marked process (start time and marker match)" \
-  '! alive "$run" && ! alive "$mark1" && ! alive "$mark2"'
-check "a marked entry whose start time no longer matches (pid reused) is not killed" 'alive "$stale"'
-check "a marked entry whose process no longer carries the run's marker is not killed" 'alive "$unmarked"'
-{ kill -9 "$run" "$mark1" "$mark2" "$stale" "$unmarked"; wait "$run" "$mark1" "$mark2" "$stale" "$unmarked"; } 2>/dev/null || true
-
-check "the script never runs pkill (comments aside)" '! grep -v "^[[:space:]]*#" "$script" | grep -q pkill'
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

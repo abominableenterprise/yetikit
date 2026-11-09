@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Synthetic source manifest and APK contracts; no SDK, network, editor or device.
+# Even subprocess cases run here; android-launcher-odd.test.sh covers the rest.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 check="$here/../android-launcher.py"
@@ -70,7 +71,14 @@ with tempfile.TemporaryDirectory() as directory:
     }
     config.write_text(json.dumps(settings))
 
+    shard = int(os.environ.get('LAUNCHER_TEST_SHARD', '0'))
+    ordinal = 0
+
     def run(target, expected, label, configured=True, contest=False):
+        global ordinal
+        ordinal += 1
+        if ordinal % 2 != shard:
+            return
         args = [sys.executable, check]
         if contest:
             args += ['--contest']
