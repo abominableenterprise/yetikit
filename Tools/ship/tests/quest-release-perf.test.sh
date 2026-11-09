@@ -6,6 +6,12 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/../quest-release.sh"
 . "$here/lib/quest-release-config.sh"
 . "$here/lib/quest-release-fixture.sh"
+# Exercise the real watchdog fallback: the synthetic adb is a shell function,
+# not an executable that gtimeout can launch.
+command() {
+  if [ "${1:-}" = -v ] && [ "${2:-}" = gtimeout ]; then return 1; fi
+  builtin command "$@"
+}
 # This suite mutates config between cases; bypass immutable-config memoization.
 # Still use the runner's real jq, without a Python launcher for each scalar read.
 jq() { command "${SHIP_TEST_REAL_JQ:-jq}" "$@"; }
@@ -83,10 +89,20 @@ emit_samples() {
 }
 # Persist virtual elapsed time across adb command substitutions. Slow probes
 # cost one second each without making this synthetic suite wait in real time.
-qr_perf_now() { command cat "$tmp/state/$(fixture_id "$QUEST_SERIAL")/clock"; }
+qr_perf_now() {
+  local clock
+  read -r clock < "$tmp/state/$(fixture_id "$QUEST_SERIAL")/clock"
+  printf '%s\n' "$clock"
+}
+# PID polling advances virtual time independently of warm-up/capture sleeping.
+qr_perf_pid_sleep() {
+  local state="$tmp/state/$(fixture_id "$QUEST_SERIAL")"
+  advance_clock 1
+  echo pid-wait >> "$tmp/events"
+}
 advance_clock() {
   local now
-  now="$(command cat "$state/clock")"
+  read -r now < "$state/clock"
   echo "$((now + $1))" > "$state/clock"
 }
 # Model the device's buffered logcat: warm-up fills it, -c empties it, and
@@ -95,7 +111,7 @@ qr_perf_sleep() {
   local id state phase profile child
   id="$(fixture_id "$QUEST_SERIAL")" || return 99
   state="$tmp/state/$id"
-  phase="$(command cat "$state/phase")"
+  read -r phase < "$state/phase"
   advance_clock "$1"
   printf '%s|sleep %s %s\n' "$QUEST_SERIAL" "$1" "$phase" >> "$tmp/events"
   if [ "$phase" = warmup ]; then
@@ -108,9 +124,9 @@ qr_perf_sleep() {
       qr_fixture_ready "$tmp/capture.ready" "$child"
       wait "$child"
     else
-      profile="$(command cat "$state/profile")"
+      read -r profile < "$state/profile"
       local elapsed=0
-      [ ! -f "$state/elapsed" ] || elapsed="$(command cat "$state/elapsed")"
+      [ ! -f "$state/elapsed" ] || read -r elapsed < "$state/elapsed"
       elapsed=$((elapsed + $1))
       echo "$elapsed" > "$state/elapsed"
     fi
@@ -122,8 +138,8 @@ adb() {
   [ "${1:-}" = -s ] && [ "$#" -ge 3 ] || return 99
   id="$(fixture_id "$2")" || return 99
   state="$tmp/state/$id"; shift 2
-  fault="$(command cat "$state/fault")"
-  profile="$(command cat "$state/profile")"
+  read -r fault < "$state/fault"
+  read -r profile < "$state/profile"
   printf '%s|%s\n' "$id" "$*" >> "$tmp/adb.log"
   printf '%s|%s\n' "$id" "$*" >> "$tmp/events"
   case "$1" in
@@ -152,6 +168,19 @@ adb() {
         'getprop ro.product.manufacturer') echo Oculus ;;
         'getprop ro.product.model') echo 'Synthetic Quest' ;;
         'pidof '*)
+          local probes=0
+          case "$profile" in
+            delayed-pid|absent-pid|two-pids|blocked-pid|late-pid)
+              [ ! -f "$state/pid-probes" ] || read -r probes < "$state/pid-probes"
+              probes=$((probes + 1)); echo "$probes" > "$state/pid-probes" ;;
+          esac
+          case "$profile" in
+            delayed-pid) if [ "$probes" -le 2 ]; then printf '\nqr_pid_rc=1\n'; return 0; fi ;;
+            absent-pid) printf '\nqr_pid_rc=1\n'; return 0 ;;
+            two-pids) printf '4242 4343\nqr_pid_rc=0\n'; return 0 ;;
+            blocked-pid) qr_fixture_block_until_term "$state/pid-blocker" ;;
+            late-pid) advance_clock 4 ;;
+          esac
           [ "$profile" != slow-probes ] || advance_clock 1
           if [ -f "$state/elapsed" ]; then
             case "$profile" in
@@ -175,6 +204,12 @@ adb() {
         'am broadcast -a com.oculus.vrpowermanager.automation_disable')
           echo attempted >> "$state/restore-attempts"
           [ "$fault" != restore ] || return 1
+          if [ "$fault" = restore-once ] && [ "$(wc -l < "$state/restore-attempts")" = 1 ]; then return 1; fi
+          if [ "$fault" = restore-hang ]; then
+            # Reap the synthetic sleep on TERM from the real timebox watchdog.
+            qr_fixture_block_until_term "$state/restore-blocker"
+            return $?
+          fi
           [ ! -f "$QUEST_LOG_ROOT/last-result" ] || : > "$tmp/early-result"
           echo restored >> "$state/restored" ;;
         'am start '*)
@@ -273,6 +308,27 @@ run "$a" perf --seconds 7 --warmup 0
 check 'CLI overrides configured seconds and accepts zero warm-up' \
   '[ "$rc" = 0 ] && json_is '\''.seconds == 7 and .warmupSeconds == 0'\'' && grep -q "sleep 0 warmup" "$tmp/events" && [ "$(grep -c "sleep 1 capture" "$tmp/events")" = 7 ]'
 
+for profile in delayed-pid absent-pid two-pids blocked-pid late-pid; do
+  reset_case
+  echo "$profile" > "$tmp/state/a/profile"
+  QR_PERF_PID_WAIT=3 run "$a" perf
+  case "$profile" in
+    delayed-pid)
+      check 'cold start waits for a unique PID before warm-up and passes' \
+        '[ "$rc" = 0 ] && json_is '\''.overall == "PASS"'\'' && [ "$(grep -E "pid-wait|sleep 3 warmup" "$tmp/events")" = "$(printf "pid-wait\npid-wait\n%s|sleep 3 warmup" "$a")" ]' ;;
+    absent-pid)
+      check 'no PID by the bounded deadline is INFRA without starting warm-up' \
+        '[ "$rc" = 3 ] && json_is '\''.overall == "INFRA" and (.message | contains("PID"))'\'' && [ "$(command cat "$tmp/state/a/pid-probes")" = 3 ] && ! grep -q "sleep .*warmup" "$tmp/events"' ;;
+    two-pids)
+      check 'multiple live PIDs are immediately INFRA without starting warm-up' \
+        '[ "$rc" = 3 ] && json_is '\''.overall == "INFRA" and (.message | contains("PID"))'\'' && [ "$(command cat "$tmp/state/a/pid-probes")" = 1 ] && ! grep -q "sleep .*warmup" "$tmp/events"' ;;
+    blocked-pid|late-pid)
+      check "$profile cannot exceed the PID discovery budget and start warm-up" \
+        '[ "$rc" = 3 ] && json_is '\''.overall == "INFRA" and (.message | contains("PID"))'\'' && ! grep -q "sleep .*warmup" "$tmp/events"' ;;
+  esac
+  check "$profile always restores proximity" 'restored a'
+done
+
 reset_case
 configure 'del(.quest.perf.seconds, .quest.perf.warmupSeconds)'
 run "$a" perf
@@ -354,6 +410,12 @@ run "$a" perf
 check 'failed proximity restoration is INFRA and EXIT retries restoration' \
   '[ "$rc" = 3 ] && json_is '\''.overall == "INFRA" and (.message | contains("restoration failed"))'\'' && [ "$(wc -l < "$tmp/state/a/restore-attempts")" -ge 2 ]'
 
+reset_case
+echo restore-once > "$tmp/state/a/fault"
+run "$a" perf
+check 'successful EXIT retry clears its matching proximity marker' \
+  '[ "$rc" = 3 ] && restored a && [ ! -e "$run_dir/perf-active" ]'
+
 for field in app stale fps; do
   reset_case
   echo "missing-$field" > "$tmp/state/a/profile"
@@ -431,8 +493,10 @@ check 'wait fails mixed perf and preserves both per-device summaries' \
 
 # Real qr_main owner/traps, real run lock and real cancel/drain; only adb and
 # capture sleeping are fake. Readiness is published inside the capture window.
+for cancel_fault in none restore-hang; do
 reset_case
-export QR_PERF_TEST_TMP="$tmp" QR_PERF_CANCEL=1 QUEST_SERIAL="$a"
+echo "$cancel_fault" > "$tmp/state/a/fault"
+export QR_PERF_TEST_TMP="$tmp" QR_PERF_CANCEL=1 QUEST_SERIAL="$a" QR_PERF_RESTORE_WAIT=1
 if declare -F qr_perf >/dev/null; then
   set -m
   qr_fixture_bash "$here/quest-release-perf.test.sh" --cancel-worker > "$tmp/cancel.out" 2>&1 & owner=$!
@@ -444,7 +508,16 @@ if declare -F qr_perf >/dev/null; then
   run "$a" perf --seconds 1 --warmup 0
   check 'active capture holds the real run lock and rejects a competing perf command' \
     '[ "$ready" = 1 ] && [ "$recorded" = "$owner" ] && [ "$rc" = 1 ] && [ "$(wc -l < "$tmp/adb.log")" = "$before" ] && grep -q "another quest-release run is active" "$tmp/err"'
-  qr_fixture_watchdog "$owner" & watchdog=$!
+  # A broken owner restore must not stall this regression for the suite timeout.
+  (
+    timer=''
+    trap 'kill "$timer" "${!:-}" 2>/dev/null; wait "$timer" 2>/dev/null; exit' TERM
+    /bin/sleep 12 & timer=$!; wait "$timer"
+    group="$(command cat "$QUEST_LOG_ROOT/run.lock/group" 2>/dev/null)"
+    [ -z "$group" ] || kill -KILL -- "-$group" 2>/dev/null || true
+    kill -KILL -- "-$owner" 2>/dev/null || true
+  ) & watchdog=$!
+  cancel_started=$SECONDS
   kill -TERM "$owner" 2>/dev/null || true
   rc=0; wait "$owner" || rc=$?
   kill -TERM "$watchdog" 2>/dev/null || true
@@ -460,11 +533,38 @@ if declare -F qr_perf >/dev/null; then
   else
     stopped=0
   fi
-  check 'TERM drains capture and logs proximity restoration before publishing cancellation and releasing lock' \
-    '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -f "$tmp/early-result" ] && grep -q "^cmd=perf$" "$QUEST_LOG_ROOT/last-result" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result" && json_is '\''.overall != "PASS"'\'''
+  if [ "$cancel_fault" = none ]; then
+    check 'TERM drains capture and logs proximity restoration before publishing cancellation and releasing lock' \
+      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -f "$tmp/early-result" ] && grep -q "^cmd=perf$" "$QUEST_LOG_ROOT/last-result" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result" && json_is '\''.overall != "PASS"'\'''
+  else
+    check 'hung restore after TERM is bounded, warns in the per-device summary and removes the marker' \
+      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ "$((SECONDS - cancel_started))" -le 8 ] && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -e "$run_dir/perf-active" ] && json_is '\''.overall == "INFRA" and (.message | contains("WARN: proximity sensor may still be disabled; run: adb -s"))'\'' && grep -Fq "shell am broadcast -a com.oculus.vrpowermanager.automation_disable" "$run_dir/perf-summary.txt" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result"'
+  fi
+  unset QR_PERF_CANCEL
+  echo none > "$tmp/state/a/fault"
+  run "$a" perf --seconds 1 --warmup 0
+  check "$cancel_fault cancellation releases both locks for the next capture" \
+    '[ "$rc" = 0 ] && json_is '\''.overall == "PASS"'\'' && restored a'
 else
   check 'perf must be sourced before real TERM/run-lock regression can run' false
 fi
-unset QR_PERF_CANCEL
+unset QR_PERF_CANCEL QR_PERF_RESTORE_WAIT
+done
+# A real executable can inherit ignored TERM from the cancelling owner. It
+# must be KILLed after the restoration-specific grace, not the shared 60s.
+mkdir -p "$tmp/restore-bin"
+printf '#!/bin/sh\ntrap "" TERM\nexec /bin/sleep 300\n' > "$tmp/restore-bin/adb"
+chmod +x "$tmp/restore-bin/adb"
+started=$SECONDS
+r=0
+(
+  unset -f adb
+  PATH="$tmp/restore-bin:$PATH"
+  QR_RUN_DIR="$tmp"; QR_PERF_RUN_ROOT="$tmp"; QR_PERF_RESTORE_WAIT=1
+  perf_prox=1; perf_error='capture cancelled'
+  qr_perf_restore
+) > "$tmp/resistant.out" 2>&1 || r=$?
+check 'TERM-resistant executable restore is killed after the short grace' \
+  '[ "$r" = 3 ] && [ "$((SECONDS - started))" -le 5 ] && grep -q "WARN: proximity sensor may still be disabled" "$tmp/resistant.out"'
 [ "$fails" = 0 ] || { echo "$fails failed"; exit 1; }
 echo 'all passed'

@@ -118,16 +118,17 @@ overall:     $(qr_get overall)"
 
 # --- time box ---------------------------------------------------------------------------------------------------------------
 # Run "$@" for at most $1 seconds: gtimeout (coreutils) when present, else a background watchdog that sends
-# TERM, then KILL 60 s later. A timeout returns 124 either way.
+# TERM, then KILL 60 s later (callers may shorten QR_TIMEBOX_KILL_AFTER).
+# A timeout returns 124 either way.
 qr_timebox() {
-  local secs="$1" pid w rc fired
+  local secs="$1" pid w rc fired kill_after="${QR_TIMEBOX_KILL_AFTER:-60}"
   shift
   if command -v gtimeout >/dev/null 2>&1; then
     # The release step already owns a cancellable process group; do not let timeout move the editor out of it.
     if [ "${QR_STEP_GROUP:-}" = 1 ]; then
-      rc=0; gtimeout --foreground -k 60 "$secs" "$@" || rc=$?
+      rc=0; gtimeout --foreground -k "$kill_after" "$secs" "$@" || rc=$?
     else
-      rc=0; gtimeout -k 60 "$secs" "$@" || rc=$?
+      rc=0; gtimeout -k "$kill_after" "$secs" "$@" || rc=$?
     fi
     [ "$rc" = 124 ] && qr_log "timed out after ${secs}s: ${1##*/}"
     return "$rc"
@@ -142,7 +143,7 @@ qr_timebox() {
     wait
     if kill -0 "$pid" 2>/dev/null; then
       : > "$fired"; kill -TERM "$pid" 2>/dev/null
-      sleep 60 &
+      sleep "$kill_after" &
       wait
       kill -KILL "$pid" 2>/dev/null
     fi
