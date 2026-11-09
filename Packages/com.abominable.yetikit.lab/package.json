@@ -7,7 +7,7 @@
   "license": "MIT",
   "dependencies": {
     "com.abominable.yetikit.hands": "0.0.1",
-    "com.abominable.yetikit.core": "0.1.2",
+    "com.abominable.yetikit.core": "0.1.3",
     "com.abominable.yetikit.playtest": "0.0.1"
   }
 }
