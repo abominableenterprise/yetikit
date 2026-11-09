@@ -360,7 +360,9 @@ With several serials, gate/build/sign/primary APK verification run once, followe
 by each device's check, idle check, backup, install, launch and optional rollback
 before moving to the next device. Standalone install/rollback also verify their
 APK once. Devices run in the supplied order; failures do not stop later devices.
-A busy or unverified headset blocks only its own install/launch. Rollback targets
+A busy or unverified headset blocks only its own install (and therefore its
+subsequent launch in `all`). Standalone `launch` retains the existing behavior:
+connectivity/manufacturer checks, but no install idle check. Rollback targets
 only the device whose launch confirmed a crash, and still respects its idle check
 unless `all --force` was supplied. A rollback APK is verified once separately
 before any device operations.
