@@ -78,9 +78,9 @@ kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
 doctor_run
 check "doctor only warns about a stale lock and does not remove it" '[ "$rc" = 0 ] && line warn "running stale lock" && [ -d "$lock" ]'
 rm -rf "$lock"
-rm -f "$tmp/editor-ready"
-QR_TEST_READY="$tmp/editor-ready" "$tmp/bin/Unity" -c 'trap "kill \$! 2>/dev/null; exit" TERM; : > "$QR_TEST_READY"; while :; do sleep 3600 & wait; done' -batchmode -projectPath "$root/rel-$short-test" -logFile "$tmp/edrun/gate-unity.log" >/dev/null 2>&1 & ed=$!
-qr_fixture_wait_ready "$tmp/editor-ready" "$ed" || exit 1
+rm -f "$tmp/editor.started"
+QR_TEST_FIXTURE_LIB="$(dirname "$script")/tests/lib/quest-release-fixture.sh" QR_TEST_MARKER="$tmp/editor" "$tmp/bin/Unity" -c '. "$QR_TEST_FIXTURE_LIB"; qr_fixture_block_until_term "$QR_TEST_MARKER"' -batchmode -projectPath "$root/rel-$short-test" -logFile "$tmp/edrun/gate-unity.log" >/dev/null 2>&1 & ed=$!
+qr_fixture_wait_ready "$tmp/editor.started" "$ed" || exit 1
 doctor_run
 kill "$ed" 2>/dev/null; wait "$ed" 2>/dev/null
 check "doctor FAILs while a Unity editor runs on a rel-* worktree, naming its PID and run folder" \
@@ -106,18 +106,18 @@ rc=0
 check "editor scan preserves whitespace in executable, release worktree and log paths" \
   '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/space-editors")" = 3 ] && grep -Fqx "$(printf "8101\t%s\t%s" "$tmp/work trees/rel-abc-build" "$tmp/run logs/build-unity.log")" "$tmp/space-editors" && grep -Fqx "$(printf "8102\t%s\t" "$tmp/work trees/rel-abc-test")" "$tmp/space-editors" && grep -Fqx "$(printf "8103\t%s\t%s" "$tmp/work trees/rel-quoted-build" "$tmp/run logs/quoted.log")" "$tmp/space-editors"'
 # BSD ps without -ww cuts args to the terminal width (79 columns with none), dropping a Unity.app editor's -projectPath.
-rm -f "$tmp/editor-ready"
-QR_TEST_READY="$tmp/editor-ready" "$tmp/bin/Unity" -c 'trap "kill \$! 2>/dev/null; exit" TERM; : > "$QR_TEST_READY"; while :; do sleep 3600 & wait; done' -batchmode -force-metal -nographics -projectPath "$root/rel-$short-test" -logFile "$tmp/edrun/gate-unity.log" >/dev/null 2>&1 & ed=$!
-qr_fixture_wait_ready "$tmp/editor-ready" "$ed" || exit 1
+rm -f "$tmp/editor.started"
+QR_TEST_FIXTURE_LIB="$(dirname "$script")/tests/lib/quest-release-fixture.sh" QR_TEST_MARKER="$tmp/editor" "$tmp/bin/Unity" -c '. "$QR_TEST_FIXTURE_LIB"; qr_fixture_block_until_term "$QR_TEST_MARKER"' -batchmode -force-metal -nographics -projectPath "$root/rel-$short-test" -logFile "$tmp/edrun/gate-unity.log" >/dev/null 2>&1 & ed=$!
+qr_fixture_wait_ready "$tmp/editor.started" "$ed" || exit 1
 ps() { case " $* " in *" -ww "*) command ps "$@" ;; *) command ps "$@" | cut -c1-79 ;; esac; }
 doctor_run
 unset -f ps
 kill "$ed" 2>/dev/null; wait "$ed" 2>/dev/null
 check "doctor finds a rel-* editor whose command line is wider than 79 columns (ps -ww)" \
   '[ "$rc" != 0 ] && line FAIL "running a Unity editor is running on $root/rel-$short-test (pid $ed"'
-rm -f "$tmp/editor-ready"
-QR_TEST_READY="$tmp/editor-ready" "$tmp/bin/Unity" -c 'trap "kill \$! 2>/dev/null; exit" TERM; : > "$QR_TEST_READY"; while :; do sleep 3600 & wait; done' -batchmode -projectPath "$root/mac-pass" -logFile "$tmp/x.log" >/dev/null 2>&1 & ed=$!
-qr_fixture_wait_ready "$tmp/editor-ready" "$ed" || exit 1
+rm -f "$tmp/editor.started"
+QR_TEST_FIXTURE_LIB="$(dirname "$script")/tests/lib/quest-release-fixture.sh" QR_TEST_MARKER="$tmp/editor" "$tmp/bin/Unity" -c '. "$QR_TEST_FIXTURE_LIB"; qr_fixture_block_until_term "$QR_TEST_MARKER"' -batchmode -projectPath "$root/mac-pass" -logFile "$tmp/x.log" >/dev/null 2>&1 & ed=$!
+qr_fixture_wait_ready "$tmp/editor.started" "$ed" || exit 1
 doctor_run
 kill "$ed" 2>/dev/null; wait "$ed" 2>/dev/null
 check "an editor on another worktree (mac-pass) is not a release run" '[ "$rc" = 0 ] && line ok running'

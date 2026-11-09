@@ -6,7 +6,10 @@
 # Never runs Unity or adb. bash 3.2 compatible (stock macOS); like the real script it runs without set -e.
 set -u
 script="$(cd "$(dirname "$0")/.." && pwd)/quest-release.sh"
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+tmp="$(mktemp -d)"
+. "$(dirname "$0")/lib/quest-release-fixture.sh"
+QR_FIXTURE_MANAGE_CHILDREN=1 QR_FIXTURE_OWNED_PIDS=''
+trap 'qr_fixture_cleanup_children; rm -rf "$tmp"' EXIT
 . "$(dirname "$0")/lib/quest-release-config.sh"
 qr_test_config "$tmp/config"
 fails=0
@@ -39,9 +42,8 @@ export QUEST_REPO="$repo" QUEST_WT_ROOT="$root" QUEST_BACKUP_ROOT="$tmp/home" QR
 mkdir -p "$HOME"
 fake_jdk() { mkdir -p "$1/bin" && printf '#!/bin/sh\n' > "$1/bin/java" && chmod +x "$1/bin/java"; }
 fake_jdk "$tmp/jdk"; export JAVA_HOME="$tmp/jdk"
-# Each independent fixture has a distinct synthetic headset lock identity.
-serial="synthetic-device-${tmp##*/}"
-export QUEST_SERIAL="$serial"
+# Use the shared per-fixture synthetic headset identity in adb assertions too.
+serial="$QUEST_SERIAL"
 cert="00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF"
 
 # shellcheck source=Tools/ship/quest-release.sh
@@ -55,6 +57,17 @@ qr_test_cache_config_reads || exit 1
 qr_config || exit 1
 
 . "$(dirname "$0")/lib/quest-release-timebox.sh"
+
+# Canned logcat cannot change with elapsed time. Skip only launch observation;
+# readiness polls, adb timeboxes and watchdog escalation keep their real sleeps.
+# The launch timing suite overrides this locally and asserts the 30/60 s schedule.
+sleep() {
+  if [ "${FUNCNAME[1]:-}" = qr_launch_locked ]; then
+    printf '%s\n' "$1" >> "$tmp/launch-observation-sleeps"
+  else
+    command sleep "$@"
+  fi
+}
 
 # --- stubs (defined after sourcing, so they replace the script's unity/apksigner) -------------------------------------------
 FAKE_FREE_GB=100

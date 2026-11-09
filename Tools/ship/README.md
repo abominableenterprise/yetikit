@@ -244,9 +244,11 @@ Tools/ship/tests/run.sh quest-release.test.sh
 ```
 
 Pass one or more exact test basenames to the runner for the same isolation
-and timeout as CI. It runs two files at a time by default (`SHIP_TEST_JOBS=1`
-for serial execution, maximum 8); `# test-all: serial` files always run alone. It reports elapsed seconds per file, total duration and the
-three slowest files. Its test-only jq wrapper memoizes the three pure config
+and timeout as CI. It defaults to one worker per available CPU, capped at eight
+(`SHIP_TEST_JOBS=1` for sequential execution); `# test-all: serial` files run alone after the parallel
+batch. Each file has isolated temporary and home directories. Output is grouped
+per completed file, including elapsed seconds, total duration and the five slowest
+files. Its test-only jq wrapper memoizes the three pure config
 filters by filter and input bytes; config changes invalidate entries and other
 queries run normally. The release-flow fixture also reuses immutable parsed JSON;
 config validation/mutation is exercised separately. Production scripts are unchanged. Run the full suite locally only for release PRs (version

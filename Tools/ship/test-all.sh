@@ -6,6 +6,7 @@
 # --fast omits all slow-tagged files.
 set -euo pipefail
 export LC_ALL=C
+suite_started=$SECONDS
 ci_dir="$(cd "$(dirname "$0")" && pwd -P)"
 shopt -s nullglob
 tests=("$ci_dir"/tests/*.test.sh)
@@ -117,7 +118,7 @@ if ((${#selected[@]} == 0)); then
   exit 0
 fi
 
-cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)"
+cpus="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)"
 case "$cpus" in ''|*[!0-9]*) cpus=1 ;; esac
 ((cpus >= 1)) || cpus=1
 ((cpus <= 8)) || cpus=8
@@ -162,7 +163,7 @@ owned_groups() {
     }'
 }
 cleanup() {
-  local pid groups index
+  local pid groups index grace_started
   trap '' INT TERM
   groups="$(owned_groups "${pids[*]-}")"
   # Timeout TERM may already have orphaned descendants. Retain the pre-TERM
@@ -172,19 +173,22 @@ cleanup() {
       groups+=" ${timeout_groups[index]}"
     fi
   done
-  # Ordinary cancellation leaves shells time to run EXIT cleanup. Timed-out
-  # files must still complete their existing bounded escalation before wait.
+  # Retain ALL captured groups through cancellation: TERM can orphan a
+  # stubborn descendant as soon as its worker/timeout parent exits. Give EXIT
+  # handlers a bounded grace, then escalate even if the leader is already gone.
   for pid in $groups; do
     kill -TERM -- "-$pid" 2>/dev/null || true
   done
-  for ((index=0; index<${#pids[@]}; index++)); do
-    if [ -n "${pids[index]}" ] && ((timed_out[index])); then
-      while ((SECONDS - starts[index] < file_timeout + 2)); do sleep 0.1; done
-      for pid in ${timeout_groups[index]}; do
-        kill -KILL -- "-$pid" 2>/dev/null || true
-      done
-    fi
+  grace_started=$SECONDS
+  while ((SECONDS - grace_started < 2)); do
+    local alive=0
+    for pid in $groups; do
+      if kill -0 -- "-$pid" 2>/dev/null; then alive=1; break; fi
+    done
+    ((alive)) || break
+    sleep 0.1
   done
+  for pid in $groups; do kill -KILL -- "-$pid" 2>/dev/null || true; done
   for pid in ${pids[@]+"${pids[@]}"}; do
     [ -z "$pid" ] || wait "$pid" 2>/dev/null || true
   done
@@ -206,7 +210,7 @@ launch() {
   # An unhandled TERM skips Bash's EXIT trap. Keep $0 equal to the test path,
   # and disable job control there so its children share the fixture's group.
   local sandbox="$logs/fixture-$index"
-  mkdir -p "$sandbox"/{home,project,out,unity,shm,bin,swap,config,cache,data}
+  mkdir -p "$sandbox"/{home,tmp,project,out,unity,shm,bin,swap,config,cache,data,state}
   (
     echo "[shell-test] ${1##*/}"
     # Strip the caller's hub/lease state and Unity credentials before sourcing
@@ -219,10 +223,11 @@ launch() {
     done
     unset USERNAME PASSWORD PIDFILE LINUX_UNITY_RUN RETURN_ATTEMPTED EXIT_RC ACTIVATION_FD \
       TASK_CACHE TASK_CACHE_TIMEOUT KNOWN_FLAKES SCENE_AREAS APK_SWAPFILE YETIKIT_CONFIG
-    export HOME="$sandbox/home" PROJECT="$sandbox/project" OUT_DIR="$sandbox/out" \
+    export HOME="$sandbox/home" TMPDIR="$sandbox/tmp" PROJECT="$sandbox/project" OUT_DIR="$sandbox/out" \
       UNITY_ROOT="$sandbox/unity" ULF="$sandbox/licence" SHM_DIR="$sandbox/shm" \
       BIN_DIR="$sandbox/bin" APK_SWAP_DIR="$sandbox/swap" PIDFILE_FALLBACK="$sandbox/fallback.pid" \
-      XDG_CONFIG_HOME="$sandbox/config" XDG_CACHE_HOME="$sandbox/cache" XDG_DATA_HOME="$sandbox/data"
+      XDG_CONFIG_HOME="$sandbox/config" XDG_CACHE_HOME="$sandbox/cache" XDG_DATA_HOME="$sandbox/data" \
+      XDG_STATE_HOME="$sandbox/state"
     # Leave PIDFILE/SEAT_STATE unset: their defaults must follow OUT_DIR when
     # a fixture replaces it with its own fake project/output tree.
     # Latch cancellation before entering EXIT cleanup. Nested runners and Python
@@ -266,6 +271,7 @@ collect() {
   elapsed=$((SECONDS - starts[index]))
   name="${files[index]##*/}"
   cat "$logs/$index"
+  printf '[shell-test] elapsed: %s (%s s)\n' "$name" "$elapsed"
   printf '%s\t%s\n' "$elapsed" "$name" >> "$logs/durations"
   if ((status)); then
     if ((timed_out[index])); then
@@ -290,35 +296,27 @@ reap() {
   ((found)) || sleep 0.1
 }
 
-if ((jobs == 1)); then
-  # Preserve glob order and the original fail-fast exit code in sequential mode.
-  for test in "${selected[@]}"; do
-    launch "$test"
-    collect "$((${#files[@]} - 1))"
-    ((result == 0)) || break
-  done
-else
-  serial=()
-  for test in "${selected[@]}"; do
-    if grep -q '^# test-all: serial[[:space:]]*$' "$test"; then
-      serial+=("$test")
-      continue
-    fi
-    while ((active >= jobs)); do reap; done
-    launch "$test"
-  done
-  while ((active)); do reap; done
-  # Serial tests cannot overlap each other or any member of the parallel batch.
-  for test in ${serial[@]+"${serial[@]}"}; do
-    launch "$test"
-    collect "$((${#files[@]} - 1))"
-  done
-fi
+serial=()
+for test in "${selected[@]}"; do
+  if grep -q '^# test-all: serial[[:space:]]*$' "$test"; then
+    serial+=("$test")
+    continue
+  fi
+  while ((active >= jobs)); do reap; done
+  launch "$test"
+done
+while ((active)); do reap; done
+# Serial tests always follow the complete parallel batch, including jobs=1.
+for test in ${serial[@]+"${serial[@]}"}; do
+  launch "$test"
+  collect "$((${#files[@]} - 1))"
+done
 
 if ((result == 0)); then echo "[shell-test] passed $passed files"; fi
 echo "[shell-test] ok $passed files; FAIL ${#failed[@]} files"
-echo '[shell-test] slowest 3 files (seconds):'
-sort -k1,1nr -k2,2 "$logs/durations" | awk 'NR <= 3 {printf "  %ss %s\n", $1, $2}'
+echo "[shell-test] total duration: $((SECONDS - suite_started)) s"
+echo '[shell-test] slowest 5 files (seconds):'
+sort -k1,1nr -k2,2 "$logs/durations" | awk 'NR <= 5 {printf "  %ss %s\n", $1, $2}'
 if ((${#failed[@]})); then
   echo '[shell-test] failed files:' >&2
   printf '  %s\n' "${failed[@]}" >&2

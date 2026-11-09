@@ -7,6 +7,20 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 proj="$tmp/proj"
 . "$(dirname "${BASH_SOURCE[0]}")/fake-unity.sh"
+
+# The fake editor exits synchronously and leaves no editor workers to settle.
+# Remove only cleanup's fixed grace sleep in the temporary vendored copy;
+# process inspection, shared-file safety checks and real timeouts stay intact.
+python3 - "$script" "$proj" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+assert path.resolve().is_relative_to(Path(sys.argv[2]).resolve())
+source = path.read_text()
+needle = '  sleep 2\n  wipe_unity_shared_files\n'
+assert source.count(needle) == 1
+path.write_text(source.replace(needle, '  wipe_unity_shared_files\n'))
+PY
 unset TEST_PR_GFX_MAX
 
 t="$proj/Assets/Tests/EditMode"

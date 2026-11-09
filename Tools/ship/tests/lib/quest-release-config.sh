@@ -5,7 +5,8 @@ qr_test_config() {
   mkdir -p "$directory"
   export YETIKIT_CONFIG="$directory/yetikit.json"
   unset PROJECT
-  export QUEST_SERIAL=synthetic-device
+  # Host-global device locks require a unique identity for each independent suite.
+  export QUEST_SERIAL="synthetic-device-$(basename "$(dirname "$directory")")"
   # Deliberately synthetic fingerprint, never a shipped signing identity.
   export QUEST_CERT_SHA256='00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF'
   printf '%s\n' '{

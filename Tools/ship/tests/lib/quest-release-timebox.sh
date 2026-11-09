@@ -10,12 +10,7 @@ qr_test_no_gtimeout() {
 }
 
 # Never finishes naturally, so a termination marker proves the real timebox fired.
-qr_test_block_until_term() {
-  local marker="$1" child=''
-  trap 'kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; : > "$marker.terminated"; exit 143' TERM
-  : > "$marker.started"
-  while :; do command sleep 3600 & child=$!; wait "$child"; done
-}
+qr_test_block_until_term() { qr_fixture_block_until_term "$@"; }
 
 qr_test_watchdog_timeout() (
   qr_test_no_gtimeout
@@ -28,10 +23,10 @@ qr_test_watchdog_cleanup() (
   qr_test_no_gtimeout
   # Record only sleeps owned by this invocation, not unrelated process-table matches.
   sleep() {
-    local child marker
-    command sleep "$1" & child=$!
+    local child='' marker=''
+    trap 'trap "" TERM; kill "$child" "${!:-}" 2>/dev/null; wait "$child" 2>/dev/null; wait "${!:-}" 2>/dev/null; [ -z "$marker" ] || : > "$marker.done"; exit 0' TERM
+    /bin/sleep "$1" & child=$!
     marker="$tmp/watchdog-sleep-$child"
-    trap 'kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; : > "$marker.done"; exit 0' TERM
     printf '%s\n' "$child" > "$marker.pid"
     wait "$child"
     : > "$marker.done"
