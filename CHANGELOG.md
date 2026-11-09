@@ -6,7 +6,7 @@ Every release must include **Added / Fixed / Behaviour changes / Adapter changes
 Before 1.0, minor releases may break compatibility only with explicit adapter
 notes. Chunk and tuning schema changes count as breaking changes too.
 
-## [Unreleased]
+## [0.1.4] - 2026-11-09
 
 ### Added
 - None.
