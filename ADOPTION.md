@@ -2,8 +2,8 @@
 
 **Day 0:** install the [YetiKit skills](skills/README.md); copy [templates/game](templates/game/).
 
-Version 0.1.7 provides core, quality, Ship, consumer vendoring and mesh checks.
-Hands, interaction, playtest, lab and app modules remain planned (not in 0.1.7).
+Version 0.1.8 provides core, quality, Ship, consumer vendoring and mesh checks.
+Hands, interaction, playtest, lab and app modules remain planned (not in 0.1.8).
 Adopt in order: **Ship → core → quality → hands → interaction → playtest → lab → app.***.
 Within app.*, start with analytics, telemetry and menus; add paid services only
 when needed. A non-XR consumer skips hands, interaction and XR tooling.
@@ -19,7 +19,7 @@ build. See [migration safety and day-0 evidence](docs/design.md).
 Use a kit checkout to update a consumer before Unity resolves packages:
 
 ```sh
-/path/to/yetikit/Tools/vendor/kit-bump.sh v0.1.7 --project /path/to/consumer --modules core,quality
+/path/to/yetikit/Tools/vendor/kit-bump.sh v0.1.8 --project /path/to/consumer --modules core,quality
 /path/to/yetikit/Tools/vendor/kit-check.sh --project /path/to/consumer
 ```
 

@@ -12,6 +12,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
+## [0.1.8] - 2026-11-09
+
+### Added
+- None.
+
+### Fixed
 - Quest performance capture waits for a cold-started app's unique PID before
   warm-up, while retaining identity and foreground checks.
 - Proximity restoration is timeboxed during capture cleanup and cancellation;
