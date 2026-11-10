@@ -527,7 +527,9 @@ run folder, rather than accepting an earlier release's successful summary.
 installed app using the same activity/argument path as `launch` (including
 `quest.launchArgs`). It disables the proximity sensor, polls every 0.2 seconds
 for one live app PID (up to `QR_PERF_PID_WAIT`, default 20 seconds), then starts
-warm-up, clears logcat, captures the window and restores the sensor. Multiple
+warm-up, clears logcat, captures the window and restores the sensor. The capture
+runs `adb logcat -c` after warm-up: earlier logcat is lost, so save it first if
+you need it. Multiple
 PIDs or no PID by the deadline is INFRA. Cleanup traps restore the sensor on
 failures and cancellation too. Each restoration attempt is bounded by
 `QR_PERF_RESTORE_WAIT` (default 10 seconds); failed/timed-out restoration logs a

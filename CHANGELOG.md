@@ -9,13 +9,18 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
-- None.
+- Quest performance reports include combined CPU&GPU frame time and CPU/GPU
+  utilisation means when available, with full precision in JSON.
+- Regression coverage for real-device VrApi telemetry and unrounded gate boundaries.
 
 ### Fixed
-- None.
+- Quest performance summaries label thermal sensors, omit zero second-sensor
+  readings, round report-only values, and hash the installed base APK with
+  timeboxed queries (or report unavailable).
+- Document that performance capture clears earlier logcat after warm-up.
 
 ### Behaviour changes
-- None.
+- Summary text only; gates unchanged.
 
 ### Adapter changes
 - None.

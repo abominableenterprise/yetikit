@@ -76,6 +76,8 @@ emit_samples() {
       missing-stale:10) fields="FPS=72,App=${app}ms,CPU=6ms,GPU=4ms" ;;
       missing-fps:10) fields="Stale=$stale,App=${app}ms,CPU=6ms,GPU=4ms" ;;
       optional:*) fields="FPS=72,Stale=$stale,App=${app}ms" ;;
+      real:*) fields='FPS=73/72,Prd=23ms,Tear=0,Early=0,Stale=0,Stale2/5/10/max=0/0/0/0,VSnc=1,Lat=-4,Fov=0,CPU4/GPU=2/2,1382/492MHz,OC=3F,TA=0/38/38,SP=N/N/N,Mem=2736MHz,Free=4037MB,PLS=0,Temp=43.0C/0.0C,TW=0.83ms,App=1.82ms,GD=0.00ms,SPC=0.00ms,CPU&GPU=4.51ms,LCnt=1(DR72,LM0),GPU%=0.21,CPU%=0.15(W0.17),CFL=11.85/15.76,ICFLp95=15.02,LD=0,SF=1.00,DpuScale=1.00,LP=0,DVFS=0,Preempt=144,PoseAgeP95=0.00' ;;
+      precision:*) fields='FPS=72.444/72,Stale=0,App=13.904ms,CPU=6.1234ms,GPU=4.5678ms,Temp=43.0C/38.5C' ;;
     esac
     [ "$profile" != mixed ] || { [ "$i" -le 3 ] || pid=8888; }
     [ "$profile" != gapped ] || base="$((base + 2))"
@@ -161,6 +163,12 @@ adb() {
     shell)
       shift
       case "$*" in
+        'pm path '*)
+          [ "$fault" != apk-path ] || return 1
+          echo 'package:/data/app/synthetic/base.apk' ;;
+        'sha256sum /data/app/synthetic/base.apk')
+          [ "$fault" != apk-hash ] || return 1
+          printf '%s  /data/app/synthetic/base.apk\n' "$sha" ;;
         'date +%s')
           [ "$fault" != clock ] || return 1
           if [ "$fault" = bad-clock ]; then echo invalid; return 0; fi
@@ -304,6 +312,40 @@ check 'wait succeeds for scripted perf and prints performance measurements' \
   '[ "$wrc" = 0 ] && grep -q "Quest performance: PASS" "$tmp/wait.out" && grep -q "App p95 (per-second samples)" "$tmp/wait.out"'
 
 reset_case
+echo real > "$tmp/state/a/profile"
+run "$a" perf
+check 'real telemetry parses FPS numerator, stale, levels and App' \
+  'json_is '\''.averageFps == 73 and .stalePercent == 0 and .levels == "2/2" and .p95AppMs == 1.82'\'''
+check 'combined timing and utilisation are retained at full precision in JSON' \
+  'json_is '\''(.combinedMs - 4.51 | fabs) < 0.000001 and (.cpuUtilization - 0.15 | fabs) < 0.000001 and (.gpuUtilization - 0.21 | fabs) < 0.000001'\'''
+check 'combined timing and utilisation are labelled in text' \
+  'grep -Fq "CPU&GPU frame time mean (combined): 4.51 ms" "$run_dir/perf-summary.txt" && grep -Fq "CPU/GPU utilisation mean (report only): 0.15 / 0.21" "$run_dir/perf-summary.txt"'
+check 'thermal raw values remain in JSON while zero second sensor is omitted from text' \
+  'json_is '\''.thermalStart == "43.0C/0.0C" and .thermalEnd == "43.0C/0.0C"'\'' && grep -Fxq "thermal start/end: 43.0C / 43.0C" "$run_dir/perf-summary.txt"'
+check 'already installed APK hash is queried rather than assumed from local state' \
+  'jq -e --arg sha "$sha" '\''.apkSha256 == $sha'\'' "$report" >/dev/null && grep -Fq "shell pm path" "$tmp/adb.log" && grep -Fq "shell sha256sum /data/app/synthetic/base.apk" "$tmp/adb.log"'
+for fault in apk-path apk-hash; do
+  reset_case
+  echo "$fault" > "$tmp/state/a/fault"
+  ( qr_config && qr_load_state && qr_set apk_sha256 "$sha" )
+  run "$a" perf
+  check "$fault reports unavailable without changing the verdict" \
+    '[ "$rc" = 0 ] && json_is '\''.apkSha256 == "unavailable" and .overall == "PASS"'\'''
+done
+reset_case
+echo precision > "$tmp/state/a/profile"
+configure '.quest.perf.maxP95AppMs = 13.904'
+run "$a" perf
+check 'text rounds report-only numbers while JSON and exact-threshold gate retain precision' \
+  '[ "$rc" = 0 ] && json_is '\''.p95AppMs == 13.904 and .gates.app.verdict == "PASS" and (.averageFps - 72.444 | fabs) < 0.000001'\'' && grep -Fxq "average fps (report only): 72.4" "$run_dir/perf-summary.txt" && grep -Fxq "worst App: 13.90 ms" "$run_dir/perf-summary.txt" && grep -Fxq "CPU/GPU frame time mean: 6.12 / 4.57 ms" "$run_dir/perf-summary.txt"'
+check 'nonzero second thermal sensor is labelled separately' \
+  'grep -Fxq "thermal start/end: 43.0C / 43.0C; second sensor: 38.5C / 38.5C" "$run_dir/perf-summary.txt"'
+configure '.quest.perf.maxP95AppMs = 13.9'
+run "$a" perf
+check 'rounded-looking threshold cannot pass an unrounded failing value' \
+  '[ "$rc" = 1 ] && json_is '\''.gates.app.value == 13.904 and .gates.app.verdict == "FAIL"'\'''
+
+reset_case
 run "$a" perf --seconds 7 --warmup 0
 check 'CLI overrides configured seconds and accepts zero warm-up' \
   '[ "$rc" = 0 ] && json_is '\''.seconds == 7 and .warmupSeconds == 0'\'' && grep -q "sleep 0 warmup" "$tmp/events" && [ "$(grep -c "sleep 1 capture" "$tmp/events")" = 7 ]'
@@ -436,7 +478,7 @@ reset_case
 echo optional > "$tmp/state/a/profile"
 run "$a" perf
 check 'missing optional metadata/timings are explicit unavailable strings without blocking measurable gates' \
-  '[ "$rc" = 0 ] && json_is '\''.overall == "PASS" and .cpuMs == "unavailable" and .gpuMs == "unavailable" and .levels == "unavailable" and .thermalStart == "unavailable" and .thermalEnd == "unavailable" and .versionName == "unavailable" and .versionCode == "unavailable" and .apkSha256 == "unavailable"'\'''
+  '[ "$rc" = 0 ] && json_is '\''.overall == "PASS" and .cpuMs == "unavailable" and .gpuMs == "unavailable" and .levels == "unavailable" and .thermalStart == "unavailable" and .thermalEnd == "unavailable" and .versionName == "unavailable" and .versionCode == "unavailable"'\'' && jq -e --arg sha "$sha" '\''.apkSha256 == $sha'\'' "$report" >/dev/null'
 
 reset_case
 echo diagnostic > "$tmp/state/a/profile"
