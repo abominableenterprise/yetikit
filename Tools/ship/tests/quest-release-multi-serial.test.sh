@@ -90,7 +90,11 @@ adb() {
     logcat)
       if [ "$2" = -d ]; then
         [ "$fault" != infra ] || { echo 'synthetic transport failure' >&2; return 1; }
-        if [ "$fault" = crash ]; then
+        if [ "$fault" = blocked ]; then
+          echo 'SystemUXController: Launch is blocked because: a Reprojected OS dialog is currently showing. Caching launch for component com.example.consumer/com.unity3d.player.UnityPlayerGameActivity'
+        elif [ "$fault" = never-started ]; then
+          :
+        elif [ "$fault" = crash ]; then
           echo '10-31 12:00:40.000 4242 4242 E AndroidRuntime: FATAL EXCEPTION: main'
         else
           case "$id" in a) fps=71 ;; b) fps=72 ;; wifi) fps=73 ;; escaped) fps=74 ;; esac
@@ -104,7 +108,7 @@ adb() {
         'am start '*) : > "$state/launched" ;;
         'pidof '*)
           # Execute the real remote probe including its status trailer.
-          ( pidof() { echo 4242; }; eval "$*" ) ;;
+          ( pidof() { case "$fault" in blocked|never-started) return 1 ;; esac; echo 4242; }; eval "$*" ) ;;
         'dumpsys activity activities'|'dumpsys window windows'|'dumpsys power'|'dumpsys vrpowermanager')
           fixture=home-multi-top-resumed
           [ ! -f "$state/busy" ] || fixture=game-mounted
@@ -178,6 +182,21 @@ check 'each logcat capture belongs to its selected device' \
 wait_run
 check 'wait succeeds and prints both healthy devices' \
   '[ "$wrc" = 0 ] && wait_result_is install "$a" OK && wait_result_is install "$b" OK && wait_result_is launch "$a" OK && wait_result_is launch "$b" OK'
+
+for fault_case in blocked never-started; do
+  reset_case
+  echo "$fault_case" > "$tmp/state/b/fault"
+  run "$a $b" all --rollback "$tmp/old.apk"
+  case "$fault_case" in
+    blocked) reason='launch blocked by the OS: a Reprojected OS dialog is currently showing' ;;
+    never-started) reason='process never started (no crash evidence)' ;;
+  esac
+  check "multi $fault_case retains INFRA reason without rollback" \
+    '[ "$rc" = 3 ] && result_is launch "$a" OK && result_is launch "$b" INFRA && no_rollback a && no_rollback b && grep -Fq "$reason" "$summary"'
+  wait_run
+  check "multi wait retains $fault_case reason" \
+    '[ "$wrc" = 1 ] && wait_result_is launch "$b" INFRA && grep -Fq "$reason" "$tmp/wait.out"'
+done
 
 reset_case
 echo crash > "$tmp/state/b/fault"

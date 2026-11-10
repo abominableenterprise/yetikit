@@ -42,6 +42,23 @@ adb() {
       [ "$fault" != "logcat-$2" ] || { echo 'transport error' >&2; return 1; }
       if [ "$2" = -d ] && [ "$fault" = fatal ]; then
         echo '10-31 12:00:40.000 4242 4242 E AndroidRuntime: FATAL EXCEPTION: main'
+      fi
+      if [ "$2" = -d ]; then
+        case "$fault" in
+          blocked|blocked-fatal|blocked-dies)
+            echo 'SystemUXController: Launch is blocked because: a Reprojected OS dialog is currently showing. Caching launch for component com.example.consumer/com.unity3d.player.UnityPlayerGameActivity'
+            echo 'VolumetricWindowManagerServiceImpl: Timeout while requesting window placement' ;;
+          other-blocked) echo 'SystemUXController: Launch is blocked because: another dialog. Caching launch for component com.example.consumer.other/com.unity3d.player.UnityPlayerGameActivity' ;;
+          never-fatal|dies)
+            echo '10-31 12:00:40.000 4242 4242 E AndroidRuntime: FATAL EXCEPTION: main'
+            echo '10-31 12:00:40.001 4242 4242 E AndroidRuntime: Process: com.example.consumer, PID: 4242' ;;
+          never-anr) echo 'ActivityManager: ANR in com.example.consumer' ;;
+        esac
+        case "$fault" in
+          blocked-fatal|blocked-dies)
+            echo '10-31 12:00:40.000 4242 4242 E AndroidRuntime: FATAL EXCEPTION: main'
+            echo '10-31 12:00:40.001 4242 4242 E AndroidRuntime: Process: com.example.consumer, PID: 4242' ;;
+        esac
       fi ;;
     shell)
       shift
@@ -61,8 +78,16 @@ adb() {
           if [ "$fault" = pidof-transport ]; then echo 4242; return 1; fi
           if [ "$fault" = pidof-final ] && [ -f "$tmp/probed" ]; then return 1; fi
           if [ "$fault" = pidof-malformed ]; then echo invalid; return 0; fi
+          local seen=no
+          [ ! -f "$tmp/probed" ] || seen=yes
           : > "$tmp/probed"
-          ( pidof() { case "$fault" in gone|start-output) return 1 ;; esac; echo 4242; }; eval "$*" ) ;;
+          ( pidof() {
+              case "$fault" in
+                gone|blocked|blocked-fatal|never-fatal|never-anr|start-output) return 1 ;;
+                dies|blocked-dies) [ "$seen" = no ] || return 1 ;;
+              esac
+              echo 4242
+            }; eval "$*" ) ;;
         'dumpsys activity activities'|'dumpsys window windows'|'dumpsys power'|'dumpsys vrpowermanager')
           if [ "$busy" = 1 ] && [ -f "$tmp/installed" ]; then
             fixture=game-mounted
@@ -93,7 +118,20 @@ for fault in logcat--d logcat--c start start-output pidof-transport pidof-final 
   wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
   check "wait reports $fault as INFRA and fails" '[ "$wrc" = 1 ] && grep -q "launch:      INFRA:" "$tmp/wait.out"'
 done
-for fault in fatal gone; do
+for fault in blocked gone; do
+  run all --rollback "$tmp/old.apk"
+  case "$fault" in
+    blocked) reason='launch blocked by the OS: a Reprojected OS dialog is currently showing' ;;
+    gone) reason='process never started (no crash evidence)' ;;
+  esac
+  check "all $fault is INFRA with reason, never rollback" 'infra && no_rollback && grep -Fq "$reason" "$summary"'
+  if [ "$fault" = blocked ]; then
+    check 'blocked launch includes recovery hint' 'grep -q "clear the dialog on the headset and rerun" "$tmp/out" "$tmp/err"'
+  fi
+  wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
+  check "wait retains $fault reason" '[ "$wrc" = 1 ] && grep -Fq "$reason" "$tmp/wait.out"'
+done
+for fault in fatal never-fatal never-anr dies blocked-fatal blocked-dies; do
   run all --rollback "$tmp/old.apk"
   check "all $fault is a confirmed CRASH and rolls back" '[ "$rc" = 1 ] && grep -q "^launch:      CRASH:" "$summary" && grep -q "install -r -d $tmp/old.apk" "$tmp/installed"'
 done
@@ -102,12 +140,15 @@ run all --rollback "$tmp/old.apk"
 check 'crash rollback respects idle check without user force' '[ "$rc" = 1 ] && no_rollback && grep -q "headset in use" "$tmp/err" && grep -q "IN USE.*refused" "$summary"'
 run all --force --rollback "$tmp/old.apk"
 check 'user force is forwarded to crash rollback' '[ "$rc" = 1 ] && grep -q "install -r -d $tmp/old.apk" "$tmp/installed" && grep -q "IN USE.*--force given" "$summary"'
+fault=other-blocked busy=0
+run all --rollback "$tmp/old.apk"
+check 'another package sharing our activity does not block a healthy launch' '[ "$rc" = 0 ] && no_rollback'
 fault=healthy busy=0
 run all --rollback "$tmp/old.apk"
 check 'healthy all launch remains successful, no rollback' '[ "$rc" = 0 ] && no_rollback && grep -q "^launch:      fps .*alive yes" "$summary"'
 for fault in healthy gone pidof-transport logcat--d; do
   run launch
-  case "$fault" in healthy) expected=0 ;; gone) expected=1 ;; *) expected=3 ;; esac
+  case "$fault" in healthy) expected=0 ;; gone) expected=3 ;; *) expected=3 ;; esac
   check "standalone launch $fault exit code is $expected" '[ "$rc" = "$expected" ]'
 done
 # No implicit discovery failure may leave a stale successful launch result.

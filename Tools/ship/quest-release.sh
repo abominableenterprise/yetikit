@@ -16,6 +16,7 @@
 #                     same checks with install -r -d; never uninstall or clear data
 #   launch            start Unity GameActivity, bounded logcat capture and crash check
 #                     exit 0 OK, 1 confirmed crash, 3 infrastructure/unverified
+#                     OS-blocked or never-started without crash evidence: 3, no rollback
 #   perf [--seconds N] [--warmup S]
 #                     launch installed app, exclude warm-up, capture VrApi and gate/report
 #                     exit 0 PASS/REPORT, 1 gate failed, 3 infrastructure/no data

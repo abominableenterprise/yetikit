@@ -182,6 +182,16 @@ qr_launch_shell_lines() {
     | grep -E "(^|[^[:alnum:]_.])${QR_PKG//./\\.}([^[:alnum:]_.]|$)" | sort -u
 }
 
+# A shared Unity activity alone cannot identify this app: require the exact package
+# token on the blocked-launch record, not a component belonging to another app.
+qr_launch_blocked_reason() {
+  grep -Ei 'SystemUX|launcher' "$@" \
+    | grep -F 'Launch is blocked because:' \
+    | grep -E "(^|[^[:alnum:]_.])${QR_PKG//./\\.}([^[:alnum:]_.]|$)" \
+    | awk '{ sub(/^.*Launch is blocked because:[[:space:]]*/, "");
+               sub(/[.]?[[:space:]]*Caching launch for component.*$/, ""); print; exit }'
+}
+
 # Device-wide logcat stays available for diagnostics. Only the game's crashes may trigger rollback: associate
 # threadtime/brief records with a PID observed after start or at the final check, or an AndroidRuntime Process:
 # record naming the exact package (also catches a crash followed by a restart). Native tombstones name the package
@@ -204,6 +214,11 @@ qr_launch_crashes() {
     }
     {
       pid=emitter($0)
+      anr=index($0, "ANR in " package)
+      if (anr) {
+        rest=substr($0, anr+length("ANR in " package))
+        if (rest == "" || rest ~ /^[^[:alnum:]_.]/) { print; next }
+      }
       if (($0 ~ crash_re && pid in own) || ($0 ~ /F(\/|[[:space:]]+)DEBUG[: (]/ && index($0, ">>> " package " <<<"))) print
     }
   ' "$1" "$1"
@@ -270,7 +285,7 @@ qr_launch() (
 )
 
 qr_launch_locked() {
-  local cat="$QR_RUN_DIR/launch-logcat.txt" fps errs fatal alive=no pid start_pid findings crash=0 crashes
+  local cat="$QR_RUN_DIR/launch-logcat.txt" fps errs fatal alive=no pid start_pid findings crash=0 crashes blocked
   local early="$QR_RUN_DIR/launch-early-logcat.txt" warnings="$QR_RUN_DIR/launch-shell-warnings.txt" shell_count=0
   ( qr_await_device ) || qr_launch_infra "device check/wait failed (see release.log)"
   qr_adb logcat -c || qr_launch_infra "adb logcat -c failed"
@@ -317,6 +332,13 @@ qr_launch_locked() {
       head -n 10 "$warnings"
     fi
   } | tee "$QR_RUN_DIR/launch-report.txt"
+  blocked="$(qr_launch_blocked_reason "$early" "$cat")"
+  if [ -n "$blocked" ] && [ "$crashes" = 0 ] && { [ -z "$start_pid" ] || [ "$alive" = yes ]; }; then
+    qr_launch_infra "launch blocked by the OS: $blocked; clear the dialog on the headset and rerun"
+  fi
+  if [ -z "$start_pid$pid" ] && [ "$crashes" = 0 ]; then
+    qr_launch_infra "process never started (no crash evidence)"
+  fi
   { [ "$crashes" != 0 ] || [ "$alive" = no ]; } && crash=1
   findings="fps ${fps:-none}, E/Unity $errs, fatal $fatal, alive $alive"
   [ "$shell_count" = 0 ] || findings="$findings, WARN shell launch warnings $shell_count"
