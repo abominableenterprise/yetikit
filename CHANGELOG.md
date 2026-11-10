@@ -12,6 +12,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
+## [0.1.9] - 2026-11-10
+
+### Added
+- None.
+
+### Fixed
 - Quest launch no longer mistakes an OS-blocked launch or a process that never
   started without attributed crash evidence for a confirmed crash.
 

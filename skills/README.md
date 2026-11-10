@@ -21,7 +21,7 @@ task-brief tail, review checklist and playtest-inbox routine. Replace
 `{{GAME_NAME}}` and `{{GAME_ID}}`, fill area paths/commands, and configure private
 sources and permissions outside the public kit. No stamping script ships yet.
 
-Version 0.1.8 provides core runtime/editor APIs, quality validators, Ship,
+Version 0.1.9 provides core runtime/editor APIs, quality validators, Ship,
 vendoring and mesh checks; see the [release status](../README.md#modules).
 Hands, interaction, playtest, lab and analyzer integrations remain planned; see
 [the design](../docs/design.md). Skills must not be read as proof an unavailable
