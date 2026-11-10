@@ -18,7 +18,8 @@ def gate($value; $limit):
     map({key: (.key | gsub("^\\s+|\\s+$"; "")), value}) | from_entries) as $f |
   select($f | has("FPS") or has("Stale") or has("App")) |
   {fps: number($f.FPS), stale: number($f.Stale), app: number($f.App),
-   cpu: number($f.CPU), gpu: number($f.GPU),
+   cpu: number($f.CPU), gpu: number($f.GPU), combined: number($f["CPU&GPU"]),
+   cpuUtilization: number(($f["CPU%"] // "" | split("(")[0])), gpuUtilization: number($f["GPU%"]),
    time: ((try ($line | capture("^\\s*(?<t>[0-9]+\\.[0-9]+)\\s").t | tonumber) catch null) // null),
    levels: ($f | to_entries | map(select(.key | test("^CPU[0-9]*/GPU$"))) | .[0].value // "unavailable"),
    temp: ($f.Temp // "unavailable")} |
@@ -43,6 +44,9 @@ def gate($value; $limit):
  worstAppMs: (if complete($rows; "app") then [$rows[].app] | max else "unavailable" end),
  cpuMs: (if complete($rows; "cpu") then [$rows[].cpu] | mean else "unavailable" end),
  gpuMs: (if complete($rows; "gpu") then [$rows[].gpu] | mean else "unavailable" end),
+ combinedMs: (if complete($rows; "combined") then [$rows[].combined] | mean else "unavailable" end),
+ cpuUtilization: (if complete($rows; "cpuUtilization") then [$rows[].cpuUtilization] | mean else "unavailable" end),
+ gpuUtilization: (if complete($rows; "gpuUtilization") then [$rows[].gpuUtilization] | mean else "unavailable" end),
  longestStaleStreak: (if complete($rows; "stale") then
    reduce $rows[] as $r ({best: 0, streak: 0, time: null};
      .streak = (if $r.stale > 0 then

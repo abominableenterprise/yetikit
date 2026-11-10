@@ -21,16 +21,32 @@ qr_perf_report() {
     -f "$QR_DIR/quest-release/perf-stats.jq" "$QR_RUN_DIR/perf-logcat.txt" \
     > "$QR_RUN_DIR/perf-summary.json" || return 3
   jq -r '
+    # Text formatting only; JSON and gate inputs retain their original precision.
+    def fixed($digits):
+      if type != "number" then . else
+        (pow(10; $digits)) as $scale |
+        ((. * $scale | round) / $scale | tostring | split(".")) as $parts |
+        $parts[0] + "." + ((($parts[1] // "") + "000000")[0:$digits])
+      end;
+    def sensor($index): split("/") | .[$index] // "unavailable";
+    def nonzero: (try (sub("C$"; "") | tonumber) catch 0) != 0;
     "Quest performance: \(.overall)",
     "device model: \(.model) (\(.mode))", "CPU/GPU levels: \(.levels)",
-    "thermal start/end: \(.thermalStart) / \(.thermalEnd)",
+    "thermal start/end: \(.thermalStart | sensor(0)) / \(.thermalEnd | sensor(0))" +
+      (if any([.thermalStart, .thermalEnd][]; sensor(1) | nonzero) then
+        "; second sensor: \(.thermalStart | sensor(1)) / \(.thermalEnd | sensor(1))" else "" end),
     "APK versionName/versionCode: \(.versionName) / \(.versionCode)", "APK sha256: \(.apkSha256)",
     "scene: \(.scene)", "window: \(.seconds)s; warm-up excluded: \(.warmupSeconds)s; samples: \(.samples)",
     "stale frames: \(.stalePercent)% <= \(.gates.stale.limit)%: \(.gates.stale.verdict)",
     "App p95 (per-second samples): \(.p95AppMs) ms <= \(.gates.app.limit) ms: \(.gates.app.verdict)",
-    "average fps (report only): \(.averageFps)", "worst App: \(.worstAppMs) ms",
+    "average fps (report only): \(.averageFps | fixed(1))", "worst App: \(.worstAppMs | fixed(2)) ms",
     "longest consecutive stale seconds: \(.longestStaleStreak)",
-    "CPU/GPU frame time mean: \(.cpuMs) / \(.gpuMs) ms",
+    (if .cpuMs == "unavailable" and .gpuMs == "unavailable" and (.combinedMs | type) == "number" then
+      "CPU&GPU frame time mean (combined): \(.combinedMs | fixed(2)) ms"
+    else "CPU/GPU frame time mean: \(.cpuMs | fixed(2)) / \(.gpuMs | fixed(2)) ms" end),
+    (if (.cpuUtilization | type) == "number" or (.gpuUtilization | type) == "number" then
+      "CPU/GPU utilisation mean (report only): \(.cpuUtilization | fixed(2)) / \(.gpuUtilization | fixed(2))"
+    else empty end),
     (if .message != "" then .message else empty end)
   ' "$QR_RUN_DIR/perf-summary.json" > "$QR_RUN_DIR/perf-summary.txt" || return 3
   qr_set perf "$(cat "$QR_RUN_DIR/perf-summary.txt")"
@@ -40,6 +56,20 @@ qr_perf_report() {
   qr_set perf_result "$rc"
   perf_reported=1
   return "$rc"
+}
+
+# Hash the captured installation, not a possibly unrelated local APK/state hash.
+# Missing tools, split-only/ambiguous paths and transport failures are report-only.
+qr_perf_apk_sha() {
+  local path out
+  path="$(QR_TIMEBOX_KILL_AFTER=1 qr_timebox 5 adb -s "$QUEST_SERIAL" shell pm path "$QR_PKG" 2>/dev/null)" || { echo unavailable; return; }
+  path="${path//$'\r'/}"
+  # Only accept a single base APK path; never interpolate device output into shell code.
+  if [[ ! "$path" =~ ^package:/[a-zA-Z0-9_./=+-]+/base\.apk$ ]]; then echo unavailable; return; fi
+  out="$(QR_TIMEBOX_KILL_AFTER=1 qr_timebox 5 adb -s "$QUEST_SERIAL" shell sha256sum "${path#package:}" 2>/dev/null)" || { echo unavailable; return; }
+  if [[ "$out" =~ ^([a-fA-F0-9]{64})[[:space:]] ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}" | tr 'A-F' 'a-f'
+  else echo unavailable; fi
 }
 
 # Optional diagnostic: unsupported thermalservice must not make capture fail.
@@ -151,6 +181,7 @@ qr_perf_locked() (
     perf_package="$(qr_adb shell dumpsys package "$QR_PKG" 2>/dev/null)" || perf_error='adb package query failed'
     perf_model="${perf_model//$'\r'/}"
     perf_package="${perf_package//$'\r'/}"
+    QR_PERF_SHA="$(qr_perf_apk_sha)"
     perf_mode="$(qr_config_get '.quest.perf.devices // {}' | jq -r --arg model "$perf_model" '.[$model] // "report"')"
     # Arm cleanup BEFORE attempting the broadcast: transport can fail after delivery.
     printf '%s\n%s\n' "$QUEST_SERIAL" "$QR_RUN_DIR" > "$QR_PERF_RUN_ROOT/perf-active.tmp" \
@@ -233,7 +264,7 @@ qr_perf() {
   qr_positive_seconds 'perf seconds' "$QR_PERF_SECONDS" || return 1
   case "$QR_PERF_WARMUP" in 0) ;; *) qr_positive_seconds 'perf warmup' "$QR_PERF_WARMUP" || return 1 ;; esac
   QR_PERF_RUN_ROOT="$QR_RUN_DIR"
-  QR_PERF_SHA="$(qr_get apk_sha256 unavailable)"
+  QR_PERF_SHA=unavailable
   qr_set device_results ''; qr_set multi_command ''; qr_set overall ''
   if [ "${#QR_SERIALS[@]}" = 1 ]; then qr_perf_device; return $?; fi
   qr_set perf 'per-device performance captures (see below)'
