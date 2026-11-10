@@ -9,6 +9,20 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
+- None.
+
+### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
+## [0.1.10] - 2026-11-10
+
+### Added
 - Quest performance reports include combined CPU&GPU frame time and CPU/GPU
   utilisation means when available, with full precision in JSON.
 - Regression coverage for real-device VrApi telemetry and unrounded gate boundaries.
