@@ -65,7 +65,7 @@ qr_perf_apk_sha() {
   path="$(QR_TIMEBOX_KILL_AFTER=1 qr_timebox 5 adb -s "$QUEST_SERIAL" shell pm path "$QR_PKG" 2>/dev/null)" || { echo unavailable; return; }
   path="${path//$'\r'/}"
   # Only accept a single base APK path; never interpolate device output into shell code.
-  if [[ ! "$path" =~ ^package:/[a-zA-Z0-9_./=+-]+/base\.apk$ ]]; then echo unavailable; return; fi
+  if [[ ! "$path" =~ ^package:/[a-zA-Z0-9_./=+~-]+/base\.apk$ ]]; then echo unavailable; return; fi
   out="$(QR_TIMEBOX_KILL_AFTER=1 qr_timebox 5 adb -s "$QUEST_SERIAL" shell sha256sum "${path#package:}" 2>/dev/null)" || { echo unavailable; return; }
   if [[ "$out" =~ ^([a-fA-F0-9]{64})[[:space:]] ]]; then
     printf '%s\n' "${BASH_REMATCH[1]}" | tr 'A-F' 'a-f'
