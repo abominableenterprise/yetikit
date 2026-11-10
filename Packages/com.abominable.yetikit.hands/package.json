@@ -6,7 +6,7 @@
   "description": "Planned tracked hands, controllers, panels and comfort locomotion.",
   "license": "MIT",
   "dependencies": {
-    "com.abominable.yetikit.core": "0.1.5",
+    "com.abominable.yetikit.core": "0.1.10",
     "com.unity.inputsystem": "1.20.0",
     "com.unity.xr.interaction.toolkit": "3.6.1",
     "com.unity.xr.hands": "1.9.0"
