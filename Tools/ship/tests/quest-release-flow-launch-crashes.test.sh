@@ -27,6 +27,6 @@ reset_logs; FAKE_LOGCAT="10-31 12:00:40.000  9998  9998 E AndroidRuntime: FATAL 
 10-31 12:00:40.001  9998  9998 E AndroidRuntime: Process: $QR_PKG, PID: 9998" run launch
 check "package attribution catches a game process that restarted during observation" '[ "$rc" != 0 ] && grep -q "launch:      CRASH" "$tmp/out"'
 reset_logs; FAKE_ALIVE=0 run launch
-check "a dead process is a crash" '[ "$rc" != 0 ] && grep -q "alive no" "$tmp/out"'
+check "a process never observed without crash evidence is infrastructure" '[ "$rc" = 3 ] && grep -q "INFRA: process never started (no crash evidence)" "$tmp/out"'
 
 qr_flow_finish

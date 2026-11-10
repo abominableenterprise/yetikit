@@ -12,10 +12,13 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Quest launch no longer mistakes an OS-blocked launch or a process that never
+  started without attributed crash evidence for a confirmed crash.
 
 ### Behaviour changes
-- None.
+- Blocked/never-started launches report INFRA (exit 3) and never roll back;
+  package-attributed crashes/ANRs and observed processes that disappear remain
+  CRASH (exit 1).
 
 ### Adapter changes
 - None.

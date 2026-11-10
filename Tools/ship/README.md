@@ -493,10 +493,15 @@ wait exceeds 30), then at the final deadline; it reports optional FPS, errors,
 package-attributed crashes, alive status and Quest-shell launch warnings. Shell
 warnings alone do not trigger rollback and a live process is not proof of XR
 presentation. `launch` exits **0** for a healthy observed process, **1** for a
-confirmed crash (`CRASH:`: package-attributed crash lines or a successful probe
-confirming the process is gone), and **3** for an infrastructure/unverified
-result (`INFRA:`). Device checks, activity start, logcat capture (including the
-early snapshot), and failed/malformed pidof probes are infrastructure errors.
+confirmed crash (`CRASH:`: package-attributed crash/ANR evidence or a process
+observed after start that is gone at the final probe), and **3** for an
+infrastructure/unverified result (`INFRA:`). An OS/launcher blocked-launch record
+naming the exact package reports `INFRA: launch blocked by the OS: <reason>`
+with the hint `clear the dialog on the headset and rerun`. A process absent at
+both PID probes without attributed crash evidence reports
+`INFRA: process never started (no crash evidence)`. Neither case rolls back.
+Device checks, activity start, logcat capture (including the early snapshot),
+and failed/malformed pidof probes are infrastructure errors.
 The probe checks adb's transport status separately from the remote pidof status;
 remote exit 1 with no output confirms absence, not a transport failure.
 Multi-device exit status uses **crash (1) > infrastructure (3) > OK (0)**,

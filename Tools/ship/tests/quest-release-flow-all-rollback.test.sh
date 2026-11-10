@@ -9,7 +9,8 @@ qr_flow_old_apk
 reset_logs; FAKE_LOGCAT='10-31 12:00:40.000  9999  9999 E AndroidRuntime: FATAL EXCEPTION: main' run all --rollback "$old"
 check "all does not roll back a healthy release for another app crash" \
   '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/installed")" = 1 ] && ! grep -q "install -r -d" "$tmp/adb.log"'
-reset_logs; FAKE_ALIVE=0 run all --rollback "$old"
+reset_logs; FAKE_ALIVE=0 FAKE_LOGCAT="10-31 12:00:40.000 4242 4242 E AndroidRuntime: FATAL EXCEPTION: main
+10-31 12:00:40.001 4242 4242 E AndroidRuntime: Process: $QR_PKG, PID: 4242" run all --rollback "$old"
 check "all --rollback: a crash at launch rolls back to the given APK" \
   '[ "$rc" != 0 ] && [ "$(sed -n 2p "$tmp/installed")" = "$old" ]'
 for k in test build; do [ -d "$root/rel-$short-$k" ] && git -C "$repo" worktree remove --force "$root/rel-$short-$k"; done
