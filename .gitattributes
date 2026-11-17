@@ -1,5 +1,43 @@
-* text=auto
+# Text: normalise line endings
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh text eol=lf
+
+# Binary (LFS patterns are listed separately)
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.jar binary
+*.keystore binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.mp3 binary
+*.ogg binary
+*.mp4 binary
+*.mov binary
+
+# Unity: mark YAML assets as generated in review; keep text merges.
 *.meta text eol=lf
+*.unity text eol=lf linguist-generated=true
+*.prefab text eol=lf linguist-generated=true
+*.asset text eol=lf linguist-generated=true
+*.mat text eol=lf linguist-generated=true
+*.anim text eol=lf linguist-generated=true
+*.controller text eol=lf linguist-generated=true
+*.psd binary
+*.tga binary
+*.exr binary
+*.cubemap binary
+*.unitypackage binary
+
+# Git LFS
 *.png filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
 *.fbx filter=lfs diff=lfs merge=lfs -text
