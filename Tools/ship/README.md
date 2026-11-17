@@ -533,9 +533,11 @@ you need it. Multiple
 PIDs or no PID by the deadline is INFRA. Cleanup traps restore the sensor on
 failures and cancellation too. Each restoration attempt is bounded by
 `QR_PERF_RESTORE_WAIT` (default 10 seconds); failed/timed-out restoration logs a
-WARN with a manual adb recovery command in the per-device summary. Cancellation
-still publishes its result, removes the active marker and releases run ownership;
-an unreachable device is infrastructure failure, not success. No build, install, editor or credentials
+WARN with a manual adb recovery command in the per-device summary. Failed
+restorations remain pending per device in the run folder. Cancellation retries
+pending restorations under the corresponding headset locks, publishes a fresh
+cancellation result and releases run ownership. An unreachable device is an
+infrastructure failure, not success. No build, install, editor or credentials
 are needed. Manual `perf start` / `perf stop` is tracked in
 [#61](https://github.com/abominableenterprise/yetikit/issues/61).
 
@@ -570,10 +572,12 @@ mode); missing optional measurements say `unavailable`. No samples is INFRA,
 never PASS. Captures also require the same unique app PID and resumed package
 through warm-up and each second of the window. PID-filtered epoch logcat is
 validated again while parsing, so another process cannot supply passing samples.
-Missing/replaced/backgrounded app identity is INFRA. Coverage requires at least
-N−1 samples (minimum one), a timestamp span of at least N−2 seconds, and no
-nonpositive or greater-than-2.5-second intervals. This allows boundary jitter,
-not short surviving fragments; insufficient coverage is INFRA in both modes.
+Missing/replaced/backgrounded app identity is INFRA. Capture uses a fractional
+device epoch and a monotonic host deadline; a device-clock query taking 500 ms
+or longer invalidates the capture. Coverage requires at least N−1 samples
+(minimum one), a timestamp span of at least N−2 seconds, and no nonpositive or
+greater-than-1.5-second intervals. This allows boundary jitter, not a missing
+interior record; insufficient coverage is INFRA in both modes.
 CPU and GPU frame-time means are reported separately when present.
 The stale streak counts adjacent samples with Stale > 0, resetting on an epoch
 timestamp gap greater than 1.5 seconds. No interpolation fills lost samples.

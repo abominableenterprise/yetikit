@@ -94,7 +94,7 @@ emit_samples() {
 qr_perf_now() {
   local clock
   read -r clock < "$tmp/state/$(fixture_id "$QUEST_SERIAL")/clock"
-  printf '%s\n' "$clock"
+  printf '%s\n' "$((clock * 1000))"
 }
 # PID polling advances virtual time independently of warm-up/capture sleeping.
 qr_perf_pid_sleep() {
@@ -120,7 +120,9 @@ qr_perf_sleep() {
     printf '%s.000 4242 4242 I VrApi: FPS=1,Stale=99,App=999ms\n' "$(date +%s)" >> "$state/buffer"
     echo capture > "$state/phase"
   else
-    if [ "${QR_PERF_CANCEL:-0}" = 1 ]; then
+    if [ "${QR_PERF_CANCEL:-0}" = 1 ] && { [ "${QR_PERF_TEST_CASE:-}" != pending ] || [ "$id" = b ]; }; then
+      # Simulate the worker dying before it can publish a cancellation report.
+      if [ "${QR_PERF_TEST_CASE:-}" = metadata ]; then trap 'exit 3' TERM; trap - EXIT; fi
       /bin/sleep 300 & child=$!
       printf '%s\n' "$child" > "$tmp/capture-child.pid"
       qr_fixture_ready "$tmp/capture.ready" "$child"
@@ -169,10 +171,13 @@ adb() {
         'sha256sum /data/app/synthetic/base.apk')
           [ "$fault" != apk-hash ] || return 1
           printf '%s  /data/app/synthetic/base.apk\n' "$sha" ;;
-        'date +%s')
+        'date +%s.%N')
           [ "$fault" != clock ] || return 1
           if [ "$fault" = bad-clock ]; then echo invalid; return 0; fi
-          command cat "$state/clock" | tee "$state/window-start" ;;
+          local epoch
+          read -r epoch < "$state/clock"
+          printf '%s\n' "$epoch" > "$state/window-start"
+          printf '%s.000000000\n' "$epoch" ;;
         'getprop ro.product.manufacturer') echo Oculus ;;
         'getprop ro.product.model') echo 'Synthetic Quest' ;;
         'pidof '*)
@@ -210,8 +215,15 @@ adb() {
         'am broadcast -a com.oculus.vrpowermanager.prox_close')
           [ "$fault" != proximity ] || return 1 ;;
         'am broadcast -a com.oculus.vrpowermanager.automation_disable')
+          local key lock
+          key="$(printf '%s' "$QUEST_SERIAL" | qr_sha256)"
+          lock="/tmp/yetikit-quest-device-locks-$UID/$key.lock/pid"
+          if [ "$(command cat "$lock" 2>/dev/null)" != "$$" ]; then
+            echo "$id" >> "$tmp/unowned-restores"
+          fi
           echo attempted >> "$state/restore-attempts"
           [ "$fault" != restore ] || return 1
+          if [ "$fault" = restore-until-b ] && [ ! -f "$tmp/capture.ready" ]; then return 1; fi
           if [ "$fault" = restore-once ] && [ "$(wc -l < "$state/restore-attempts")" = 1 ]; then return 1; fi
           if [ "$fault" = restore-hang ]; then
             # Reap the synthetic sleep on TERM from the real timebox watchdog.
@@ -229,7 +241,17 @@ adb() {
   esac
 }
 if [ "$worker" = --cancel-worker ]; then
-  qr_main perf --seconds 20 --warmup 0
+  case "${QR_PERF_TEST_CASE:-}" in
+    early) qr_select_device() { kill -TERM "$$"; } ;;
+    late)
+      summarize="$(declare -f qr_summary)"
+      eval "${summarize/qr_summary ()/qr_fixture_summary ()}"
+      qr_summary() {
+        if [ ! -f "$tmp/late-signal" ]; then : > "$tmp/late-signal"; kill -TERM "$$"; fi
+        qr_fixture_summary
+      } ;;
+  esac
+  qr_main perf --seconds 7 --warmup 0
   exit $?
 fi
 
@@ -247,7 +269,7 @@ configure() {
 }
 reset_case() {
   rm -rf "$QUEST_LOG_ROOT" "$tmp/state"
-  rm -f "$tmp/capture.ready" "$tmp/capture-child.pid" "$tmp/early-result"
+  rm -f "$tmp/capture.ready" "$tmp/capture-child.pid" "$tmp/early-result" "$tmp/unowned-restores" "$tmp/late-signal"
   qr_test_config "$tmp/config"
   configure '.quest.launchArgs = ["-scene", "Synthetic Scene"] |
     .quest.perf = {seconds:20, warmupSeconds:3, maxStalePercent:1,
@@ -279,6 +301,7 @@ run() {
 }
 json_is() { [ -s "$report" ] && jq -e "$1" "$report" >/dev/null; }
 restored() { [ -s "$tmp/state/$1/restored" ]; }
+pending() { [ -f "$run_dir/perf-pending/$(printf '%s' "$1" | qr_sha256)" ]; }
 
 reset_case
 # Cache only immutable fixture scalars; all perf reads and schema validation stay
@@ -290,7 +313,7 @@ qr_cached_get="$(declare -f qr_config_get)"
 eval "${qr_cached_get/qr_config_get ()/qr_perf_fixture_get ()}"
 qr_config_get() {
   case "$1" in
-    .quest.perf*) printf '%s\n' "$QR_CONFIG_JSON" | command "${SHIP_TEST_REAL_JQ:-jq}" -r "$1" ;;
+    .quest.perf*|.quest.launchArgs*) printf '%s\n' "$QR_CONFIG_JSON" | command "${SHIP_TEST_REAL_JQ:-jq}" -r "$1" ;;
     *) qr_perf_fixture_get "$1" ;;
   esac
 }
@@ -310,6 +333,12 @@ check 'warm-up records are cleared after warm-up and before the capture window' 
 wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
 check 'wait succeeds for scripted perf and prints performance measurements' \
   '[ "$wrc" = 0 ] && grep -q "Quest performance: PASS" "$tmp/wait.out" && grep -q "App p95 (per-second samples)" "$tmp/wait.out"'
+
+reset_case
+configure '.quest.launchArgs = ["--es", "unity", "-other value -scene \"Synthetic Scene\" -flag"]'
+run "$a" perf
+check 'scene in the Unity intent extra labels JSON and text without changing launch arguments' \
+  '[ "$rc" = 0 ] && json_is '\''.scene == "Synthetic Scene"'\'' && grep -Fxq "scene: Synthetic Scene" "$run_dir/perf-summary.txt" && grep -Fq -- "-other value -scene" "$tmp/adb.log"'
 
 reset_case
 echo real > "$tmp/state/a/profile"
@@ -456,7 +485,7 @@ reset_case
 echo restore-once > "$tmp/state/a/fault"
 run "$a" perf
 check 'successful EXIT retry clears its matching proximity marker' \
-  '[ "$rc" = 3 ] && restored a && [ ! -e "$run_dir/perf-active" ]'
+  '[ "$rc" = 3 ] && restored a && ! pending "$a"'
 
 for field in app stale fps; do
   reset_case
@@ -533,18 +562,35 @@ wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
 check 'wait fails mixed perf and preserves both per-device summaries' \
   '[ "$wrc" = 1 ] && grep -Fq "perf[$a]:" "$tmp/wait.out" && grep -Fq "perf[$b]:" "$tmp/wait.out"'
 
+# Signal the owner deterministically before worker setup and after worker return.
+for boundary in early late; do
+  reset_case
+  run "$a" perf
+  check "$boundary cancellation fixture starts with a reused PASS summary" 'json_is '\''.overall == "PASS"'\'''
+  echo warmup > "$tmp/state/a/phase"
+  rc=0
+  ( QR_PERF_TEST_TMP="$tmp" QR_PERF_TEST_CASE="$boundary" QUEST_SERIAL="$a" \
+    qr_fixture_bash "$here/quest-release-perf.test.sh" --cancel-worker ) > "$tmp/cancel.out" 2>&1 || rc=$?
+  load_report
+  check "$boundary cancellation replaces PASS independently of pending restoration" \
+    '[ "$rc" = 1 ] && json_is '\''.overall == "INFRA" and .message == "capture cancelled" and .seconds == 7 and .warmupSeconds == 0'\'' && ! grep -q "Quest performance: PASS" "$run_dir/summary.txt" && grep -q "capture cancelled" "$run_dir/summary.txt"'
+done
+
 # Real qr_main owner/traps, real run lock and real cancel/drain; only adb and
 # capture sleeping are fake. Readiness is published inside the capture window.
-for cancel_fault in none restore-hang report-blocked; do
+for cancel_fault in none metadata restore-hang report-blocked pending; do
 reset_case
 if [ "$cancel_fault" = report-blocked ]; then
   echo restore > "$tmp/state/a/fault"
+  cancel_serials="$a,$b"
+elif [ "$cancel_fault" = pending ]; then
+  echo restore-until-b > "$tmp/state/a/fault"
   cancel_serials="$a,$b"
 else
   echo "$cancel_fault" > "$tmp/state/a/fault"
   cancel_serials="$a"
 fi
-export QR_PERF_TEST_TMP="$tmp" QR_PERF_CANCEL=1 QUEST_SERIAL="$cancel_serials" QR_PERF_RESTORE_WAIT=1
+export QR_PERF_TEST_TMP="$tmp" QR_PERF_TEST_CASE="$cancel_fault" QR_PERF_CANCEL=1 QUEST_SERIAL="$cancel_serials" QR_PERF_RESTORE_WAIT=1
 if declare -F qr_perf >/dev/null; then
   set -m
   qr_fixture_bash "$here/quest-release-perf.test.sh" --cancel-worker > "$tmp/cancel.out" 2>&1 & owner=$!
@@ -585,16 +631,23 @@ if declare -F qr_perf >/dev/null; then
   else
     stopped=0
   fi
-  if [ "$cancel_fault" = none ]; then
+  if [ "$cancel_fault" = none ] || [ "$cancel_fault" = metadata ]; then
     check 'TERM drains capture and logs proximity restoration before publishing cancellation and releasing lock' \
       '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -f "$tmp/early-result" ] && grep -q "^cmd=perf$" "$QUEST_LOG_ROOT/last-result" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result" && json_is '\''.overall != "PASS"'\'''
+    if [ "$cancel_fault" = metadata ]; then
+      check 'owner fallback keeps effective CLI durations and installed APK SHA without a worker report' \
+        'jq -e --arg sha "$sha" '\''.overall == "INFRA" and .seconds == 7 and .warmupSeconds == 0 and .apkSha256 == $sha'\'' "$report" >/dev/null'
+    fi
+  elif [ "$cancel_fault" = pending ]; then
+    check 'cancel on device B retries device A after two failed restorations without losing either record' \
+      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && restored a && restored b && [ "$(wc -l < "$tmp/state/a/restore-attempts")" = 3 ] && ! pending "$a" && ! pending "$b" && [ ! -e "$tmp/unowned-restores" ]'
   elif [ "$cancel_fault" = report-blocked ]; then
     recovery="adb -s $a shell am broadcast -a com.oculus.vrpowermanager.automation_disable"
-    check 'failed per-device publication puts manual recovery in the owner summary before removing the marker' \
-      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ -d "$run_dir/devices/$a/perf-summary.json" ] && [ -s "$tmp/state/a/restore-attempts" ] && ! restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -e "$run_dir/perf-active" ] && grep -Fq "$recovery" "$run_dir/summary.txt" && grep -Fq "$recovery" "$tmp/cancel.out"'
+    check 'failed per-device publication puts manual recovery in the owner summary and keeps the pending record' \
+      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ -d "$run_dir/devices/$a/perf-summary.json" ] && [ -s "$tmp/state/a/restore-attempts" ] && ! restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && pending "$a" && grep -Fq "$recovery" "$run_dir/summary.txt" && grep -Fq "$recovery" "$tmp/cancel.out"'
   else
-    check 'hung restore after TERM is bounded, warns in the per-device summary and removes the marker' \
-      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ "$((SECONDS - cancel_started))" -le 8 ] && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -e "$run_dir/perf-active" ] && json_is '\''.overall == "INFRA" and (.message | contains("WARN: proximity sensor may still be disabled; run: adb -s"))'\'' && grep -Fq "shell am broadcast -a com.oculus.vrpowermanager.automation_disable" "$run_dir/perf-summary.txt" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result"'
+    check 'hung restore after TERM is bounded, warns in the per-device summary and keeps the pending record' \
+      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ "$((SECONDS - cancel_started))" -le 8 ] && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && pending "$a" && json_is '\''.overall == "INFRA" and (.message | contains("WARN:"))'\'' && grep -Fq "shell am broadcast -a com.oculus.vrpowermanager.automation_disable" "$run_dir/perf-summary.txt" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result"'
   fi
   unset QR_PERF_CANCEL
   echo none > "$tmp/state/a/fault"
@@ -604,7 +657,7 @@ if declare -F qr_perf >/dev/null; then
 else
   check 'perf must be sourced before real TERM/run-lock regression can run' false
 fi
-unset QR_PERF_CANCEL QR_PERF_RESTORE_WAIT
+unset QR_PERF_CANCEL QR_PERF_RESTORE_WAIT QR_PERF_TEST_CASE
 done
 # A real executable can inherit ignored TERM from the cancelling owner. It
 # must be KILLed after the restoration-specific grace, not the shared 60s.
