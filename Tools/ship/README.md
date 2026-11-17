@@ -538,8 +538,37 @@ restorations remain pending per device in the run folder. Cancellation retries
 pending restorations under the corresponding headset locks, publishes a fresh
 cancellation result and releases run ownership. An unreachable device is an
 infrastructure failure, not success. No build, install, editor or credentials
-are needed. Manual `perf start` / `perf stop` is tracked in
-[#61](https://github.com/abominableenterprise/yetikit/issues/61).
+are needed.
+
+### Record a live session
+
+1. Launch the configured app and navigate to the workload before recording.
+2. Run `Tools/ship/quest-release.sh perf start`. Wait for it to succeed before
+   measuring. It records each selected headset's device-clock start and app
+   PID and holds its proximity override open. It does not launch the app,
+   clear logcat, or apply warm-up.
+3. Run `Tools/ship/quest-release.sh perf stop` while the same app is still in
+   the foreground. Use the same checkout, log root, and device serial(s).
+   Stop sets a separate end for each headset, restores proximity, and writes
+   the same text and JSON summaries as scripted perf. Duration is measured,
+   not configured; neither manual command accepts `--seconds` or `--warmup`.
+   Scene is `unavailable` because the tool did not choose it.
+
+A manual window belongs to one serial, so you can stop a subset of a list. A
+second start cannot replace an open window, and stop without a matching start
+is INFRA. The host-local reservation blocks other release commands that mutate
+that headset, even from another checkout. Direct adb or a different host is not
+covered by this lock. Do not restart or background the app during a window:
+manual capture checks identity at both ends, not continuously. Only records
+from the persisted start (inclusive) to stop (exclusive) enter the manual
+logcat artifact and summary. Long windows can lose samples as logcat rolls
+over; missing coverage is INFRA.
+
+After an interrupted start/stop or failed restoration, reconnect the headset
+and retry `perf stop` from the owning checkout and log root. If a usable window
+was not recorded or was already consumed, the retry restores proximity but
+reports INFRA instead of issuing a capture result. Use the same host and user
+throughout, and always stop open windows when finished.
 
 Optional configuration under `quest`:
 
@@ -570,7 +599,8 @@ frame telemetry. Both thresholds are inclusive. Average FPS never gates.
 Missing gate inputs in any sample make that gate unavailable (FAIL in gate
 mode); missing optional measurements say `unavailable`. No samples is INFRA,
 never PASS. Captures also require the same unique app PID and resumed package
-through warm-up and each second of the window. PID-filtered epoch logcat is
+through warm-up and each second of the scripted window, or at both edges of a
+manual window. PID-filtered epoch logcat is
 validated again while parsing, so another process cannot supply passing samples.
 Missing/replaced/backgrounded app identity is INFRA. Capture uses a fractional
 device epoch and a monotonic host deadline; a device-clock query taking 500 ms
@@ -583,8 +613,8 @@ The stale streak counts adjacent samples with Stale > 0, resetting on an epoch
 timestamp gap greater than 1.5 seconds. No interpolation fills lost samples.
 
 Each selected `QUEST_SERIAL` receives `perf-summary.txt`, `perf-summary.json`
-and raw `perf-logcat.txt` in the current run directory (encoded `devices/`
-subfolders for lists, same as install/launch). The run's known APK SHA-256 is
+and `perf-logcat.txt` in the current run directory (encoded `devices/`
+subfolders for lists, same as install/launch). The installed APK SHA-256 is
 included alongside installed versionName/versionCode; absent metadata is
 unavailable. Thermal readings use first/last sample `Temp`, falling back to
 `dumpsys thermalservice` status at the capture boundaries, or unavailable. Example synthetic gate-mode summary excerpt:

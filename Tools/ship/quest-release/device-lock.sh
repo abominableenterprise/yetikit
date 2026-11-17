@@ -37,5 +37,15 @@ qr_device_locked() (
     ''|0|*[!0-9]*) ;;
     *) printf '%s\n' "$group" > "$device_lock/group" || exit 1 ;;
   esac
+  # A manual capture reserves the headset between invocations. Check the
+  # reservation only under the normal lock, including for competing repos.
+  local QR_DEVICE_MANUAL="$root/$key.manual"
+  case "$1" in
+    qr_perf_manual_locked|qr_perf_manual_recover_locked) ;;
+    *) if [ -e "$QR_DEVICE_MANUAL" ]; then
+         qr_log "error: device $QUEST_SERIAL has a pending manual capture; run perf stop from its owning checkout and log root"
+         exit 3
+       fi ;;
+  esac
   "$@"
 )
