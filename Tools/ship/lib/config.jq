@@ -92,5 +92,15 @@ elif has("tests") and (.tests | has("scriptsRoot")) and (.tests.scriptsRoot | re
 elif has("tests") and (.tests | has("editorRoot")) and (.tests.editorRoot | relpath | not) then invalid("tests.editorRoot")
 elif has("tests") and (.tests | has("builderFixtures")) and (.tests.builderFixtures | type) != "object" then invalid("tests.builderFixtures")
 elif has("tests") and (.tests | has("builderFixtures")) and (.tests.builderFixtures | all(.[]; methods) | not) then invalid("tests.builderFixtures")
+elif (.tests // {} | has("prPure")) and (.tests.prPure | type) != "object" then invalid("tests.prPure")
+elif (.tests.prPure // {} | has("smokeFixtures")) and
+  (.tests.prPure.smokeFixtures | if strings then all(.[]; test("^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$")) else false end | not)
+  then invalid("tests.prPure.smokeFixtures")
+elif (.tests.prPure // {} | has("max")) and
+  (.tests.prPure.max | if type == "number" then floor != . or . < 0 or . > 9999999 else true end)
+  then invalid("tests.prPure.max")
+elif (.tests.prPure // {} | has("fallbackRegex")) and
+  (.tests.prPure.fallbackRegex | if nonempty then . as $regex | try ("" | test($regex) | true) catch false else false end | not)
+  then invalid("tests.prPure.fallbackRegex")
 else empty end
 end
