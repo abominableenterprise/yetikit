@@ -241,20 +241,22 @@ cleanup_unity() {
       esac
     done
   fi
-  sleep 2
-  wipe_unity_shared_files
+  sleep 2 || return
+  wipe_unity_shared_files "$@"
 }
 
-# Caller holds lock_unity. Never wipe shared files while a foreign editor may still own them.
+# Caller holds lock_unity. Setup treats a skipped wipe as a hard stop before replacing an install. Never wipe shared files while a foreign editor may still own them.
 wipe_unity_shared_files() {
   local remaining
   # Read-only scan: never signal an unmarked editor, another run's editor, or an unreadable owner.
   if ! remaining="$(unity_pids strict shared-files)"; then
     log "warning: Unity process inspection incomplete; skipping shared-memory and UnityLockfile cleanup"
+    [ "${1:-}" != require-idle ] || return 1
     return 0
   fi
   if [ -n "$remaining" ]; then
     log "warning: Unity processes remain (PIDs:$remaining); skipping shared-memory and UnityLockfile cleanup"
+    [ "${1:-}" != require-idle ] || return 1
     return 0
   fi
   rm -f "$SHM_DIR"/udsMem* "$SHM_DIR"/sem.udsMem* "$PROJECT/Temp/UnityLockfile"

@@ -112,8 +112,8 @@ replace_base_editor() {
   as_root test -e "$UNITY_ROOT/$DONE_MARK" || return 0
   log "replacing the editor at $UNITY_ROOT (no Android module) with $UNITY_IMAGE"
   refuse_editor_in_use
-  cleanup_unity
-  # Cleanup delays: an editor may have started since the first scan.
+  cleanup_unity require-idle || die "cleanup did not complete; refusing to replace $UNITY_ROOT. Close any Unity processes and re-run setup."
+  # An editor can still start after the cleanup scan; recheck with deletion's privileges.
   refuse_editor_in_use
   as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 }
