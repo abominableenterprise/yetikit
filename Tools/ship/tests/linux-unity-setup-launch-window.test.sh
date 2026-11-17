@@ -72,22 +72,24 @@ EOF
   declare -f ship_wait_until
   printf 'real_readlink=%q\n' "$real_readlink"
   cat <<'EOF'
-if [ "${FAKE_EXIT_BEFORE_RECHECK:-0}" = 1 ] && [ "$1" = env ] && [ -s "$FAKE_LATE_EDITOR_GATE" ]; then
+if [ "${FAKE_LATE_EDITOR_MODE:-}" = cleanup ] && [ "$1" = env ] && [ "${!#}" != shared-files ] && [ -s "$FAKE_LATE_EDITOR_GATE" ]; then
   editor=$(< "$FAKE_LATE_EDITOR_GATE")
   kill "$editor"
   editor_gone() { ! "$real_readlink" "/proc/$editor/exe" >/dev/null 2>&1; }
   ship_wait_until editor_gone
 fi
 export FAKE_PRIVILEGED=1
+if [ "${!#}" = shared-files ]; then export FAKE_SHARED_SCAN=1; fi
 exec "$@"
 EOF
 } > "$tmp/bin/sudo"
 
-# Expose the late editor only to the privileged scan in the first scenario,
-# and to cleanup itself in the second scenario.
+# Model a root-owned process whose identity cannot be read without sudo.
+# In the recheck scenario, the late editor appears just after cleanup's scan.
 cat > "$tmp/bin/readlink" <<EOF
 #!/bin/bash
-if [ -s "$tmp/editor.pid" ] && { [ "\${FAKE_EXIT_BEFORE_RECHECK:-0}" = 1 ] || [ "\${FAKE_PRIVILEGED:-0}" = 1 ]; }; then
+if [ "\${FAKE_LATE_EDITOR_MODE:-}" = idle ] && [ "\${1:-}" = /proc/1/exe ] && [ "\${FAKE_PRIVILEGED:-0}" != 1 ]; then exit 1; fi
+if [ -s "$tmp/editor.pid" ] && { [ "\${FAKE_LATE_EDITOR_MODE:-}" = cleanup ] || { [ "\${FAKE_PRIVILEGED:-0}" = 1 ] && [ "\${FAKE_SHARED_SCAN:-0}" != 1 ]; }; }; then
   export SHIP_FIXTURE_PIDS="\$(< "$tmp/editor.pid")"
 fi
 exec "$tmp/process-view/readlink" "\$@"
@@ -98,10 +100,10 @@ downloads_before="$(wc -l < "$tmp/download-calls")"
 run_setup() {
   rc=0
   PATH="$tmp/bin:$PATH" UNITY_ROOT="$root" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/logs" \
-    SHM_DIR="$tmp/shm" FAKE_LATE_EDITOR_GATE="$tmp/editor.pid" FAKE_EXIT_BEFORE_RECHECK="$1" \
+    SHM_DIR="$tmp/shm" FAKE_LATE_EDITOR_GATE="${2:-}" FAKE_LATE_EDITOR_MODE="$1" \
     bash "$script" setup --android --no-creds > "$tmp/out" 2>&1 || rc=$?
 }
-run_setup 0
+run_setup recheck "$tmp/editor.pid"
 check 'cleanup launched the editor from the installation' \
   '[ -s "$tmp/editor.pid" ]'
 check 'the final privileged scan catches an editor the cleanup scan missed' \
@@ -113,10 +115,16 @@ check 'late editor refusal does not extract an image' \
 
 if [ -s "$tmp/editor.pid" ]; then kill "$(< "$tmp/editor.pid")" 2>/dev/null || true; fi
 rm -f "$tmp/editor.pid"
-run_setup 1
+run_setup cleanup "$tmp/editor.pid"
 check 'cleanup observed an editor launched during its wait' \
   '[ -s "$tmp/editor.pid" ] && grep -qF "Unity processes remain" "$tmp/out"'
 check 'cleanup refusal stops replacement even if a later scan would be clear' \
   '[ "$rc" != 0 ] && grep -qF "cleanup did not complete; refusing to replace $root" "$tmp/out" && cmp -s /usr/bin/sleep "$root/Editor/Unity" && [ "$(< "$root/resource")" = "keep installation data" ] && [ -f "$root/.install-complete" ] && [ "$(wc -l < "$tmp/download-calls")" = "$downloads_before" ]'
+
+if [ -s "$tmp/editor.pid" ]; then kill "$(< "$tmp/editor.pid")" 2>/dev/null || true; fi
+rm -f "$tmp/editor.pid"
+run_setup idle
+check 'idle replacement succeeds even when the calling user cannot inspect every process' \
+  '[ "$rc" = 0 ] && grep -qF "setup ok" "$tmp/out" && [ ! -e "$root/resource" ] && [ -f "$root/.install-complete" ]'
 
 [ "$fails" = 0 ] && echo 'all passed' || { echo "$fails failed"; exit 1; }

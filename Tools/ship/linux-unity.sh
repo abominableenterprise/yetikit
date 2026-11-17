@@ -245,21 +245,19 @@ cleanup_unity() {
   wipe_unity_shared_files "$@"
 }
 
-# Caller holds lock_unity. Setup treats a skipped wipe as a hard stop before replacing an install. Never wipe shared files while a foreign editor may still own them.
+# Caller holds lock_unity. Never wipe shared files while a foreign editor may still own them.
 wipe_unity_shared_files() {
-  local remaining
-  # Read-only scan: never signal an unmarked editor, another run's editor, or an unreadable owner.
-  if ! remaining="$(unity_pids strict shared-files)"; then
+  local remaining scan=unity_pids
+  [ "${1:-}" != require-idle ] || scan=unity_pids_as_root # use deletion's privileges
+  if ! remaining="$("$scan" strict shared-files)"; then
     log "warning: Unity process inspection incomplete; skipping shared-memory and UnityLockfile cleanup"
-    [ "${1:-}" != require-idle ] || return 1
-    return 0
-  fi
-  if [ -n "$remaining" ]; then
+  elif [ -n "$remaining" ]; then
     log "warning: Unity processes remain (PIDs:$remaining); skipping shared-memory and UnityLockfile cleanup"
-    [ "${1:-}" != require-idle ] || return 1
-    return 0
+  else
+    rm -f "$SHM_DIR"/udsMem* "$SHM_DIR"/sem.udsMem* "$PROJECT/Temp/UnityLockfile"
+    return
   fi
-  rm -f "$SHM_DIR"/udsMem* "$SHM_DIR"/sem.udsMem* "$PROJECT/Temp/UnityLockfile"
+  [ "${1:-}" != require-idle ]
 }
 
 # One editor run under `timeout -s KILL $UNITY_TIMEOUT`. UNITY_RUN_LABEL (the pass) and UNITY_TIMEOUT_VAR (the

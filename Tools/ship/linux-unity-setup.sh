@@ -97,10 +97,14 @@ pick_image() {
 
 has_android() { [ -d "$UNITY_ROOT/$ANDROID_REL/SDK" ] && [ -d "$UNITY_ROOT/$ANDROID_REL/NDK" ]; }
 
-# Establish process visibility with deletion's privileges; incomplete inspection refuses too.
+# Establish process visibility with deletion's privileges.
+unity_pids_as_root() {
+  as_root env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids \"\$@\"" _ "$@"
+}
+
 refuse_editor_in_use() {
   local remaining
-  remaining="$(as_root env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids strict")" \
+  remaining="$(unity_pids_as_root strict)" \
     || die "cannot inspect processes safely; refusing to replace $UNITY_ROOT"
   [ -z "$remaining" ] || die "cannot replace $UNITY_ROOT while Unity processes remain (PIDs:$remaining); close them and re-run setup"
 }
