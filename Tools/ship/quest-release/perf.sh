@@ -5,7 +5,7 @@ qr_perf_now() { date +%s; }
 qr_perf_pid_sleep() { sleep 0.2; }
 
 qr_perf_report() {
-  local scene version_name version_code sha rc
+  local scene version_name version_code sha rc summary
   scene="$(jq -r 'index("-scene") as $i | if $i == null then "default" else .[$i+1] // "default" end' <<< "$QR_LAUNCH_ARGS")"
   version_name="$(printf '%s\n' "$perf_package" | sed -n 's/.*versionName=\([^[:space:]]*\).*/\1/p' | head -n1)"
   version_code="$(printf '%s\n' "$perf_package" | sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' | head -n1)"
@@ -49,11 +49,12 @@ qr_perf_report() {
     else empty end),
     (if .message != "" then .message else empty end)
   ' "$QR_RUN_DIR/perf-summary.json" > "$QR_RUN_DIR/perf-summary.txt" || return 3
-  qr_set perf "$(cat "$QR_RUN_DIR/perf-summary.txt")"
+  summary="$(cat "$QR_RUN_DIR/perf-summary.txt")" || return 3
+  qr_set perf "$summary" || return 3
   case "$(jq -r .overall "$QR_RUN_DIR/perf-summary.json")" in
     PASS|REPORT) rc=0 ;; FAIL) rc=1 ;; *) rc=3 ;;
   esac
-  qr_set perf_result "$rc"
+  qr_set perf_result "$rc" || return 3
   perf_reported=1
   return "$rc"
 }
@@ -209,21 +210,27 @@ qr_perf_locked() (
 # The owner runs this AFTER draining the worker group. A slow EXIT trap may be
 # killed by the existing bounded drain; the durable marker keeps cleanup owned.
 qr_perf_cancel() {
-  local marker="$QR_RUN_DIR/perf-active" serial dir
+  local marker="$QR_RUN_DIR/perf-active" serial dir summary
   [ -f "$marker" ] || return 0
   serial="$(head -n1 "$marker")"; dir="$(tail -n1 "$marker")"
-  ( local QR_PERF_RUN_ROOT="$QR_RUN_DIR"
+  summary="$(
+    local QR_PERF_RUN_ROOT="$QR_RUN_DIR"
     QUEST_SERIAL="$serial"; QR_RUN_DIR="$dir"
-    local perf_prox=1 perf_error='capture cancelled' perf_model='' perf_package='' perf_mode=report
+    local perf_prox=1 perf_error='capture cancelled' perf_model='' perf_package='' perf_mode=report perf_reported=0
     local perf_thermal_start=unavailable perf_thermal_end=unavailable
     qr_perf_restore || true
-    qr_perf_report || true
-    # Best effort only: even failed/timed-out restoration cannot retain run
-    # ownership. The summary carries the manual recovery command instead.
-    rm -f "$marker"
-  )
-  qr_set perf 'INFRA: capture cancelled (see per-device performance summary)'
-  qr_set perf_result 3
+    qr_perf_report || true # A published INFRA report also returns 3.
+    if [ "$perf_reported" = 1 ]; then
+      printf '%s\n' 'INFRA: capture cancelled (see per-device performance summary)'
+    else
+      printf 'INFRA: per-device performance summary could not be published: %s\n' "$perf_error"
+    fi
+  )"
+  # Surface the recovery command before discarding the marker, even if the
+  # owner summary cannot be written either. Cancellation still releases the lock.
+  qr_set perf "$summary" || printf '%s\n' "$summary"
+  qr_set perf_result 3 || true
+  rm -f "$marker"
 }
 
 qr_perf_device() {
