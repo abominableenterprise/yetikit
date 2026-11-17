@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# test-all: slow linux-unity.sh
+# test-all: slow linux-unity.sh linux-unity-kill.sh
 # Duration parsing and exact boundaries, without wall-clock waits.
 # shellcheck disable=SC2016,SC2034
 set -euo pipefail
-script="$(cd "$(dirname "$0")/.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # Load only the diagnostic helper, never the entry point. Arithmetic errors fail in a subshell.
-eval "$(awk '/^report_killed\(\) \{/ { copy=1 } copy { print } copy && /^}/ { exit }' "$script")"
+# shellcheck source=Tools/ship/lib/linux-unity-kill.sh
+. "$(dirname "$0")/../lib/linux-unity-kill.sh"
 log() { printf '[linux-unity] %s\n' "$*" >&2; }
 diagnose() {
   rc=0
-  ( UNITY_TIMEOUT="$duration" UNITY_TIMEOUT_VAR="$var" UNITY_RUN_LABEL=fixture report_killed "$1" ) \
+  ( UNITY_TIMEOUT="$duration" UNITY_TIMEOUT_VAR="$var" UNITY_RUN_LABEL=fixture report_killed "$1" "" "" ) \
     2>"$tmp/err" || rc=$?
 }
 for var in UNITY_TIMEOUT UNITY_GFX_TIMEOUT APK_TIMEOUT; do

@@ -43,8 +43,8 @@
 #                       Every test command: when all failures of a pass are in Tools/ship/known-flakes.txt, they rerun
 #                       once (<pass>-retry.xml) and a green rerun passes. The noise revert and --keep work as in open.
 #                       When every pass passed but the noise revert failed (another git command kept .git/index.lock
-#                       through scene-noise.sh's retries), test reprints the totals and exits 3 (NOISE_REVERT_RC), and so
-#                       does scene once rebuilt: rerun only the printed Tools/ship/scene-noise.sh command
+#                       through scene-noise.sh's retries), test exits 3 (NOISE_REVERT_RC), as does scene once rebuilt:
+#                       rerun only the printed Tools/ship/scene-noise.sh command
 #   stop                kill the editor and Xvfb this script started (pidfile $OUT_DIR/linux-unity.pid)
 #   all                 setup, activate, open, test editmode (keeps the licence, including on failure)
 #
