@@ -15,7 +15,13 @@ qr_perf_note_device() {
 
 qr_perf_restore() {
   [ "$perf_prox" = 1 ] || return 0
-  if QR_TIMEBOX_KILL_AFTER=1 qr_timebox "${QR_PERF_RESTORE_WAIT:-10}" adb -s "$QUEST_SERIAL" shell am broadcast -a com.oculus.vrpowermanager.automation_disable >> "$QR_RUN_DIR/perf-prox.log" 2>&1; then
+  local log="$QR_RUN_DIR/perf-prox.log"
+  # Do not skip the safety broadcast just because its log cannot be opened.
+  if ! ( : >> "$log" ); then
+    qr_log 'WARN: cannot write perf-prox.log; attempting proximity restoration anyway'
+    log=/dev/null
+  fi
+  if QR_TIMEBOX_KILL_AFTER=1 qr_timebox "${QR_PERF_RESTORE_WAIT:-10}" adb -s "$QUEST_SERIAL" shell am broadcast -a com.oculus.vrpowermanager.automation_disable >> "$log" 2>&1; then
     perf_prox=0
     # A failed attempt leaves its record for EXIT, cancellation or the next capture.
     [ -z "${marker:-}" ] || rm -f "$marker"
@@ -29,6 +35,7 @@ qr_perf_restore() {
 
 qr_perf_recover_device() (
   local marker="$1" perf_prox=1 perf_error=''
+  [[ "${marker##*/}" =~ ^[0-9a-f]{64}$ ]] || return 3
   {
     IFS= read -r QUEST_SERIAL && IFS= read -r QR_RUN_DIR
   } < "$marker" || return 3
@@ -59,12 +66,19 @@ qr_perf_cancel() {
   if [ -f "$cursor" ]; then
     { IFS= read -r serial && IFS= read -r dir && IFS= read -r sha; } < "$cursor"
   fi
-  for marker in "$QR_PERF_RUN_ROOT"/perf-pending/*; do
-    [[ "${marker##*/}" =~ ^[0-9a-f]{64}$ ]] && [ -f "$marker" ] || continue
-    warning="$(qr_perf_recover_device "$marker")"
+  local recovery_dir="$QR_PERF_RUN_ROOT/perf-pending" recovery=qr_perf_recover_device entry_serial
+  if [ "${QR_PERF_ACTION:-scripted}" != scripted ]; then
+    recovery_dir="${cursor%/*}/perf-manual"
+    recovery=qr_perf_manual_cancel_device
+  fi
+  for marker in "$recovery_dir"/*; do
+    case "${marker##*/}" in *.tmp) continue ;; esac
+    [ -f "$marker" ] || continue
+    warning="$("$recovery" "$marker")"
     [ -n "$warning" ] || continue
     warnings="${warnings:+$warnings$'\n'}$warning"
-    if [ "$(head -n1 "$marker")" = "$serial" ]; then active_warning="$warning"; fi
+    IFS= read -r entry_serial < "$marker"
+    if [ "$entry_serial" = "$serial" ]; then active_warning="$warning"; fi
   done
   if ! qr_perf_cancel_report "$dir" "$sha" "$active_warning"; then
     summary="$summary (per-device performance summary could not be published)"

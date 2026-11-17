@@ -20,6 +20,7 @@
 #   perf [--seconds N] [--warmup S]
 #                     launch installed app, exclude warm-up, capture VrApi and gate/report
 #                     exit 0 PASS/REPORT, 1 gate failed, 3 infrastructure/no data
+#   perf start|stop   bracket a running app; stop writes the same reports
 #   cleanup           remove release worktrees only when safe
 #   summary           print the current run summary
 #   wait [minutes]    read-only, default 45; exit 0 success, 1 failure, 124 timeout
@@ -67,6 +68,8 @@ QR_SHIP_DIR="$QR_DIR"
 . "$QR_DIR/quest-release/perf.sh"
 # shellcheck source=Tools/ship/quest-release/perf-recovery.sh
 . "$QR_DIR/quest-release/perf-recovery.sh"
+# shellcheck source=Tools/ship/quest-release/perf-manual.sh
+. "$QR_DIR/quest-release/perf-manual.sh"
 
 # gate and build at once (two editors, two projects, separate -logFile and output), then wait for both.
 qr_parallel_unity() {

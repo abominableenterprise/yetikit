@@ -26,7 +26,7 @@ qr_perf_report() {
     --argjson seconds "$QR_PERF_SECONDS" --argjson warmup "$QR_PERF_WARMUP" \
     --argjson maxStale "$QR_PERF_MAX_STALE" --argjson maxApp "$QR_PERF_MAX_APP" \
     --arg thermalStart "$perf_thermal_start" --arg thermalEnd "$perf_thermal_end" \
-    --arg scene "$scene" --arg sha "$sha" --arg versionName "${version_name:-unavailable}" \
+    --arg scene "${perf_scene:-$scene}" --arg sha "$sha" --arg versionName "${version_name:-unavailable}" \
     --arg versionCode "${version_code:-unavailable}" --arg error "$perf_error" \
     --arg pid "${perf_pid:-}" \
     --argjson windowStart "${perf_start:-null}" --argjson windowEnd "${perf_end:-null}" \
@@ -88,7 +88,8 @@ qr_perf_apk_sha() {
 # Optional diagnostic: unsupported thermalservice must not make capture fail.
 qr_perf_thermal() {
   local out
-  out="$(qr_adb shell dumpsys thermalservice 2>/dev/null)" || out=''
+  [ "$#" != 0 ] || set -- qr_adb
+  out="$("$@" shell dumpsys thermalservice 2>/dev/null)" || out=''
   out="$(printf '%s\n' "$out" | tr -d '\r' | grep -E 'Thermal Status:|mStatus=' | head -n1)"
   printf '%s\n' "${out:-unavailable}"
 }
@@ -97,9 +98,10 @@ qr_perf_thermal() {
 # Poll through the window, not just at its endpoints; logcat is also PID-bound.
 qr_perf_identity() {
   local pid activity
-  pid="$(qr_launch_pid)" || return 3
+  [ "$#" != 0 ] || set -- qr_adb
+  pid="$(qr_launch_pid "$@")" || return 3
   [ -n "$pid" ] && [ "$pid" = "$perf_pid" ] || return 3
-  activity="$(qr_adb shell dumpsys activity activities 2>/dev/null)" || return 3
+  activity="$("$@" shell dumpsys activity activities 2>/dev/null)" || return 3
   printf '%s\n' "$activity" | awk -v package="$QR_PKG" '
     /mResumedActivity:|topResumedActivity=/ {
       for (i = 1; i <= NF; i++) if (index($i, package "/") == 1) found = 1
@@ -107,8 +109,33 @@ qr_perf_identity() {
     END {exit !found}'
 }
 
+# Bracket the device epoch query on the host to reject transport-delayed edges.
+qr_perf_clock() {
+  local clock query_start
+  query_start="$(qr_perf_now)" || { perf_error='host monotonic clock unavailable'; return 3; }
+  clock="$(QR_TIMEBOX_KILL_AFTER=1 qr_timebox 0.5 adb -s "$QUEST_SERIAL" shell date +%s.%N)" \
+    || { perf_error='adb capture clock query failed or timed out'; return 3; }
+  perf_clock_host_ms="$(qr_perf_now)" || { perf_error='host monotonic clock unavailable'; return 3; }
+  if [ "$((perf_clock_host_ms - query_start))" -ge 500 ]; then
+    perf_error='adb capture clock query exceeded 500ms latency budget'; return 3
+  fi
+  clock="${clock//$'\r'/}"
+  [[ "$clock" =~ ^(0|[1-9][0-9]{0,11})\.[0-9]{9}$ ]] || { perf_error='invalid adb capture clock'; return 3; }
+  perf_clock="$clock"
+}
+
+qr_perf_metadata() {
+  [ "$#" != 0 ] || set -- qr_adb
+  perf_model="$("$@" shell getprop ro.product.model 2>/dev/null)" || perf_error='adb model query failed'
+  perf_package="$("$@" shell dumpsys package "$QR_PKG" 2>/dev/null)" || perf_error='adb package query failed'
+  perf_model="${perf_model//$'\r'/}"
+  perf_package="${perf_package//$'\r'/}"
+  QR_PERF_SHA="$(qr_perf_apk_sha)"
+  perf_mode="$(qr_config_get '.quest.perf.devices // {}' | jq -r --arg model "$perf_model" '.[$model] // "report"')"
+}
+
 qr_perf_capture() {
-  local deadline clock remaining now delay query_start
+  local deadline remaining now delay perf_clock perf_clock_host_ms
   local host_clock_error='host monotonic clock unavailable'
   # am start may return before a cold-started process exists. Keep launch's
   # behaviour unchanged: only perf polls, and warm-up begins after discovery.
@@ -142,19 +169,10 @@ qr_perf_capture() {
   if ! qr_adb logcat -c; then
     perf_error='adb logcat -c failed'; return
   fi
-  # The device timestamp is the capture start. Bracket it on the host and
-  # reject a slow query rather than accepting a window shifted by transport.
-  query_start="$(qr_perf_now)" || { perf_error="$host_clock_error"; return; }
-  clock="$(QR_TIMEBOX_KILL_AFTER=1 qr_timebox 0.5 adb -s "$QUEST_SERIAL" shell date +%s.%N)" \
-    || { perf_error='adb capture clock query failed or timed out'; return; }
-  now="$(qr_perf_now)" || { perf_error="$host_clock_error"; return; }
-  if [ "$((now - query_start))" -ge 500 ]; then
-    perf_error='adb capture clock query exceeded 500ms latency budget'; return
-  fi
-  clock="${clock//$'\r'/}"
-  [[ "$clock" =~ ^(0|[1-9][0-9]{0,11})\.([0-9]{9})$ ]] || { perf_error='invalid adb capture clock'; return; }
-  perf_start="$clock"
-  perf_end="$((BASH_REMATCH[1] + QR_PERF_SECONDS)).${BASH_REMATCH[2]}"
+  qr_perf_clock || return 0 # Report the clock error through perf_error.
+  now="$perf_clock_host_ms"
+  perf_start="$perf_clock"
+  perf_end="$(( ${perf_start%.*} + QR_PERF_SECONDS )).${perf_start#*.}"
   # Wait through the latest possible end of the bracket. Only the exact
   # device interval enters the report, even if a probe delays the dump.
   deadline=$((now + QR_PERF_SECONDS * 1000))
@@ -190,13 +208,8 @@ qr_perf_locked() (
   if ! ( qr_await_device ); then
     perf_error='device check/wait failed'
   else
-    perf_model="$(qr_adb shell getprop ro.product.model 2>/dev/null)" || perf_error='adb model query failed'
-    perf_package="$(qr_adb shell dumpsys package "$QR_PKG" 2>/dev/null)" || perf_error='adb package query failed'
-    perf_model="${perf_model//$'\r'/}"
-    perf_package="${perf_package//$'\r'/}"
-    QR_PERF_SHA="$(qr_perf_apk_sha)"
+    qr_perf_metadata
     qr_perf_note_device || exit 3
-    perf_mode="$(qr_config_get '.quest.perf.devices // {}' | jq -r --arg model "$perf_model" '.[$model] // "report"')"
     # Arm cleanup BEFORE attempting the broadcast: transport can fail after delivery.
     mkdir -p "${marker%/*}" && printf '%s\n%s\n' "$QUEST_SERIAL" "$QR_RUN_DIR" > "$marker.tmp" \
       && mv -f "$marker.tmp" "$marker" || exit 3
@@ -225,9 +238,12 @@ qr_perf_device() {
   qr_set perf_result 3
   qr_perf_note_device || return 3
   rm -f "$QR_RUN_DIR/perf-summary.json" "$QR_RUN_DIR/perf-summary.txt"
-  qr_device_locked qr_perf_locked || rc=$?
+  case "${QR_PERF_ACTION:-scripted}" in
+    scripted) qr_device_locked qr_perf_locked || rc=$? ;;
+    *) qr_device_locked qr_perf_manual_locked || rc=$? ;;
+  esac
   # A refused device lock still needs its own fresh machine-readable outcome.
-  if [ ! -s "$QR_RUN_DIR/perf-summary.json" ]; then
+  if [ ! -s "$QR_RUN_DIR/perf-summary.json" ] && [ "$(qr_get perf_result 3)" = 3 ]; then
     local perf_error='device lock/setup failed' perf_model='' perf_package='' perf_mode=report
     local perf_thermal_start=unavailable perf_thermal_end=unavailable
     : > "$QR_RUN_DIR/perf-logcat.txt"
@@ -239,6 +255,13 @@ qr_perf_device() {
 }
 
 qr_perf_options() {
+  QR_PERF_ACTION=scripted
+  case "${1:-}" in
+    start|stop)
+      QR_PERF_ACTION="$1"; shift
+      [ "$#" = 0 ] || { qr_log 'usage: perf start | perf stop (no duration or warm-up options)'; return 1; }
+      QR_PERF_SECONDS=0; QR_PERF_WARMUP=0 ;;
+  esac
   while [ $# -gt 0 ]; do
     case "$1" in
       --seconds|--warmup)
@@ -246,7 +269,7 @@ qr_perf_options() {
         case "$2" in ''|*[!0-9]*) qr_log 'error: perf: seconds must be integers'; return 1 ;; esac
         if [ "$1" = --seconds ]; then QR_PERF_SECONDS="$2"; else QR_PERF_WARMUP="$2"; fi
         shift ;;
-      *) qr_log 'usage: perf [--seconds N] [--warmup S] (manual windows not yet supported)'; return 1 ;;
+      *) qr_log 'usage: perf [--seconds N] [--warmup S] | perf start | perf stop'; return 1 ;;
     esac
     shift
   done
@@ -254,7 +277,7 @@ qr_perf_options() {
   QR_PERF_RESTORE_WAIT="${QR_PERF_RESTORE_WAIT:-10}"
   qr_positive_seconds QR_PERF_PID_WAIT "$QR_PERF_PID_WAIT" || return 1
   qr_positive_seconds QR_PERF_RESTORE_WAIT "$QR_PERF_RESTORE_WAIT" || return 1
-  qr_positive_seconds 'perf seconds' "$QR_PERF_SECONDS" || return 1
+  [ "$QR_PERF_ACTION" != scripted ] || qr_positive_seconds 'perf seconds' "$QR_PERF_SECONDS" || return 1
   case "$QR_PERF_WARMUP" in 0) ;; *) qr_positive_seconds 'perf warmup' "$QR_PERF_WARMUP" || return 1 ;; esac
   QR_PERF_SHA=unavailable
 }
