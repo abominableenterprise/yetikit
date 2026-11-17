@@ -535,10 +535,16 @@ check 'wait fails mixed perf and preserves both per-device summaries' \
 
 # Real qr_main owner/traps, real run lock and real cancel/drain; only adb and
 # capture sleeping are fake. Readiness is published inside the capture window.
-for cancel_fault in none restore-hang; do
+for cancel_fault in none restore-hang report-blocked; do
 reset_case
-echo "$cancel_fault" > "$tmp/state/a/fault"
-export QR_PERF_TEST_TMP="$tmp" QR_PERF_CANCEL=1 QUEST_SERIAL="$a" QR_PERF_RESTORE_WAIT=1
+if [ "$cancel_fault" = report-blocked ]; then
+  echo restore > "$tmp/state/a/fault"
+  cancel_serials="$a,$b"
+else
+  echo "$cancel_fault" > "$tmp/state/a/fault"
+  cancel_serials="$a"
+fi
+export QR_PERF_TEST_TMP="$tmp" QR_PERF_CANCEL=1 QUEST_SERIAL="$cancel_serials" QR_PERF_RESTORE_WAIT=1
 if declare -F qr_perf >/dev/null; then
   set -m
   qr_fixture_bash "$here/quest-release-perf.test.sh" --cancel-worker > "$tmp/cancel.out" 2>&1 & owner=$!
@@ -559,6 +565,10 @@ if declare -F qr_perf >/dev/null; then
     [ -z "$group" ] || kill -KILL -- "-$group" 2>/dev/null || true
     kill -KILL -- "-$owner" 2>/dev/null || true
   ) & watchdog=$!
+  if [ "$cancel_fault" = report-blocked ]; then
+    # A directory in place of the report simulates a write failure even as root.
+    mkdir "$run_dir/devices/$a/perf-summary.json"
+  fi
   cancel_started=$SECONDS
   kill -TERM "$owner" 2>/dev/null || true
   rc=0; wait "$owner" || rc=$?
@@ -578,6 +588,10 @@ if declare -F qr_perf >/dev/null; then
   if [ "$cancel_fault" = none ]; then
     check 'TERM drains capture and logs proximity restoration before publishing cancellation and releasing lock' \
       '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -f "$tmp/early-result" ] && grep -q "^cmd=perf$" "$QUEST_LOG_ROOT/last-result" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result" && json_is '\''.overall != "PASS"'\'''
+  elif [ "$cancel_fault" = report-blocked ]; then
+    recovery="adb -s $a shell am broadcast -a com.oculus.vrpowermanager.automation_disable"
+    check 'failed per-device publication puts manual recovery in the owner summary before removing the marker' \
+      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ -d "$run_dir/devices/$a/perf-summary.json" ] && [ -s "$tmp/state/a/restore-attempts" ] && ! restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -e "$run_dir/perf-active" ] && grep -Fq "$recovery" "$run_dir/summary.txt" && grep -Fq "$recovery" "$tmp/cancel.out"'
   else
     check 'hung restore after TERM is bounded, warns in the per-device summary and removes the marker' \
       '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ "$((SECONDS - cancel_started))" -le 8 ] && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && [ ! -e "$run_dir/perf-active" ] && json_is '\''.overall == "INFRA" and (.message | contains("WARN: proximity sensor may still be disabled; run: adb -s"))'\'' && grep -Fq "shell am broadcast -a com.oculus.vrpowermanager.automation_disable" "$run_dir/perf-summary.txt" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result"'

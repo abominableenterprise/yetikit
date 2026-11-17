@@ -136,7 +136,7 @@ qr_run_step() {
     # it already exists on the child's first timeslice. Bash's $$ remains the lock owner in this subshell.
     kill -0 "$$" 2>/dev/null || exit 1
     [ "$(cat "$d/pid" 2>/dev/null)" = "$$" ] || exit 1
-    QR_STEP_GROUP=1; "$@"
+    "$@"
   ) &
   if ! { printf '%s\n' "$!" > "$d/group" && touch "$step/ready"; }; then
     rc=1
@@ -151,18 +151,12 @@ qr_run_step() {
     return 1
   fi
   wait "$QR_ACTIVE_STEP" || rc=$?
-  # timeout --foreground kills only the editor. Drain compiler/Gradle descendants on normal step completion
-  # too, before the owner publishes last-result or releases its lock (including failed builds inside all).
+  # Drain any remaining step workers before publishing last-result or releasing the lock.
   qr_drain_group "$QR_ACTIVE_STEP"
   rm -f "$d/group"
   rm -rf "$step"
   QR_ACTIVE_STEP=""
   return "$rc"
-}
-
-# ps uses a numeric process-group identity only, never a process-name search. Zombies have already terminated.
-qr_group_alive() {
-  ps -axo pgid=,stat= | awk -v group="$1" '$1 == group && $2 !~ /^Z/ { alive=1 } END { exit !alive }'
 }
 
 # Async editor/watchdog jobs can inherit ignored INT; always terminate with TERM. Resume stopped credential

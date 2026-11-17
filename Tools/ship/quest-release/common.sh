@@ -116,44 +116,8 @@ overall:     $(qr_get overall)"
   if [ -n "${QR_RUN_DIR:-}" ] && [ -d "$QR_RUN_DIR" ]; then printf '%s\n' "$block" > "$QR_RUN_DIR/summary.txt"; fi
 }
 
-# --- time box ---------------------------------------------------------------------------------------------------------------
-# Run "$@" for at most $1 seconds: gtimeout (coreutils) when present, else a background watchdog that sends
-# TERM, then KILL 60 s later (callers may shorten QR_TIMEBOX_KILL_AFTER).
-# A timeout returns 124 either way.
-qr_timebox() {
-  local secs="$1" pid w rc fired kill_after="${QR_TIMEBOX_KILL_AFTER:-60}"
-  shift
-  if command -v gtimeout >/dev/null 2>&1; then
-    # The release step already owns a cancellable process group; do not let timeout move the editor out of it.
-    if [ "${QR_STEP_GROUP:-}" = 1 ]; then
-      rc=0; gtimeout --foreground -k "$kill_after" "$secs" "$@" || rc=$?
-    else
-      rc=0; gtimeout -k "$kill_after" "$secs" "$@" || rc=$?
-    fi
-    [ "$rc" = 124 ] && qr_log "timed out after ${secs}s: ${1##*/}"
-    return "$rc"
-  fi
-  fired="$(mktemp "${TMPDIR:-/tmp}/qr-timebox.XXXXXX")" && rm -f "$fired"
-  "$@" &
-  pid=$!
-  (
-    # On TERM (the run ended) stop every sleep this watchdog started, even one forked a moment before the signal.
-    trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM
-    sleep "$secs" &
-    wait
-    if kill -0 "$pid" 2>/dev/null; then
-      : > "$fired"; kill -TERM "$pid" 2>/dev/null
-      sleep "$kill_after" &
-      wait
-      kill -KILL "$pid" 2>/dev/null
-    fi
-  ) >/dev/null 2>&1 &
-  w=$!
-  rc=0; wait "$pid" || rc=$?
-  kill -TERM "$w" 2>/dev/null; wait "$w" 2>/dev/null
-  if [ -f "$fired" ]; then rm -f "$fired"; qr_log "timed out after ${secs}s: ${1##*/}"; return 124; fi
-  return "$rc"
-}
+# shellcheck source=Tools/ship/quest-release/timebox.sh
+. "$QR_SHIP_DIR/quest-release/timebox.sh"
 
 # --- Unity ------------------------------------------------------------------------------------------------------------------
 # Use the validated config version; reject worktrees using a different editor.
