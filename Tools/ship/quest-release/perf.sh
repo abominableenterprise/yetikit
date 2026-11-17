@@ -1,12 +1,24 @@
 # shellcheck shell=bash
 # Scripted compositor capture. Keep all device mutations inside the headset lock.
 qr_perf_sleep() { sleep "$1"; }
-qr_perf_now() { date +%s; }
+# Monotonic milliseconds; stock macOS Bash has neither EPOCHREALTIME nor GNU date.
+qr_perf_now() {
+  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e '
+    my $now = clock_gettime(CLOCK_MONOTONIC);
+    defined $now or exit 1;
+    printf "%.0f\n", 1000 * $now;'
+}
 qr_perf_pid_sleep() { sleep 0.2; }
 
 qr_perf_report() {
   local scene version_name version_code sha rc summary
-  scene="$(jq -r 'index("-scene") as $i | if $i == null then "default" else .[$i+1] // "default" end' <<< "$QR_LAUNCH_ARGS")"
+  scene="$(jq -r '
+    def scene: index("-scene") as $i | if $i == null then null else .[$i+1] end;
+    scene // ([range(0; length) as $i | select(.[$i:$i+2] == ["--es", "unity"]) |
+      .[$i+2] // empty |
+      [match("\"[^\"]*\"|[^\\s\"]+"; "g").string | sub("^\"|\"$"; ""; "g")] |
+      scene // empty] | last) // "default"
+  ' <<< "$QR_LAUNCH_ARGS")"
   version_name="$(printf '%s\n' "$perf_package" | sed -n 's/.*versionName=\([^[:space:]]*\).*/\1/p' | head -n1)"
   version_code="$(printf '%s\n' "$perf_package" | sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' | head -n1)"
   sha="${QR_PERF_SHA:-unavailable}"
@@ -81,27 +93,6 @@ qr_perf_thermal() {
   printf '%s\n' "${out:-unavailable}"
 }
 
-qr_perf_restore() {
-  [ "$perf_prox" = 1 ] || return 0
-  # Clear only after success: EXIT retries a failed explicit restoration.
-  if QR_TIMEBOX_KILL_AFTER=1 qr_timebox "${QR_PERF_RESTORE_WAIT:-10}" adb -s "$QUEST_SERIAL" shell am broadcast -a com.oculus.vrpowermanager.automation_disable >> "$QR_RUN_DIR/perf-prox.log" 2>&1; then
-    perf_prox=0
-    # EXIT retries also own cleanup, but must not clear another device's marker.
-    [ "${perf_reported:-0}" != 1 ] || qr_perf_clear_marker
-  else
-    local warning="WARN: proximity sensor may still be disabled; run: adb -s $QUEST_SERIAL shell am broadcast -a com.oculus.vrpowermanager.automation_disable"
-    perf_error="${perf_error:+$perf_error; }adb proximity restoration failed or timed out (see perf-prox.log); $warning"
-    qr_log "$warning"
-    return 3
-  fi
-}
-
-# Keep recovery owned until a complete summary exists, including on EXIT retry.
-qr_perf_clear_marker() {
-  local marker="$QR_PERF_RUN_ROOT/perf-active"
-  if [ "$(head -n1 "$marker" 2>/dev/null)" = "$QUEST_SERIAL" ] && [ "$(tail -n1 "$marker" 2>/dev/null)" = "$QR_RUN_DIR" ]; then rm -f "$marker"; fi
-}
-
 # Fail closed if the launched process disappears/restarts or loses foreground.
 # Poll through the window, not just at its endpoints; logcat is also PID-bound.
 qr_perf_identity() {
@@ -117,28 +108,32 @@ qr_perf_identity() {
 }
 
 qr_perf_capture() {
-  local deadline clock remaining
+  local deadline clock remaining now delay query_start
+  local host_clock_error='host monotonic clock unavailable'
   # am start may return before a cold-started process exists. Keep launch's
   # behaviour unchanged: only perf polls, and warm-up begins after discovery.
-  deadline=$(( $(qr_perf_now) + QR_PERF_PID_WAIT ))
+  now="$(qr_perf_now)" || { perf_error="$host_clock_error"; return; }
+  deadline=$((now + QR_PERF_PID_WAIT * 1000))
   while :; do
-    remaining=$((deadline - $(qr_perf_now)))
+    remaining=$((deadline - now))
     if [ "$remaining" -le 0 ]; then
       perf_error="target app has no live PID after ${QR_PERF_PID_WAIT}s"; return
     fi
-    perf_pid="$(QR_TIMEBOX_KILL_AFTER=1 qr_launch_pid qr_timebox "$remaining" adb -s "$QUEST_SERIAL")" \
+    printf -v delay '%d.%03d' "$((remaining / 1000))" "$((remaining % 1000))"
+    perf_pid="$(QR_TIMEBOX_KILL_AFTER=1 qr_launch_pid qr_timebox "$delay" adb -s "$QUEST_SERIAL")" \
       || { perf_error='initial app PID probe failed or timed out'; return; }
-    if [ "$(qr_perf_now)" -gt "$deadline" ]; then
+    now="$(qr_perf_now)" || { perf_error="$host_clock_error"; return; }
+    if [ "$now" -gt "$deadline" ]; then
       perf_error="target app PID probe exceeded ${QR_PERF_PID_WAIT}s deadline"; return
     fi
     if [ -n "$perf_pid" ]; then
       [[ "$perf_pid" =~ ^[0-9]+$ ]] || { perf_error='target app has multiple live PIDs'; return; }
       break
     fi
-    if [ "$(qr_perf_now)" -ge "$deadline" ]; then
-      perf_error="target app has no live PID after ${QR_PERF_PID_WAIT}s"; return
+    if [ "$now" -lt "$deadline" ]; then
+      qr_perf_pid_sleep
+      now="$(qr_perf_now)" || { perf_error="$host_clock_error"; return; }
     fi
-    qr_perf_pid_sleep
   done
   qr_perf_sleep "$QR_PERF_WARMUP"
   qr_perf_identity || { perf_error='target app identity/foreground lost during warm-up'; return; }
@@ -147,22 +142,33 @@ qr_perf_capture() {
   if ! qr_adb logcat -c; then
     perf_error='adb logcat -c failed'; return
   fi
-  # Use the device's epoch for logcat boundaries (host clocks may differ).
-  # Anchor elapsed time BEFORE the clock query so its transport cost cannot
-  # extend the requested window. Slow transports may fail coverage, never pass
-  # by diluting hitches with healthy samples collected after the deadline.
-  deadline=$(( $(qr_perf_now) + QR_PERF_SECONDS ))
-  clock="$(qr_adb shell date +%s)" || { perf_error='adb capture clock query failed'; return; }
+  # The device timestamp is the capture start. Bracket it on the host and
+  # reject a slow query rather than accepting a window shifted by transport.
+  query_start="$(qr_perf_now)" || { perf_error="$host_clock_error"; return; }
+  clock="$(QR_TIMEBOX_KILL_AFTER=1 qr_timebox 0.5 adb -s "$QUEST_SERIAL" shell date +%s.%N)" \
+    || { perf_error='adb capture clock query failed or timed out'; return; }
+  now="$(qr_perf_now)" || { perf_error="$host_clock_error"; return; }
+  if [ "$((now - query_start))" -ge 500 ]; then
+    perf_error='adb capture clock query exceeded 500ms latency budget'; return
+  fi
   clock="${clock//$'\r'/}"
-  [[ "$clock" =~ ^[0-9]+$ ]] || { perf_error='invalid adb capture clock'; return; }
-  perf_start="$clock"; perf_end=$((perf_start + QR_PERF_SECONDS))
-  while [ "$(qr_perf_now)" -lt "$deadline" ]; do
-    qr_perf_sleep 1
+  [[ "$clock" =~ ^(0|[1-9][0-9]{0,11})\.([0-9]{9})$ ]] || { perf_error='invalid adb capture clock'; return; }
+  perf_start="$clock"
+  perf_end="$((BASH_REMATCH[1] + QR_PERF_SECONDS)).${BASH_REMATCH[2]}"
+  # Wait through the latest possible end of the bracket. Only the exact
+  # device interval enters the report, even if a probe delays the dump.
+  deadline=$((now + QR_PERF_SECONDS * 1000))
+  while [ "$now" -lt "$deadline" ]; do
+    remaining=$((deadline - now))
+    delay=1
+    if [ "$remaining" -lt 1000 ]; then printf -v delay '0.%03d' "$remaining"; fi
+    qr_perf_sleep "$delay"
     if ! qr_perf_identity; then
       perf_error='target app identity/foreground lost during capture'; break
     fi
+    now="$(qr_perf_now)" || { perf_error="$host_clock_error"; return; }
   done
-  qr_adb logcat -d -v epoch --pid="$perf_pid" -s VrApi > "$QR_RUN_DIR/perf-logcat.txt" 2> "$QR_RUN_DIR/perf-adb.err" \
+  qr_adb logcat -d -v epoch -v usec --pid="$perf_pid" -s VrApi > "$QR_RUN_DIR/perf-logcat.txt" 2> "$QR_RUN_DIR/perf-adb.err" \
     || perf_error='adb logcat capture failed'
   perf_thermal_end="$(qr_perf_thermal)"
 }
@@ -173,8 +179,14 @@ qr_perf_locked() (
   local perf_thermal_start=unavailable perf_thermal_end=unavailable
   : > "$QR_RUN_DIR/perf-logcat.txt"
   # This subshell's cleanup leaves qr_device_locked's lock/cancel traps intact.
+  local marker
+  marker="$(qr_perf_marker)" || exit 3
   trap 'qr_perf_restore' EXIT
-  trap 'perf_error="capture cancelled"; qr_perf_restore; qr_perf_report; [ "$perf_prox" != 0 ] || qr_perf_clear_marker; exit 3' HUP INT TERM
+  trap 'exit 3' HUP INT TERM
+  if [ -f "$marker" ]; then
+    perf_prox=1
+    if ! qr_perf_restore; then qr_perf_report || true; exit 3; fi
+  fi
   if ! ( qr_await_device ); then
     perf_error='device check/wait failed'
   else
@@ -183,10 +195,11 @@ qr_perf_locked() (
     perf_model="${perf_model//$'\r'/}"
     perf_package="${perf_package//$'\r'/}"
     QR_PERF_SHA="$(qr_perf_apk_sha)"
+    qr_perf_note_device || exit 3
     perf_mode="$(qr_config_get '.quest.perf.devices // {}' | jq -r --arg model "$perf_model" '.[$model] // "report"')"
     # Arm cleanup BEFORE attempting the broadcast: transport can fail after delivery.
-    printf '%s\n%s\n' "$QUEST_SERIAL" "$QR_RUN_DIR" > "$QR_PERF_RUN_ROOT/perf-active.tmp" \
-      && mv -f "$QR_PERF_RUN_ROOT/perf-active.tmp" "$QR_PERF_RUN_ROOT/perf-active" || exit 3
+    mkdir -p "${marker%/*}" && printf '%s\n%s\n' "$QUEST_SERIAL" "$QR_RUN_DIR" > "$marker.tmp" \
+      && mv -f "$marker.tmp" "$marker" || exit 3
     perf_prox=1
     if [ -n "$perf_error" ]; then
       : # Preserve metadata transport failure; report fields as unavailable.
@@ -203,40 +216,14 @@ qr_perf_locked() (
   qr_perf_restore || true
   local rc=0
   qr_perf_report || rc=$?
-  [ "$perf_prox" != 0 ] || qr_perf_clear_marker
   exit "$rc"
 )
-
-# The owner runs this AFTER draining the worker group. A slow EXIT trap may be
-# killed by the existing bounded drain; the durable marker keeps cleanup owned.
-qr_perf_cancel() {
-  local marker="$QR_RUN_DIR/perf-active" serial dir summary
-  [ -f "$marker" ] || return 0
-  serial="$(head -n1 "$marker")"; dir="$(tail -n1 "$marker")"
-  summary="$(
-    local QR_PERF_RUN_ROOT="$QR_RUN_DIR"
-    QUEST_SERIAL="$serial"; QR_RUN_DIR="$dir"
-    local perf_prox=1 perf_error='capture cancelled' perf_model='' perf_package='' perf_mode=report perf_reported=0
-    local perf_thermal_start=unavailable perf_thermal_end=unavailable
-    qr_perf_restore || true
-    qr_perf_report || true # A published INFRA report also returns 3.
-    if [ "$perf_reported" = 1 ]; then
-      printf '%s\n' 'INFRA: capture cancelled (see per-device performance summary)'
-    else
-      printf 'INFRA: per-device performance summary could not be published: %s\n' "$perf_error"
-    fi
-  )"
-  # Surface the recovery command before discarding the marker, even if the
-  # owner summary cannot be written either. Cancellation still releases the lock.
-  qr_set perf "$summary" || printf '%s\n' "$summary"
-  qr_set perf_result 3 || true
-  rm -f "$marker"
-}
 
 qr_perf_device() {
   local rc=0
   qr_set perf 'INFRA: performance capture did not complete (device lock/setup or cancel)'
   qr_set perf_result 3
+  qr_perf_note_device || return 3
   rm -f "$QR_RUN_DIR/perf-summary.json" "$QR_RUN_DIR/perf-summary.txt"
   qr_device_locked qr_perf_locked || rc=$?
   # A refused device lock still needs its own fresh machine-readable outcome.
@@ -251,16 +238,15 @@ qr_perf_device() {
   return "$rc"
 }
 
-qr_perf() {
-  local serial path run="$QR_RUN_DIR" total=0 rc previous
+qr_perf_options() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --seconds|--warmup)
-        [ $# -ge 2 ] || qr_die "perf: $1 needs seconds"
-        case "$2" in ''|*[!0-9]*) qr_die 'perf: seconds must be integers' ;; esac
+        [ $# -ge 2 ] || { qr_log "error: perf: $1 needs seconds"; return 1; }
+        case "$2" in ''|*[!0-9]*) qr_log 'error: perf: seconds must be integers'; return 1 ;; esac
         if [ "$1" = --seconds ]; then QR_PERF_SECONDS="$2"; else QR_PERF_WARMUP="$2"; fi
         shift ;;
-      *) qr_die 'usage: perf [--seconds N] [--warmup S] (manual windows not yet supported)' ;;
+      *) qr_log 'usage: perf [--seconds N] [--warmup S] (manual windows not yet supported)'; return 1 ;;
     esac
     shift
   done
@@ -270,8 +256,13 @@ qr_perf() {
   qr_positive_seconds QR_PERF_RESTORE_WAIT "$QR_PERF_RESTORE_WAIT" || return 1
   qr_positive_seconds 'perf seconds' "$QR_PERF_SECONDS" || return 1
   case "$QR_PERF_WARMUP" in 0) ;; *) qr_positive_seconds 'perf warmup' "$QR_PERF_WARMUP" || return 1 ;; esac
-  QR_PERF_RUN_ROOT="$QR_RUN_DIR"
   QR_PERF_SHA=unavailable
+}
+
+qr_perf() {
+  local serial path run="$QR_RUN_DIR" total=0 rc previous
+  QR_PERF_RUN_ROOT="$QR_RUN_DIR"
+  QR_PERF_CURSOR="$(qr_lock_dir)/perf-device"
   qr_set device_results ''; qr_set multi_command ''; qr_set overall ''
   if [ "${#QR_SERIALS[@]}" = 1 ]; then qr_perf_device; return $?; fi
   qr_set perf 'per-device performance captures (see below)'

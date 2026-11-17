@@ -65,6 +65,8 @@ QR_SHIP_DIR="$QR_DIR"
 . "$QR_DIR/quest-release/multi.sh"
 # shellcheck source=Tools/ship/quest-release/perf.sh
 . "$QR_DIR/quest-release/perf.sh"
+# shellcheck source=Tools/ship/quest-release/perf-recovery.sh
+. "$QR_DIR/quest-release/perf-recovery.sh"
 
 # gate and build at once (two editors, two projects, separate -logFile and output), then wait for both.
 qr_parallel_unity() {
@@ -161,6 +163,8 @@ qr_main() {
   fi
   # wait is read-only too: it only watches the current run.
   if [ "$cmd" = wait ]; then ( qr_wait "$@" ) || rc=$?; return "$rc"; fi
+  # Parse perf overrides in the owner so even a pre-worker cancellation has them.
+  [ "$cmd" != perf ] || qr_perf_options "$@" || return 1
   mkdir -p "$QR_LOGS" 2>/dev/null
   case "$cmd" in
     all|prepare|gate|build|verify|install|launch|rollback|perf|cleanup)
@@ -203,7 +207,7 @@ qr_main() {
       else
         qr_run_step "qr_$cmd" "$@" || rc=$?
       fi ;;
-    perf) qr_run_step qr_perf "$@" || rc=$? ;;
+    perf) qr_run_step qr_perf || rc=$? ;;
     gate|build|verify|cleanup)
       qr_load_state
       qr_run_step "qr_$cmd" "$@" || rc=$? ;;

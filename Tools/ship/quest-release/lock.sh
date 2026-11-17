@@ -182,7 +182,7 @@ qr_cancel() {
     qr_drain_group "$group"
     QR_ACTIVE_STEP=""
   fi
-  [ ! -f "$(qr_state_file)" ] || qr_load_state
+  if [ "$cmd" = perf ] || [ -f "$(qr_state_file)" ]; then qr_load_state; fi
   [ "$cmd" != perf ] || qr_perf_cancel
   qr_summary
   qr_lock_result "$cmd" 1

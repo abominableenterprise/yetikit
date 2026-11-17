@@ -27,11 +27,12 @@ def gate($value; $limit):
   # gate. Epoch boundaries come from the device, independently of host time.
   select($windowStart == null or (.time >= $windowStart and .time < $windowEnd))] as $rows |
 ($rows | length) as $n |
-# Allow one boundary sample of jitter, never a short surviving fragment or gap.
+# Allow one boundary sample of jitter, but a gap of two sample periods
+# means an interior sample was lost. Split one vs. two seconds at 1.5s.
 ([$rows[].time] | sort) as $times |
 ($n >= ([$seconds - 1, 1] | max) and complete($rows; "time") and
  ($times[-1] - $times[0]) >= ([$seconds - 2, 0] | max) and
- all(range(1; $n); ($times[.] - $times[. - 1]) > 0 and ($times[.] - $times[. - 1]) <= 2.5)) as $covered |
+ all(range(1; $n); ($times[.] - $times[. - 1]) > 0 and ($times[.] - $times[. - 1]) <= 1.5)) as $covered |
 (if complete($rows; "fps") and complete($rows; "stale") and ([$rows[].fps] | add) > 0
  then ([$rows[].stale] | add) / ([$rows[].fps] | add) * 100 else "unavailable" end) as $stale |
 (if complete($rows; "app") then [$rows[].app] | p95 else "unavailable" end) as $app |

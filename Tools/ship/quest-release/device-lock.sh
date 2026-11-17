@@ -16,7 +16,15 @@ qr_device_locked() (
   # Reuse the run lock's race-safe stale reclamation, but never its held flag.
   qr_lock_dir() { printf '%s\n' "$device_lock"; }
   QR_LOCK_HELD=""
-  qr_lock_acquire || exit 1
+  if [ "${QR_DEVICE_RESUME_OWNER:-0}" = 1 ] && [ -n "$group" ] &&
+    [ "$(cat "$device_lock/pid" 2>/dev/null)" = "$$" ] &&
+    [ "$(cat "$device_lock/group" 2>/dev/null)" = "$group" ] && ! qr_group_alive "$group"; then
+    # Perf cancellation runs after draining. The cancelled worker may have
+    # handed its still-owned lock back to this same live run owner.
+    QR_LOCK_HELD=1
+  else
+    qr_lock_acquire || exit 1
+  fi
   # Cancellation TERM reaches this shell and adb together. Leave the generation
   # for stale reclamation until the outer owner has drained every worker; an
   # EXIT release here would authorize a second consumer during that drain.
