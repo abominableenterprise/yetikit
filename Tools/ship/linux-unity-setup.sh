@@ -97,10 +97,14 @@ pick_image() {
 
 has_android() { [ -d "$UNITY_ROOT/$ANDROID_REL/SDK" ] && [ -d "$UNITY_ROOT/$ANDROID_REL/NDK" ]; }
 
-# Establish process visibility with deletion's privileges; incomplete inspection refuses too.
+# Establish process visibility with deletion's privileges.
+unity_pids_as_root() {
+  as_root env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids \"\$@\"" _ "$@"
+}
+
 refuse_editor_in_use() {
   local remaining
-  remaining="$(as_root env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids strict")" \
+  remaining="$(unity_pids_as_root strict)" \
     || die "cannot inspect processes safely; refusing to replace $UNITY_ROOT"
   [ -z "$remaining" ] || die "cannot replace $UNITY_ROOT while Unity processes remain (PIDs:$remaining); close them and re-run setup"
 }
@@ -112,8 +116,8 @@ replace_base_editor() {
   as_root test -e "$UNITY_ROOT/$DONE_MARK" || return 0
   log "replacing the editor at $UNITY_ROOT (no Android module) with $UNITY_IMAGE"
   refuse_editor_in_use
-  cleanup_unity
-  # Cleanup delays: an editor may have started since the first scan.
+  cleanup_unity require-idle || die "cleanup did not complete; refusing to replace $UNITY_ROOT. Close any Unity processes and re-run setup."
+  # An editor can still start after the cleanup scan; recheck with deletion's privileges.
   refuse_editor_in_use
   as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 }

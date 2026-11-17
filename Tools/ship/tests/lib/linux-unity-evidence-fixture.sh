@@ -14,9 +14,9 @@ import sys
 path = Path(sys.argv[1])
 assert path.resolve().is_relative_to(Path(sys.argv[2]).resolve())
 source = path.read_text()
-needle = '  sleep 2\n  wipe_unity_shared_files\n'
+needle = '  sleep 2 || return\n  wipe_unity_shared_files "$@"\n'
 assert source.count(needle) == 1
-path.write_text(source.replace(needle, '  wipe_unity_shared_files\n'))
+path.write_text(source.replace(needle, '  wipe_unity_shared_files "$@"\n'))
 PY
 run() { : > "$tmp/runs"; rc=0; bash "$script" test "$@" 2>"$tmp/err" || rc=$?; }
 
