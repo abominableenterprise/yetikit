@@ -43,8 +43,8 @@
 #                       Every test command: when all failures of a pass are in Tools/ship/known-flakes.txt, they rerun
 #                       once (<pass>-retry.xml) and a green rerun passes. The noise revert and --keep work as in open.
 #                       When every pass passed but the noise revert failed (another git command kept .git/index.lock
-#                       through scene-noise.sh's retries), test reprints the totals and exits 3 (NOISE_REVERT_RC), and so
-#                       does scene once rebuilt: rerun only the printed Tools/ship/scene-noise.sh command
+#                       through scene-noise.sh's retries), test exits 3 (NOISE_REVERT_RC), as does scene once rebuilt:
+#                       rerun only the printed Tools/ship/scene-noise.sh command
 #   stop                kill the editor and Xvfb this script started (pidfile $OUT_DIR/linux-unity.pid)
 #   all                 setup, activate, open, test editmode (keeps the licence, including on failure)
 #
@@ -125,6 +125,8 @@ log() { printf '[linux-unity] %s\n' "$*" >&2; }
 . "$(dirname "${BASH_SOURCE[0]}")/test-evidence.sh"
 # shellcheck source=Tools/ship/test-stages.sh
 . "$(dirname "${BASH_SOURCE[0]}")/test-stages.sh"
+# shellcheck source=Tools/ship/lib/linux-unity-kill.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/linux-unity-kill.sh"
 # shellcheck source=Tools/ship/linux-unity-seat.sh
 . "$(dirname "${BASH_SOURCE[0]}")/linux-unity-seat.sh"
 die() { log "error: $*"; exit 1; }
@@ -263,17 +265,19 @@ wipe_unity_shared_files() {
 # One editor run under `timeout -s KILL $UNITY_TIMEOUT`. UNITY_RUN_LABEL (the pass) and UNITY_TIMEOUT_VAR (the
 # variable that sets this run's limit) name it in the line printed when it was killed.
 unity() {
-  local rc=0 start elapsed
+  local rc=0 start elapsed events baseline
   test_stage activate-reuse start
   ensure_licence
   test_stage activate-reuse end
   test_editor_begin "$@"
+  events="$(unity_memory_events_file)"
+  baseline="$(unity_memory_events_read "$events")"
   start="$(date +%s.%N)"
   xvfb-run -a -s "-screen 0 1280x1024x24" timeout -s KILL "$UNITY_TIMEOUT" \
     "$UNITY_BIN" -batchmode -projectPath "$PROJECT" "$@" || rc=$?
   if [ "$rc" = 137 ]; then
     elapsed="$(LC_ALL=C awk -v start="$start" -v end="$(date +%s.%N)" 'BEGIN { printf "%.6f", end - start }')"
-    report_killed "$elapsed"
+    report_killed "$elapsed" "$events" "$baseline"
   fi
   test_editor_end
   cleanup_unity
@@ -281,23 +285,6 @@ unity() {
   return $rc
 }
 
-# SIGKILL (137) after $1 seconds: timeout if the limit was reached, else OOM/stop. GNU timeout accepts fractional
-# s/m/h/d durations; zero disables it. Normalize only for diagnosis (timeout validates input). No results are written.
-report_killed() {
-  local label="${UNITY_RUN_LABEL:-editor}" var="${UNITY_TIMEOUT_VAR:-UNITY_TIMEOUT}"
-  log "$label: $(LC_ALL=C awk -v duration="$UNITY_TIMEOUT" -v elapsed="$1" -v var="$var" '
-    BEGIN {
-      unit = substr(duration, length(duration))
-      limit = (duration + 0) * (unit == "m" ? 60 : unit == "h" ? 3600 : unit == "d" ? 86400 : 1)
-      if (limit == 0)
-        printf "killed (SIGKILL) after %s s, timeout disabled (out of memory? stop?); no results", elapsed
-      else if (elapsed >= limit)
-        printf "killed at the %.12g s timeout; no results. Re-run with %s=%.12g", limit, var, limit * 2
-      else
-        printf "killed (SIGKILL) after %s s, before the %.12g s timeout (out of memory? stop?); no results", elapsed, limit
-    }
-  ')"
-}
 # Process start time (field 22 of /proc/<pid>/stat, after the comm field that may hold spaces): with the pid it
 # identifies one process, so `stop` never kills an unrelated process that reused the pid.
 proc_start() {
@@ -405,15 +392,6 @@ cmd_stop() {
   [ "$found" = 1 ] || log "stop: no pidfile ($PIDFILE): nothing this script started is running"
   log "stop done"
 }
-# Results files written by this run's passes (run_pass), for the totals reprinted after a failed noise revert.
-RUN_RESULTS=()
-
-summary() {
-  [ -f "$1" ] || { log "no results in $1"; return; }
-  log "$(basename "$1"): $(grep -m1 -o '<test-run [^>]*' "$1" \
-    | grep -oE '(total|passed|failed|skipped)="[0-9]+"' | tr '\n' ' ')"
-}
-
 # --keep handling for open and test: `--keep <path>` protects a path from the noise revert, a bare `--keep` (last, or
 # followed by an option) skips it. Sets NOISE_SKIP and RUN_KEEP; RUN_ARGS gets the other args.
 parse_keep() {
@@ -574,10 +552,8 @@ run_pass() {
   TEST_EVIDENCE_ONLY=0
   # A crashed or killed editor writes no XML: never read a stale one from an earlier run as this pass's flakes.
   rm -f "$OUT_DIR/$stem.xml" "$OUT_DIR/$stem-retry.xml"
-  RUN_RESULTS+=("$OUT_DIR/$stem.xml")
   unity "$@" -testResults "$OUT_DIR/$stem.xml" -logFile "$OUT_DIR/$stem.log" || rc=$?
-  test_results_summary "$OUT_DIR/$stem.xml"
-  if ! test_evidence "$stem" "$OUT_DIR/$stem.xml" "${TEST_ALLOW_EMPTY:-0}"; then
+  if ! test_results_summary "$stem" "$OUT_DIR/$stem.xml" "${TEST_ALLOW_EMPTY:-0}"; then
     if [ "$rc" = 0 ]; then rc=1; TEST_EVIDENCE_ONLY=1; fi
     return "$rc"
   fi
@@ -591,12 +567,10 @@ run_pass() {
   done <<< "$failed"
   log "$stem: only known flakes failed; rerunning once: $filter"
   while IFS= read -r -d '' f; do args+=("$f"); done < <(without_test_filter "$@")
-  RUN_RESULTS+=("$OUT_DIR/$stem-retry.xml")
   UNITY_RUN_LABEL="$stem-retry"
   unity ${args[@]+"${args[@]}"} -testFilter "$filter" -testResults "$OUT_DIR/$stem-retry.xml" \
     -logFile "$OUT_DIR/$stem-retry.log" || retry_rc=$?
-  test_results_summary "$OUT_DIR/$stem-retry.xml"
-  test_evidence "$stem-retry" "$OUT_DIR/$stem-retry.xml" 0 || return "$rc"
+  test_results_summary "$stem-retry" "$OUT_DIR/$stem-retry.xml" 0 || return "$rc"
   if [ "$retry_rc" = 0 ] && [ -z "$(failed_tests "$OUT_DIR/$stem-retry.xml")" ] \
     && retry_passed_all "$OUT_DIR/$stem-retry.xml" "$failed"; then
     log "flaky-passed: $(tr '\n' ' ' <<< "$failed" | sed 's/ $//')"

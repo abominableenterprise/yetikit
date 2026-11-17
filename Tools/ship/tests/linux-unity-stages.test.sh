@@ -16,7 +16,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 printf 'Importing assets\nScriptCompilation: starting\nCompleted reload\nRunning tests\n' > "$logf"
-printf '<test-run total="1" passed="1" failed="0" skipped="0" />\n' > "$res"
+# Valid multiline NUnit root with reordered counts.
+printf "<test-run skipped='2'\n failed='0' passed='3' total='5' />\n" > "$res"
 EOF
 chmod +x "$UNITY_ROOT/Editor/Unity"
 # Expected order is actual shell execution order. Import and compile are nested
@@ -55,7 +56,13 @@ sed -E 's/^\[linux-unity\] stage //; s/ \+[0-9]+s$//' "$tmp/stages" > "$tmp/orde
 check 'stubbed test prints ordered start/end stages' 'diff -u "$tmp/expected" "$tmp/order"'
 check 'every stage has an elapsed whole-second timestamp' \
   '! grep -vE "^\[linux-unity\] stage [a-z-]+ (start|end) \+[0-9]+s$" "$tmp/stages"'
-check 'the stage file exactly matches the printed stage lines' 'cmp "$tmp/stages" "$OUT_DIR/test-stages.log"'
+counts='total="5" passed="3" failed="0" skipped="2"'
+awk '/stage results start/ { in_results=1 } /stage results end/ { in_results=0 } in_results { print }' \
+  "$OUT_DIR/test-stages.log" > "$tmp/results"
+check 'results stages include counts for both passes in the stage log' \
+  'grep -qFx "[linux-unity] editmode.xml: $counts" "$tmp/results" && grep -qFx "[linux-unity] editmode-gfx.xml: $counts" "$tmp/results"'
+check 'the stage markers match the printed stage lines' \
+  'grep "^\[linux-unity\] stage " "$OUT_DIR/test-stages.log" > "$tmp/stage-markers" && cmp "$tmp/stages" "$tmp/stage-markers"'
 # No changed fixtures: pure still runs and Gfx does not. The file resets per command.
 bash "$script" test pr 2> "$tmp/err"
 check 'test pr writes a fresh stage log and still runs pure when Gfx is empty' \
@@ -65,4 +72,6 @@ printf '#!/bin/sh\nexit 7\n' > "$UNITY_ROOT/Editor/Unity"
 rc=0; EDITMODE_GFX=0 bash "$script" test editmode 2> "$tmp/err" || rc=$?
 check 'failed editor retains exit status and closes fallback timing scopes' \
   '[ "$rc" = 7 ] && grep -q "stage compile end" "$tmp/err" && grep -q "stage pure-pass end" "$tmp/err" && grep -q "stage noise-revert end" "$tmp/err"'
+check 'a pass without XML does not report stale or fabricated counts' \
+  '! grep -q "total=" "$OUT_DIR/test-stages.log"'
 [ "$fails" = 0 ] && echo 'all passed' || { echo "$fails failed"; exit 1; }

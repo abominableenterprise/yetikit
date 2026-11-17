@@ -137,7 +137,14 @@ Tools/yetikit/linux-unity.sh test pr > build/test-pr.log 2>&1 &
 wait-log --pid $! 25
 ```
 
-Logs/results live in `build/` (`OUT_DIR` override), including `test-stages.log`.
+Logs/results live in `build/` (`OUT_DIR` override). `test-stages.log` records
+elapsed stage timing and the total, passed, failed and skipped counts from each
+pass's result XML, including retries. When a direct editor run exits with
+SIGKILL status, the runner also reports its cgroup v2 `memory.events` `oom`
+and `oom_kill` counters and any measurable changes. The counters cover the
+whole cgroup, so a change is a clue, not proof the editor was OOM-killed.
+If the counters are unavailable, the usual kill and timeout diagnosis still
+prints.
 Default limits: `UNITY_TIMEOUT=1800`, `UNITY_GFX_TIMEOUT=3600`, `APK_TIMEOUT=5400`,
 `TASK_CACHE_TIMEOUT=300` seconds. An explicit `UNITY_TIMEOUT` also sets Gfx unless
 `UNITY_GFX_TIMEOUT` is supplied. PR Gfx selection caps at `TEST_PR_GFX_MAX=12`

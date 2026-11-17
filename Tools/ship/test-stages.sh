@@ -17,6 +17,11 @@ test_stages_claim() {
 test_stage() {
   [ -n "${TEST_STAGES_START:-}" ] || return 0
   local line="[linux-unity] stage $1 $2 +$((SECONDS - TEST_STAGES_START))s"
+  test_stage_log "$line"
+}
+
+test_stage_log() {
+  local line="$1"
   printf '%s\n' "$line" >&2
   if [ -n "${TEST_STAGES_LOG:-}" ]; then
     printf '%s\n' "$line" >> "$TEST_STAGES_LOG"
@@ -78,8 +83,16 @@ test_editor_stages() {
 
 test_results_summary() {
   test_stage results start
-  summary "$@"
+  local rc=0 counts
+  if [ ! -f "$2" ]; then log "no results in $2"; fi
+  local TEST_COUNTS
+  test_evidence "$@" || rc=$?
+  if [ -n "$TEST_COUNTS" ]; then
+    counts="[linux-unity] ${2##*/}: $TEST_COUNTS"
+    test_stage_log "$counts"
+  fi
   test_stage results end
+  return "$rc"
 }
 
 # Keep observer ownership outside unity()'s locals so EXIT can clean it up even
@@ -114,7 +127,7 @@ cmd_test() {
   parse_keep "$@"
   set -- ${RUN_ARGS[@]+"${RUN_ARGS[@]}"}
   validate_test_args "$@"
-  local before rc=0 nrc=0 f
+  local before rc=0 nrc=0
   mkdir -p "$OUT_DIR"
   if [ -z "${TEST_STAGES_LOG:-}" ]; then test_stages_begin; fi
   # test has no shell cache-restore step (unlike open); retain that behaviour.
@@ -128,8 +141,7 @@ cmd_test() {
   revert_run_noise_after "$before" || nrc=$?
   test_stage noise-revert end
   [ "$nrc" != 0 ] || return $rc
-  # Preserve a test failure; otherwise reprint totals and the noise recovery command.
+  # Preserve a test failure; otherwise print the noise recovery command.
   [ "$rc" = 0 ] || { log "the noise revert failed too (exit $nrc)"; return $rc; }
-  for f in ${RUN_RESULTS[@]+"${RUN_RESULTS[@]}"}; do [ ! -f "$f" ] || test_results_summary "$f"; done
   noise_revert_failed "$nrc" "$before" "tests passed" --run
 }

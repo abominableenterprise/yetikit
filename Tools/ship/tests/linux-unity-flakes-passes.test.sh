@@ -11,6 +11,7 @@ check "editmode: each pass retries its own flakes (editmode-retry.xml and editmo
   '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/runs")" = 4 ] && [ -f "$OUT_DIR/editmode-retry.xml" ] && [ -f "$OUT_DIR/editmode-gfx-retry.xml" ] && [ "$(grep -c flaky-passed "$tmp/err")" = 2 ]'
 FAKE_FAILS="$ballers" run playmode
 check "playmode retries known flakes too" '[ "$rc" = 0 ] && [ -f "$OUT_DIR/playmode-retry.xml" ] && grep -q flaky-passed "$tmp/err"'
-
+check 'stage log includes separate counts for failed and retried passes' \
+  'grep -Eq "playmode.xml: total=.* failed=\"[1-9][0-9]*\"" "$OUT_DIR/test-stages.log" && grep -Eq "playmode-retry.xml: total=.* failed=\"0\"" "$OUT_DIR/test-stages.log"'
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
