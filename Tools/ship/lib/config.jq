@@ -18,12 +18,38 @@ def noise_keys: ["artRoot", "atlasPath", "codeRegex", "fixedTimestepCount", "fon
   "generatorsRegex", "propsDir", "protectedRegex", "repackRegex", "sourceRegex",
   "specularMaterialPath", "timeManagerPath"];
 def envname: if nonempty then test("^[A-Za-z_][A-Za-z0-9_]*$") else false end;
-# Bash locals can shadow exported signing inputs, including in children such as keytool.
-# Lowercase names and the runner's QR_ namespace are not consumer signing inputs.
-def signing_envname:
-  if nonempty then test("^[A-Z][A-Z0-9_]*$") and (startswith("QR_") | not) else false end;
-def invalid_signing_env($field):
-  invalid("quest.signing.\($field) (use an uppercase variable name starting with A-Z; QR_ is reserved)");
+# Names that the release runner reads as settings or assigns itself are not
+# dedicated signing inputs. Bash also manages or interprets its own variables.
+def reserved_signing_env:
+  startswith("QR_") or startswith("BASH_") or
+  (. as $name | ["ANDROID_SDK_ROOT", "ANDROID_USER_HOME", "HOME", "JAVA_HOME", "KNOWN_FLAKES",
+    "LC_ALL", "PATH", "PROJECT", "QUEST_ADB_WAIT", "QUEST_APK_DIR", "QUEST_BACKUP_ROOT", "QUEST_BUILD_TIMEOUT",
+    "QUEST_CERT_SHA256", "QUEST_GATE_CATEGORIES", "QUEST_GATE_TIMEOUT", "QUEST_KNOWN_FLAKES", "QUEST_LAUNCH_WAIT",
+    "QUEST_LOG_ROOT", "QUEST_MIN_FREE_GB", "QUEST_REPO", "QUEST_SERIAL", "QUEST_WAIT_GRACE", "QUEST_WAIT_POLL",
+    "QUEST_WARM_WORKTREE", "QUEST_WT_ROOT", "UNITY_BIN", "UNITY_HUB_EDITORS", "YETIKIT_CONFIG",
+    "BASH", "BASHOPTS", "BASHPID", "CDPATH", "DIRSTACK", "ENV", "EPOCHREALTIME", "EPOCHSECONDS", "EUID",
+    "FUNCNAME", "GLOBIGNORE", "GROUPS", "HISTCMD", "HISTCONTROL", "HISTFILE", "HISTFILESIZE", "HISTIGNORE",
+    "HISTSIZE", "HISTTIMEFORMAT", "HOSTNAME", "HOSTTYPE", "IFS", "LINENO", "MACHTYPE", "OLDPWD", "OPTARG",
+    "OPTERR", "OPTIND", "OSTYPE", "PIPESTATUS", "POSIXLY_CORRECT", "PPID", "PS0", "PS1", "PS2", "PS3", "PS4",
+    "PWD", "RANDOM", "SECONDS", "SHELLOPTS", "SHLVL", "SRANDOM", "TIMEFORMAT", "TMOUT", "TMPDIR", "UID"] |
+    index($name) != null);
+def signing_env_error($field):
+  .signing[$field] as $name |
+  "quest.signing.\($field)" as $key |
+  if ($name | envname | not) or ($name | test("^[A-Z][A-Z0-9_]*$") | not) then
+    invalid("\($key) (use an uppercase variable name starting with A-Z)")
+  elif ($name | reserved_signing_env) then
+    invalid("\($key) (use a dedicated signing variable; this name is reserved)")
+  # Match the effective defaults in quest-release/config.sh.
+  elif $name == (.whatsNewEnv // "YETIKIT_WHATS_NEW") then
+    invalid("\($key) (must differ from quest.whatsNewEnv)")
+  elif $name == (.prevShaEnv // "YETIKIT_PREV_SHA") then
+    invalid("\($key) (must differ from quest.prevShaEnv)")
+  else empty end;
+def quest_signing_error:
+  first((objects | .quest | objects | select((.signing | type) == "object") |
+    ("keystorePathEnv", "storePassEnv", "keyAliasEnv", (select(.signing | has("keyPassEnv")) | "keyPassEnv")) as $field |
+    signing_env_error($field)), "");
 def packageid: if nonempty then test("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$") else false end;
 # Backup destinations must also be distinct on default case-insensitive macOS volumes.
 def basenames:
@@ -32,7 +58,7 @@ def basenames:
     (map(ascii_downcase) | length == (unique | length))
   else false end;
 if length != 1 then invalid("schema (expected one JSON object)")
-else .[0] |
+else .[0] | quest_signing_error as $signing_error |
 if type != "object" then invalid("schema")
 elif .schema != 1 then invalid("schema (expected 1)")
 elif (.unityVersion | nonempty | not) then invalid("unityVersion")
@@ -71,10 +97,7 @@ elif has("quest") and (.quest | has("perfLogTag")) and (.quest.perfLogTag | none
 elif has("quest") and (.quest | has("whatsNewEnv")) and (.quest.whatsNewEnv | envname | not) then invalid("quest.whatsNewEnv")
 elif has("quest") and (.quest | has("prevShaEnv")) and (.quest.prevShaEnv | envname | not) then invalid("quest.prevShaEnv")
 elif has("quest") and (.quest | has("signing")) and (.quest.signing | type) != "object" then invalid("quest.signing")
-elif has("quest") and (.quest | has("signing")) and (.quest.signing.keystorePathEnv | signing_envname | not) then invalid_signing_env("keystorePathEnv")
-elif has("quest") and (.quest | has("signing")) and (.quest.signing.storePassEnv | signing_envname | not) then invalid_signing_env("storePassEnv")
-elif has("quest") and (.quest | has("signing")) and (.quest.signing.keyAliasEnv | signing_envname | not) then invalid_signing_env("keyAliasEnv")
-elif has("quest") and (.quest.signing // {} | has("keyPassEnv")) and (.quest.signing.keyPassEnv | signing_envname | not) then invalid_signing_env("keyPassEnv")
+elif $signing_error != "" then $signing_error
 elif has("quest") and (.quest | has("dataFiles")) and (.quest.dataFiles | basenames | not) then invalid("quest.dataFiles")
 elif has("quest") and (.quest | has("launchArgs")) and (.quest.launchArgs | strings | not) then invalid("quest.launchArgs")
 elif has("quest") and (.quest | has("launchLogTags")) and (.quest.launchLogTags | launch_log_tags | not) then
