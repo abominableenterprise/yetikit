@@ -1,0 +1,10 @@
+{
+  "name": "YetiKit.Hands",
+  "rootNamespace": "YetiKit.Hands",
+  "references": [
+    "Unity.XR.Hands",
+    "Unity.XR.Interaction.Toolkit",
+    "Unity.InputSystem"
+  ],
+  "autoReferenced": false
+}
