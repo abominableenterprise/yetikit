@@ -762,9 +762,11 @@ case "${1:-}" in
     if [ "${1:-}" = test ]; then test_stages_claim; fi ;;
 esac
 trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
-arm_seat_exit        # runs after the licence return below, so a returned licence releases the seat first
-arm_return_on_exit
+# EXIT handlers run in reverse registration order. Return the licence and seat
+# before Git lock retries can consume stop's grace period.
 case "${1:-}" in scene|lab) chain_exit_trap finish_interrupted_noise ;; esac
+arm_seat_exit
+arm_return_on_exit
 case "${1:-}" in
   setup) shift; cmd_setup "$@" ;;
   apk) shift; cmd_apk "$@" ;;
