@@ -50,13 +50,22 @@ shared packages, documentation and a minimal Unity test Host, not game code.
   One line per link, no other words on that line; the parser is strict.
 - UI PRs: a fresh simulator, browser or editor screenshot (≤768 px wide, at most 2) with the SHA and fixture name.
   Physical-device evidence is for batched candidates only; write "device: pending candidate". Non-visual PRs: list the tests that ran.
-- Verify: run focused tests for the touched files plus `Tools/ship/test-all.sh --changed` while iterating;
-  before opening a PR and the final push, run the selected gate below and check the PR is <=500 changed production lines;
-  list commands and results in the PR body. Keep the existing .github/workflows; add no new GitHub-hosted Actions.
+- Verify: run focused tests for touched code while iterating. Before opening a PR and the final push,
+  run the selected gate below and check the PR is <=500 changed production lines; list commands and
+  results in the PR body. Keep the existing .github/workflows; add no new GitHub-hosted Actions.
 - GATE SCOPE: A PR changing only docs or policy text (no code, build, test, or fixture files)
   runs the repo's short lint/format gate (`python3 -B Tools/ci/check-unity.py && python3 -B Tools/ci/check-whitespace.py && python3 -B Tools/skills/validate.py`, plus `bash -n` on each changed shell script) instead of the full gate. Its PR body must state
-  "Coverage: docs-only, full gate not run". Anything else runs the full gate (`Tools/ship/test-all.sh --changed` and
-  `Tools/vendor/tests/run.sh`, plus `Tools/ship/tests/run.sh` for release PRs (version bump/tag) or shared test-infrastructure PRs).
+  "Coverage: docs-only, full gate not run".
+  - Run one broad gate per checkout; never run two broad suites at once in the same checkout.
+  - For ordinary PRs, the broad gate is only `Tools/ship/test-all.sh --changed` plus
+    `Tools/vendor/tests/run.sh`, run sequentially. Add the full `Tools/ship/tests/run.sh` suite only
+    for release PRs (version bump/tag) or shared test-infrastructure PRs, and only if the changed run
+    did not already cover every Ship test.
+  - If `--changed` reports `[shell-test] passed N files` and N equals the number of
+    `Tools/ship/tests/*.test.sh` files, cite that run as the full Ship receipt; do not rerun
+    `Tools/ship/tests/run.sh`.
+  - Background long suites and wait once with `wait-log --pid <pid> <minutes>` or the job completion
+    notice. Read the summary once after completion; do not repeatedly tail or grep for status.
 - FULL-GATE TIMEOUT: Use at least 900s, or the repo's documented cold-start time if larger;
   prove the test worker started before counting a result (retain its startup log). 0 tests run is not a pass.
   A timeout with no result file (e.g. JUnit XML) is infra/no-result: never a test failure,

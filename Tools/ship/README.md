@@ -155,8 +155,11 @@ succeeded but noise cleanup failed: rerun only the printed recovery command.
 Standalone `scene-noise.sh [--run] [--before file] [--keep path]...` reads the
 same project config. Avoid concurrent Git operations during cleanup.
 
-Long runs should be backgrounded and observed with the environment's `wait-log`
-helper (not bundled here):
+Run one broad gate per checkout; never run two broad suites at once in the
+same checkout. Background long suites, then wait once with
+`wait-log --pid <pid> <minutes>` (an environment helper, not bundled here) or
+use the job completion notice. Read the summary once after completion; do not
+repeatedly tail or grep for status.
 
 ```sh
 mkdir -p build
@@ -298,8 +301,10 @@ selection only; scene cleanup's `noise.codeRegex` policy is unchanged.
 
 ## Test without Unity
 
-Normal PRs run focused files (including relevant slow regressions), plus
-`Tools/ship/test-all.sh --changed` and `Tools/vendor/tests/run.sh`:
+For ordinary PRs, the broad gate is only `Tools/ship/test-all.sh --changed`
+followed by `Tools/vendor/tests/run.sh`. Docs-only PRs use the short lint/format
+gate in [AGENTS.md](../../AGENTS.md) instead. While iterating on code, run
+focused tests (including relevant slow regressions), for example:
 
 ```sh
 Tools/ship/tests/run.sh quest-release.test.sh
@@ -313,9 +318,14 @@ per completed file, including elapsed seconds, total duration and the five slowe
 files. Its test-only jq wrapper memoizes the three pure config
 filters by filter and input bytes; config changes invalidate entries and other
 queries run normally. The release-flow fixture also reuses immutable parsed JSON;
-config validation/mutation is exercised separately. Production scripts are unchanged. Run the full suite locally only for release PRs (version
-bump/tag) or shared test-infrastructure changes (`tests/lib/`, `tests/run.sh`,
-fixtures):
+config validation/mutation is exercised separately. Production scripts are unchanged.
+Run the full `Tools/ship/tests/run.sh` suite locally only for release PRs
+(version bump/tag) or shared test-infrastructure changes (`tests/lib/`,
+`tests/run.sh`, fixtures), and only if the changed run did not already cover
+all Ship tests. If `--changed` reports `[shell-test] passed N files` and N equals
+the number of `Tools/ship/tests/*.test.sh` files, cite that run as the full Ship
+receipt; do not rerun `Tools/ship/tests/run.sh`. Otherwise, when the PR requires
+the full Ship suite, run:
 
 ```sh
 Tools/ship/tests/run.sh
