@@ -1,9 +1,10 @@
 # Unity test Host
 
 Minimal Unity **6000.6.6f1** project for compiling and testing local kit packages.
-Core and quality are referenced, with `testables` enabled. There are no scenes, XR or
-render-pipeline packages. Unity generates metadata and project defaults on import;
-commit required metadata, the package lock and project settings, not caches.
+Core, hands and quality are referenced, with `testables` enabled. The Host includes
+XR package dependencies for hands, but no scenes or render pipeline. Unity generates
+metadata and project defaults on import; commit required metadata, the package lock
+and project settings, not caches.
 The repository's root `.gitignore` excludes Library, Temp, Logs, obj and Builds
 at any depth.
 
@@ -14,7 +15,7 @@ From the repository root (see [Ship setup requirements](../Tools/ship/README.md)
 ```sh
 PROJECT="$PWD/Host" Tools/ship/linux-unity.sh setup
 PROJECT="$PWD/Host" Tools/ship/linux-unity.sh activate
-PROJECT="$PWD/Host" Tools/ship/linux-unity.sh test editmode -testFilter YetiKit.Core
+PROJECT="$PWD/Host" Tools/ship/linux-unity.sh test editmode -testFilter YetiKit.Hands.Tests
 PROJECT="$PWD/Host" Tools/ship/linux-unity.sh test editmode
 PROJECT="$PWD/Host" Tools/ship/linux-unity.sh return
 ```

@@ -9,7 +9,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
-- None.
+- Add tracked-hand curl and shape measurements, grab, poke, turn and teleport
+  gesture detectors, and XR input adapters in the hands package.
 
 ### Fixed
 - None.

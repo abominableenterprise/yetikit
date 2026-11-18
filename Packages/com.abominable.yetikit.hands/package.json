@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "unity": "6000.6",
   "displayName": "YetiKit Hands",
-  "description": "Planned tracked hands, controllers, panels and comfort locomotion.",
+  "description": "Tracked hand primitives for finger curls, gesture recognition, and XR input adapters.",
   "license": "MIT",
   "dependencies": {
     "com.abominable.yetikit.core": "0.1.12",
