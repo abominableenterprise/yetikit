@@ -117,6 +117,14 @@ FAKE_FAILS="$consistency;$flick" FAKE_RETRY_PASSES="$consistency;$flick" run gat
 check "a test of a listed class plus a parameterised case of a listed test: one rerun, the case as its method" \
   '[ "$rc" = 0 ] && [ "$(runs)" = 2 ] && retry_line | grep -qF -- "-testFilter $consistency;${flick%%(*} " && grep -q "retried 2 known flakes: $consistency, ${flick%%(*} — passed" "$tmp/out"'
 
+# Numeric references and single-quoted attributes in initial NUnit XML
+# must resolve to the same names used by the flake list and retry coverage.
+escaped_spray="Synthetic&#46;${spray#Synthetic.}"
+encoded_initial="<test-run total='2' passed='0' failed='2' skipped='0'><test-case fullname='$escaped_spray' result='Failed'/><test-case fullname='$consistency' result='Failed'/></test-run>"
+FAKE_INITIAL_XML="$encoded_initial" run gate
+check 'retry selects canonical failure names from the first run' \
+  '[ "$rc" = 0 ] && [ "$(runs)" = 2 ] && retry_line | grep -qF -- "-testFilter $spray;$consistency -testResults"'
+
 # --- retry results must actually pass every selected test/method -----------------------------------------------------------
 flick_other="${flick%%(*}(False,25f)"
 FAKE_FAILS="$flick;$flick_other" FAKE_RETRY_PASSES="$flick;$flick_other" run gate
