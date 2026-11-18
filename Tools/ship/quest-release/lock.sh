@@ -15,23 +15,17 @@ qr_lock_dir() { printf '%s/run.lock\n' "$QR_LOGS"; }
 # A lock with no PID counts as alive for its first minute
 # (another run is writing it), stale after that.
 qr_lock_read() {
-  local d group status=0 workers=""; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
+  local d group status=0 workers="" metadata attempt; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
+  case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
   QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
-  # Read all fields from one directory generation. A release or stale reclaim
-  # can otherwise replace the lock between reading its PID and invocation key.
-  local metadata
-  metadata="$(
-    cd "$d" 2>/dev/null || exit 1
-    local pid group
-    pid="$(cat pid 2>/dev/null)"
-    # Check the owner before sampling the step group: a live owner can still
-    # publish a new step. Then check the step before walking its worker slots.
-    if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then workers=busy; fi
-    group="$(cat group 2>/dev/null)"
-    printf '%s\n' "$pid" "$(cat invocation 2>/dev/null)" "$group" "$(cat run_dir 2>/dev/null)"
-    if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then printf 'busy\n'; fi
-    :
-  )" || return 1
+  for attempt in 1 2; do
+    status=0
+    metadata="$(qr_lock_snapshot "$d")" || status=$?
+    # A generation removed during the read may have lost some of its files.
+    # Retry it instead of interpreting a missing key as a legacy lock.
+    [ "$status" = 3 ] || break
+  done
+  [ "$status" = 0 ] || return 1
   {
     IFS= read -r QR_LOCK_PID
     IFS= read -r QR_LOCK_INVOCATION
@@ -56,6 +50,21 @@ qr_lock_read() {
   esac
   kill -0 "$QR_LOCK_PID" 2>/dev/null && return 0
   return 2
+}
+
+# Pin the directory generation while sampling it; status 3 means it vanished
+# or was replaced during the snapshot. Never consume metadata from that read.
+qr_lock_snapshot() {
+  local pid group workers=""
+  cd "$1" 2>/dev/null || return 1
+  pid="$(cat pid 2>/dev/null)"
+  # Check the owner before sampling the step group: a live owner can still
+  # publish a new step. Then check the step before walking its worker slots.
+  if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then workers=busy; fi
+  group="$(cat group 2>/dev/null)"
+  printf '%s\n' "$pid" "$(cat invocation 2>/dev/null)" "$group" "$(cat run_dir 2>/dev/null)"
+  if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then printf 'busy\n'; fi
+  [ "$1" -ef . ] || return 3
 }
 
 # Only look at the worker tree in this pinned generation. Probe the step
@@ -162,7 +171,11 @@ qr_lock_result() {
     if [ -n "$report" ]; then cat "$report" || exit 1; fi
   ) > "$result.tmp" && mv -f "$result.tmp" "$result" || return 1
   if [ -n "${QR_INVOCATION:-}" ]; then
-    cp "$result" "$QR_LOGS/last-result.$$" && mv -f "$QR_LOGS/last-result.$$" "$QR_LOGS/last-result"
+    if ! { cp "$result" "$QR_LOGS/last-result.$$" && mv -f "$QR_LOGS/last-result.$$" "$QR_LOGS/last-result"; }; then
+      rm -f "$QR_LOGS/last-result.$$" || true
+      # The keyed result is already authoritative. Do not change the exit status.
+      qr_log "warning: cannot update compatibility last-result in $QR_LOGS" || true
+    fi
   fi
 }
 
@@ -264,9 +277,15 @@ qr_cancel() {
 # Remove the lock only when this process holds it.
 qr_lock_release() {
   [ "${QR_LOCK_HELD:-}" = 1 ] || return 0
-  local d; d="$(qr_lock_dir)"
+  local d retired; d="$(qr_lock_dir)"
   # A failed/interrupted drain must never drop the only record of a survivor.
   [ -z "${QR_ACTIVE_STEP:-}" ] || [ ! "${QR_ACTIVE_STEP_DIR%/*}" -ef "$d" ] || return 1
-  [ "$(cat "$d/pid" 2>/dev/null)" = "${1:-$$}" ] && rm -rf "$d"
+  if [ "$(cat "$d/pid" 2>/dev/null)" = "${1:-$$}" ]; then
+    # Unpublish before deleting any fields, so a partial deletion is never
+    # visible as an intact but legacy lock.
+    retired="$d.released.$$"
+    [ ! -e "$retired" ] && mv "$d" "$retired" || return 1
+    rm -rf "$retired"
+  fi
   QR_LOCK_HELD=""
 }
