@@ -45,7 +45,7 @@ adb() {
       fi
       if [ "$2" = -d ]; then
         case "$fault" in
-          blocked|blocked-fatal|blocked-dies)
+          blocked|blocked-fatal|blocked-dies|blocked-dies-no-records)
             echo 'SystemUXController: Launch is blocked because: a Reprojected OS dialog is currently showing. Caching launch for component com.example.consumer/com.unity3d.player.UnityPlayerGameActivity'
             echo 'VolumetricWindowManagerServiceImpl: Timeout while requesting window placement' ;;
           other-blocked) echo 'SystemUXController: Launch is blocked because: another dialog. Caching launch for component com.example.consumer.other/com.unity3d.player.UnityPlayerGameActivity' ;;
@@ -84,7 +84,7 @@ adb() {
           ( pidof() {
               case "$fault" in
                 gone|blocked|blocked-fatal|never-fatal|never-anr|start-output) return 1 ;;
-                dies|blocked-dies) [ "$seen" = no ] || return 1 ;;
+                dies|blocked-dies|dies-no-records|blocked-dies-no-records) [ "$seen" = no ] || return 1 ;;
               esac
               echo 4242
             }; eval "$*" ) ;;
@@ -134,6 +134,17 @@ done
 for fault in fatal never-fatal never-anr dies blocked-fatal blocked-dies; do
   run all --rollback "$tmp/old.apk"
   check "all $fault is a confirmed CRASH and rolls back" '[ "$rc" = 1 ] && grep -q "^launch:      CRASH:" "$summary" && grep -q "install -r -d $tmp/old.apk" "$tmp/installed"'
+done
+# With no crash records, only the initial PID and its later absence can justify
+# rollback. A simultaneous OS block must not turn that disappearance into INFRA.
+for fault in dies-no-records blocked-dies-no-records; do
+  run all --rollback "$tmp/old.apk"
+  logcat="${summary%/*}/launch-logcat.txt"
+  crashes="${summary%/*}/launch-game-crashes.txt"
+  check "$fault has no crash records" \
+    '[ -f "$logcat" ] && ! grep -Eq "FATAL|Process:" "$logcat" && [ -f "$crashes" ] && [ ! -s "$crashes" ]'
+  check "all $fault is a CRASH from disappearance and rolls back" \
+    '[ "$rc" = 1 ] && grep -q "^launch:      CRASH:.*fatal 0, alive no" "$summary" && grep -Fxq "install -r -d $tmp/old.apk" "$tmp/installed"'
 done
 fault=fatal busy=1
 run all --rollback "$tmp/old.apk"
