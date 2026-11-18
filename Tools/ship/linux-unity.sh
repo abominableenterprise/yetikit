@@ -127,6 +127,8 @@ log() { printf '[linux-unity] %s\n' "$*" >&2; }
 . "$(dirname "${BASH_SOURCE[0]}")/test-stages.sh"
 # shellcheck source=Tools/ship/lib/linux-unity-kill.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/linux-unity-kill.sh"
+# shellcheck source=Tools/ship/lib/linux-unity-shared-files.sh
+. "$SHIP_TOOL_DIR/lib/linux-unity-shared-files.sh"
 # shellcheck source=Tools/ship/linux-unity-seat.sh
 . "$(dirname "${BASH_SOURCE[0]}")/linux-unity-seat.sh"
 die() { log "error: $*"; exit 1; }
@@ -249,21 +251,6 @@ cleanup_unity() {
   fi
   sleep 2 || return
   wipe_unity_shared_files "$@"
-}
-
-# Caller holds lock_unity. Never wipe shared files while a foreign editor may still own them.
-wipe_unity_shared_files() {
-  local remaining scan=unity_pids
-  [ "${1:-}" != require-idle ] || scan=unity_pids_as_root # use deletion's privileges
-  if ! remaining="$("$scan" strict shared-files)"; then
-    log "warning: Unity process inspection incomplete; skipping shared-memory and UnityLockfile cleanup"
-  elif [ -n "$remaining" ]; then
-    log "warning: Unity processes remain (PIDs:$remaining); skipping shared-memory and UnityLockfile cleanup"
-  else
-    rm -f "$SHM_DIR"/udsMem* "$SHM_DIR"/sem.udsMem* "$PROJECT/Temp/UnityLockfile"
-    return
-  fi
-  [ "${1:-}" != require-idle ]
 }
 
 # One editor run under `timeout -s KILL $UNITY_TIMEOUT`. UNITY_RUN_LABEL (the pass) and UNITY_TIMEOUT_VAR (the

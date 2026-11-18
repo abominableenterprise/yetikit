@@ -68,6 +68,24 @@ an overlapping runner fails before starting an editor or deleting shared memory.
 Wait for the active run or invoke `stop` from its checkout; never remove the lock
 file while a run is active.
 
+Cleanup removes stale `udsMem*`, `sem.udsMem*`, and the project's
+`Temp/UnityLockfile` only after a complete scan finds no Unity processes. The
+runner only removes entries it owns, even when running as root. A warning about
+unverified ownership means those entries were kept; other runner-owned entries
+can still be removed.
+
+Task VMs can run as root; check the runner's effective UID with `id -u` (0 is
+root). A root runner still skips the wipe if `/proc` inspection is incomplete.
+A non-root runner may be unable to inspect even unrelated system daemons. If
+that scan is incomplete and found no Unity process, cleanup retries the
+read-only scan with `sudo -n` if permitted, without prompting or elevating file
+deletion. Without that access, or if Unity classification is still uncertain
+(such as a helper from a removed installation), the incomplete-inspection
+warning means all shared files were kept. Use a runner with full process
+visibility if stale files persist; do not delete them while another editor
+could be using them. Setup still requires a complete privileged scan before
+replacing an existing editor installation.
+
 ## Commands
 
 | Command | Behaviour |
