@@ -121,6 +121,10 @@ qr_wait() {
             read -r wpid key < "$QR_LOGS/current-invocation"
             case "$wpid" in ''|*[!0-9]*) qr_wait_say "invalid invocation identity"; return 1 ;; esac
             seen=1; run=""; start="$(qr_wait_mtime "$QR_LOGS/current-invocation")"
+            # The pointer may have been published after the no-lock sample.
+            # Reconcile liveness; the identity check below keeps this waiter
+            # pinned even if the new sample sees a different invocation.
+            st=0; qr_lock_read || st=$?
           fi ;;
         *) wpid="$QR_LOCK_PID"; key="$QR_LOCK_INVOCATION"; seen=1; run=""
            if [ -z "$key" ]; then
