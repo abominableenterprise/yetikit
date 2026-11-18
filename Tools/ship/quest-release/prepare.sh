@@ -167,6 +167,18 @@ qr_prepare() {
   qr_log "worktrees ready: $(qr_wt test), $(qr_wt build)"
 }
 
+# symbolic-ref exits 1 for a detached HEAD; any other result is unsafe.
+qr_cleanup_expected_head() {
+  local wt="$1" symbolic_rc=0 head
+  git -C "$wt" symbolic-ref --quiet HEAD >/dev/null 2>&1 || symbolic_rc=$?
+  if [ "$symbolic_rc" = 1 ] && head="$(git -C "$wt" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" &&
+    [ "$head" = "$QR_SHA" ]; then
+    return 0
+  fi
+  qr_log "cannot verify expected detached HEAD in $wt; preserving worktree"
+  return 1
+}
+
 # Remove only clean worktrees, optionally after reversing recognized editor noise.
 qr_cleanup_one() {
   local wt="$1" discard="${2:-}" status_file noise_rc=0
@@ -196,7 +208,8 @@ qr_cleanup_one() {
     fi
     rm -f "$status_file"
   fi
-  # Do not force: Git must also refuse changes made after the status check.
+  # Non-forced removal rechecks local changes, not the release commit.
+  qr_cleanup_expected_head "$wt" || { echo "kept (expected detached HEAD not verified)"; return 1; }
   if qr_git worktree remove "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1; then
     echo "removed"
   else

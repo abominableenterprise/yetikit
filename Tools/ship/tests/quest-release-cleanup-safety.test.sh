@@ -6,7 +6,7 @@ tool_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/logs" "$tmp/repo"
-export QR_REPO="$tmp/repo" QR_RUN_DIR="$tmp/logs"
+export QR_REPO="$tmp/repo" QR_RUN_DIR="$tmp/logs" QR_SHA=fixture-commit
 export FIXTURE_STATUS="$tmp/status" FIXTURE_CALLS="$tmp/calls"
 cat > "$tmp/bin/git" <<'SH'
 #!/usr/bin/env bash
@@ -19,6 +19,15 @@ case "$1" in
     [ "$*" = 'status --porcelain -z --untracked-files=all' ] || exit 91
     [ "${FIXTURE_INSPECTION_FAIL:-0}" = 0 ] || exit 92
     cat "$FIXTURE_STATUS"
+    ;;
+  symbolic-ref)
+    [ "$*" = 'symbolic-ref --quiet HEAD' ] || exit 95
+    exit 1
+    ;;
+  rev-parse)
+    [ "$*" = 'rev-parse --verify HEAD^{commit}' ] || exit 96
+    [ "${FIXTURE_HEAD_FAIL:-0}" = 0 ] || exit 128
+    printf '%s\n' "$QR_SHA"
     ;;
   worktree)
     [ "$2" = remove ] || exit 93
@@ -100,4 +109,16 @@ preserves_uninspectable() {
   [ -d "$wt" ] && [ ! -s "$FIXTURE_CALLS" ] && [ "$result" = 'kept (inspection failed)' ]
 }
 check preserves_uninspectable
+
+preserves_unreadable_head() {
+  local wt="$tmp/unreadable-head" result
+  mkdir -p "$wt"
+  : > "$FIXTURE_STATUS"
+  : > "$FIXTURE_CALLS"
+  if result="$(FIXTURE_HEAD_FAIL=1 qr_cleanup_one "$wt")"; then
+    return 1
+  fi
+  [ -d "$wt" ] && [ ! -s "$FIXTURE_CALLS" ] && [ "$result" = 'kept (expected detached HEAD not verified)' ]
+}
+check preserves_unreadable_head
 [ "$failures" = 0 ]
