@@ -2,7 +2,7 @@
 # quest-release's single-run lock: `all`, `prepare`, `gate`, `build`, `verify`, `install`, `launch`, `rollback` and
 # `cleanup` hold
 # $QR_LOGS/run.lock (made with mkdir, so only one run gets it) with the run's PID and run folder, and release it on
-# exit. Liveness checks the owner PID and the recorded worker process group, never process names. Sourced by
+# exit. Liveness checks the owner PID, step group and registered isolated groups, never process names. Sourced by
 # Tools/ship/quest-release.sh; bash 3.2 compatible.
 
 # Device-step wrapper uses the same race-safe lock primitives below.
@@ -15,23 +15,32 @@ qr_lock_dir() { printf '%s/run.lock\n' "$QR_LOGS"; }
 # A lock with no PID counts as alive for its first minute
 # (another run is writing it), stale after that.
 qr_lock_read() {
-  local d group status=0; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
+  local d group status=0 workers=""; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
   QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
   # Read all fields from one directory generation. A release or stale reclaim
   # can otherwise replace the lock between reading its PID and invocation key.
   local metadata
   metadata="$(
     cd "$d" 2>/dev/null || exit 1
-    printf '%s\n' "$(cat pid 2>/dev/null)" "$(cat invocation 2>/dev/null)" "$(cat group 2>/dev/null)"
-    cat run_dir 2>/dev/null || true
+    local pid group
+    pid="$(cat pid 2>/dev/null)"
+    # Check the owner before sampling the step group: a live owner can still
+    # publish a new step. Then check the step before walking its worker slots.
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then workers=busy; fi
+    group="$(cat group 2>/dev/null)"
+    printf '%s\n' "$pid" "$(cat invocation 2>/dev/null)" "$group" "$(cat run_dir 2>/dev/null)"
+    if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then printf 'busy\n'; fi
+    :
   )" || return 1
   {
     IFS= read -r QR_LOCK_PID
     IFS= read -r QR_LOCK_INVOCATION
     IFS= read -r group
     IFS= read -r QR_LOCK_RUN
+    IFS= read -r workers || true
   } <<< "$metadata"
   QR_LOCK_RUN="${QR_LOCK_RUN:--}"
+  [ "$workers" != busy ] || return 0
   case "$group" in
     ''|0|*[!0-9]*) ;;
     *) qr_group_alive "$group" || status=$?
@@ -47,6 +56,21 @@ qr_lock_read() {
   esac
   kill -0 "$QR_LOCK_PID" 2>/dev/null && return 0
   return 2
+}
+
+# Only look at the worker tree in this pinned generation. Probe the step
+# before expanding its slots; a worker could be authorized right up to exit.
+qr_lock_workers_busy() {
+  local step status=0
+  for step in ./step.*; do
+    [ -d "$step" ] || continue
+    case "$1" in ''|0|*[!0-9]*) ;; *)
+      qr_group_alive "$1" || status=$?
+      [ "$status" = 1 ] || return 0 ;;
+    esac
+    qr_workers_busy "$step" && return 0
+  done
+  return 1
 }
 
 # Take the lock for this process ($$), or refuse at once when a live run holds it. A stale lock is removed (logged).
@@ -151,10 +175,12 @@ qr_run_step() {
   # A unique per-step generation prevents an unpublished orphan from accepting a successor's go-ahead.
   # Even if the owner dies before group publication, no later step will reuse this readiness path.
   step="$(mktemp -d "$d/step.XXXXXXXXXX")" || return 1
+  step="$(cd "$step" && pwd)" || return 1
   case "$-" in *m*) monitor=1 ;; esac
   # Traps may run between the async launch and $! registration. Record cancellation there, then handle it
   # only once the group is discoverable. Do not ignore signals: the child must inherit normal dispositions.
   QR_REGISTERING_STEP=1
+  QR_ACTIVE_STEP_DIR="$step"
   set -m
   (
     set +m; trap - HUP INT TERM
@@ -167,7 +193,7 @@ qr_run_step() {
     # it already exists on the child's first timeslice. Bash's $$ remains the lock owner in this subshell.
     kill -0 "$$" 2>/dev/null || exit 1
     [ "$(cat "$d/pid" 2>/dev/null)" = "$$" ] || exit 1
-    QR_STEP_DIR="$step" "$@"
+    QR_STEP_DIR="$step" QR_WORKER_ROOT="$QR_ACTIVE_STEP_DIR" "$@"
   ) &
   if ! { printf '%s\n' "$!" > "$d/group" && touch "$step/ready"; }; then
     rc=1
@@ -176,17 +202,10 @@ qr_run_step() {
   QR_REGISTERING_STEP=""
   [ -n "$monitor" ] || set +m
   [ -z "${QR_PENDING_CANCEL:-}" ] || qr_cancel "$cmd" "$QR_PENDING_CANCEL"
-  if [ "$rc" != 0 ]; then
-    qr_drain_group "$QR_ACTIVE_STEP"
-    QR_ACTIVE_STEP=""
-    return 1
-  fi
-  wait "$QR_ACTIVE_STEP" || rc=$?
-  # Drain any remaining step workers before publishing last-result or releasing the lock.
-  qr_drain_group "$QR_ACTIVE_STEP"
-  rm -f "$d/group"
-  rm -rf "$step"
-  QR_ACTIVE_STEP=""
+  if [ "$rc" = 0 ]; then wait "$QR_ACTIVE_STEP" || rc=$?; fi
+  # Drain the step first to stop new registrations, then its isolated workers.
+  qr_lock_drain_step || return 1
+  rm -f "$d/group" || return 1
   return "$rc"
 }
 
@@ -204,14 +223,21 @@ qr_drain_group() {
   wait "$group" 2>/dev/null || true
 }
 
+qr_lock_drain_step() {
+  qr_drain_group "$QR_ACTIVE_STEP"
+  qr_workers_drain "$QR_ACTIVE_STEP_DIR" || return 1
+  rm -rf "$QR_ACTIVE_STEP_DIR" || return 1
+  QR_ACTIVE_STEP=""; QR_ACTIVE_STEP_DIR=""
+}
+
 # Cancel and drain before publishing failure. During launch+registration, defer rather than lose the new job.
 qr_cancel() {
   local cmd="$1" signal="$2" group="${QR_ACTIVE_STEP:-}"
   if [ "${QR_REGISTERING_STEP:-}" = 1 ]; then QR_PENDING_CANCEL="$signal"; return; fi
   trap '' HUP INT TERM
   if [ -n "$group" ]; then
-    qr_drain_group "$group"
-    QR_ACTIVE_STEP=""
+    # Perf recovery still needs the old group ID to resume its device lock.
+    qr_lock_drain_step || exit 1
   fi
   if [ "$cmd" = perf ] || [ -f "$(qr_state_file)" ]; then qr_load_state; fi
   [ "$cmd" != perf ] || qr_perf_cancel
@@ -224,6 +250,8 @@ qr_cancel() {
 qr_lock_release() {
   [ "${QR_LOCK_HELD:-}" = 1 ] || return 0
   local d; d="$(qr_lock_dir)"
+  # A failed/interrupted drain must never drop the only record of a survivor.
+  [ -z "${QR_ACTIVE_STEP:-}" ] || [ ! "${QR_ACTIVE_STEP_DIR%/*}" -ef "$d" ] || return 1
   [ "$(cat "$d/pid" 2>/dev/null)" = "$$" ] && rm -rf "$d"
   QR_LOCK_HELD=""
 }

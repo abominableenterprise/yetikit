@@ -142,5 +142,5 @@ unity() {
   for a in "$@"; do [ "$prev" = -projectPath ] && proj="$a"; prev="$a"; done
   bin="$(qr_unity_bin "$proj")" || return 1
   [ -x "$bin" ] || { qr_log "no Unity editor at $bin"; return 1; }
-  qr_timebox "${QR_UNITY_TIMEOUT:-1800}" "$bin" "$@"
+  QR_TIMEBOX_WORKERS="${QR_WORKER_ROOT:-}" qr_timebox "${QR_UNITY_TIMEOUT:-1800}" "$bin" "$@"
 }

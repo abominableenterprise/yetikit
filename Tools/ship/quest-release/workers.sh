@@ -1,0 +1,70 @@
+# shellcheck shell=bash
+# Each isolated group reserves a unique slot under its caller's group directory.
+# Only the caller can publish the group (an atomic mkdir); the child cannot run
+# the command first. Descendants register under that published group, not as
+# siblings, so draining a parent group freezes registration at the next level.
+qr_worker_slot() {
+  [ -n "$1" ] || return 0
+  mktemp -d "$1/worker.XXXXXXXXXX"
+}
+
+qr_worker_publish() {
+  [ -z "$1" ] && return 0
+  [[ "$2" =~ ^[1-9][0-9]*$ ]] && mkdir "$1/group.$2"
+}
+
+qr_worker_await() {
+  local slot="$1" parent="$2" entry
+  QR_WORKER_ROOT=""; export QR_WORKER_ROOT
+  [ -n "$slot" ] || return 0
+  while [ -d "$slot" ] && kill -0 "$parent" 2>/dev/null; do
+    for entry in "$slot"/group.*; do
+      if [ -d "$entry" ]; then QR_WORKER_ROOT="$entry"; return 0; fi
+    done
+    command sleep 0.05
+  done
+  return 1
+}
+
+qr_worker_drain_group() {
+  local pgid="$1" deadline=$((SECONDS + 2))
+  qr_own_group_alive "$pgid" || return 0
+  kill -TERM -- "-$pgid" 2>/dev/null || true
+  kill -CONT -- "-$pgid" 2>/dev/null || true
+  while qr_own_group_alive "$pgid"; do
+    if [ "$SECONDS" -ge "$deadline" ]; then kill -KILL -- "-$pgid" 2>/dev/null || true; fi
+    command sleep 0.1
+  done
+}
+
+# Read only after the enclosing group is gone. Unknown process status (or an
+# invalid group record) is not proof of absence and cannot authorize reclaim.
+qr_workers_busy() {
+  local entry pgid status
+  for entry in "$1"/worker.*/group.*; do
+    [ -d "$entry" ] || continue
+    pgid="${entry##*.}"
+    [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || return 0
+    status=0; qr_group_alive "$pgid" || status=$?
+    [ "$status" = 1 ] || return 0
+    qr_workers_busy "$entry" && return 0
+  done
+  return 1
+}
+
+# Drain only after the enclosing group is gone; it can no longer authorize a
+# child. An unpublished slot can be discarded without signalling any process.
+qr_workers_drain() {
+  local slot entry pgid
+  for slot in "$1"/worker.*; do
+    [ -d "$slot" ] || continue
+    for entry in "$slot"/group.*; do
+      [ -d "$entry" ] || continue
+      pgid="${entry##*.}"
+      [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || return 1
+      qr_worker_drain_group "$pgid"
+      qr_workers_drain "$entry" || return 1
+    done
+    rm -rf "$slot" || return 1
+  done
+}

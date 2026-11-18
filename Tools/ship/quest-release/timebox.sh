@@ -3,6 +3,9 @@
 # Keep the supervisor in the caller's group for release-step cancellation, but
 # put only the timed command in a new group so a timeout cannot hit siblings.
 
+# shellcheck source=Tools/ship/quest-release/workers.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/workers.sh"
+
 # Zombies cannot hold resources. Return 0 for live, 1 for gone, 2 when
 # the probe failed (even a partial listing cannot establish absence).
 qr_group_alive() {
@@ -55,15 +58,21 @@ qr_timebox_drain() {
 }
 
 qr_timebox_supervise() {
-  local secs="$1" grace="$2" group timer='' supervisor rc=0 timed_out=0 cancelled=0
+  local secs="$1" grace="$2" group timer='' supervisor slot rc=0 timed_out=0 cancelled=0
   shift 2
   # Latch signals during launch and registration. In particular, a release
   # cancel must not lose the new group between fork and the $! assignment.
   trap 'timed_out=1' ALRM
   trap 'cancelled=1' HUP INT TERM
+  slot="$(qr_worker_slot "${QR_TIMEBOX_WORKERS:-}")" || exit 1
+  if [ -n "$slot" ] || [ -n "$secs" ]; then
+    # $$ is the release owner in subshells (and Bash 3.2 has no BASHPID).
+    supervisor="$(exec sh -c 'printf "%s\n" "$PPID"')" || exit 1
+  else supervisor=""; fi
   set -m
   (
     set +m
+    qr_worker_await "$slot" "$supervisor" || exit 1
     case "$(type -t -- "$1")" in
       function|builtin) "$@" ;;
       *) exec "$@" ;;
@@ -71,9 +80,10 @@ qr_timebox_supervise() {
   ) <&0 &
   group=$!
   set +m
+  if [ "$timed_out$cancelled" = 00 ] && ! qr_worker_publish "$slot" "$group"; then
+    rc=1; qr_timebox_finish
+  fi
   if [ -n "$secs" ]; then
-    # $$ is the release owner in subshells (and Bash 3.2 has no BASHPID).
-    supervisor="$(exec sh -c 'printf "%s\n" "$PPID"')"
     qr_timebox_watchdog "$secs" "$supervisor" &
     timer=$!
   fi
@@ -97,6 +107,9 @@ qr_timebox_finish() {
     timer=''
   fi
   wait "$group" 2>/dev/null || true
+  if [ -n "$slot" ]; then
+    qr_workers_drain "$slot/group.$group" && rm -rf "$slot" || rc=1
+  fi
   if [ "$timed_out" = 1 ]; then exit 124; fi
   if [ "$cancelled" = 1 ]; then exit 143; fi
   exit "$rc"
@@ -108,7 +121,8 @@ qr_timebox() {
   if command -v gtimeout >/dev/null 2>&1; then
     # GNU timeout signals the supervisor, which owns TERM/CONT/KILL and reaping.
     # ALRM distinguishes the deadline from a release cancellation via TERM.
-    gtimeout --foreground -s ALRM "$secs" bash "$QR_SHIP_DIR/quest-release/timebox.sh" '' "$grace" "$@" || rc=$?
+    QR_TIMEBOX_WORKERS="${QR_TIMEBOX_WORKERS:-}" \
+      gtimeout --foreground -s ALRM "$secs" bash "$QR_SHIP_DIR/quest-release/timebox.sh" '' "$grace" "$@" || rc=$?
   else
     ( qr_timebox_supervise "$secs" "$grace" "$@" ) || rc=$?
   fi
