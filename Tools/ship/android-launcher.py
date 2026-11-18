@@ -82,10 +82,12 @@ def decoded_manifest(tree):
             stack.append((indent, ET.SubElement(stack[-1][1], element.group(1))))
             continue
         attribute = re.match(r'\s*A: android:([\w_]+)(?:\(0x[0-9a-fA-F]+\))?='
-                             r'(?:"([^"]*)"|(@0x[0-9a-fA-F]+))', line)
+                             r'(?:"([^"]*)"|(@0x[0-9a-fA-F]+)|\(type 0x12\)(0x[0-9a-fA-F]+)(?=\s|$))', line)
         if attribute and indent > stack[-1][0]:
-            stack[-1][1].set(ANDROID + attribute.group(1),
-                             attribute.group(2) if attribute.group(2) is not None else attribute.group(3))
+            name, text, resource, boolean = attribute.groups()
+            if boolean is not None:
+                text = "true" if int(boolean, 16) else "false"
+            stack[-1][1].set(ANDROID + name, text if text is not None else resource)
     root = document.find("manifest")
     require(root is not None, "missing decoded APK manifest")
     return root
@@ -100,7 +102,8 @@ def source(path, package, checks, contest=False):
     root = ET.parse(path).getroot()
     # Unity source manifests may omit package; the build then supplies the ID.
     require(root.get("package", package) == package, "wrong application ID")
-    permissions = {p.get(ANDROID + "name") for p in root.findall("uses-permission")}
+    permissions = {p.get(ANDROID + "name") for p in root
+                   if p.tag in ("uses-permission", "uses-permission-sdk-23")}
     for permission in checks.get("permissions", []):
         payload_check(permission in permissions, contest, "permission " + permission)
     activities = root.findall("./application/activity")
@@ -134,14 +137,15 @@ def apk(path, package, checks, contest=False):
     tree = subprocess.check_output([tools, "dump", "xmltree", path, "AndroidManifest.xml"], text=True)
     require(re.search(r"^package: name='" + re.escape(package) + "'", badging, re.M), "wrong application ID")
     for permission in checks.get("permissions", []):
-        payload_check(re.search(r"^uses-permission: name='" + re.escape(permission) + "'", badging, re.M),
-                      contest, "permission " + permission)
+        present = re.search(r"^uses-permission(?:-sdk-23)?: name='" + re.escape(permission) + "'", badging, re.M)
+        payload_check(present, contest, "permission " + permission)
     require(re.search(r"^launchable-activity: name='" + re.escape(GAME) + r"'", badging, re.M),
             "GameActivity not launchable")
     root = decoded_manifest(tree)
     activities = [a for a in root.findall("./application/activity") if a.get(ANDROID + "name") == GAME]
     require(len(activities) == 1, "expected one UnityPlayerGameActivity in merged manifest")
     activity = activities[0]
+    require(activity.get(ANDROID + "exported") == "true", "GameActivity not exported")
     game_contract(activity)
     # AAPT resolves theme references to resource IDs; inspect the resource table's style name.
     resources = subprocess.check_output([tools, "dump", "resources", path], text=True)

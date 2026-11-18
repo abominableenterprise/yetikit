@@ -27,11 +27,11 @@ launcher = '''      E: intent-filter (line=7)
         E: category (line=9)
           A: android:name(0x01010003)="android.intent.category.LAUNCHER" (Raw: "android.intent.category.LAUNCHER")
 '''
+exported = '      A: android:exported(0x01010010)=(type 0x12)0xffffffff\n'
 activity = f'''    E: activity (line=5)
       A: android:theme(0x01010000)=@0x7f030001
       A: android:name(0x01010003)="{game}" (Raw: "{game}")
-      A: android:exported(0x01010010)=(type 0x12)0xffffffff
-'''
+''' + exported
 header = '''N: android=http://schemas.android.com/apk/res/android
 E: manifest (line=1)
   E: application (line=3)
@@ -54,8 +54,14 @@ mutations = {
     "theme on another activity": valid.replace('@0x7f030001', '@0x7f030002') + other,
     "missing decoded manifest": '',
 }
+export_mutations = {
+    "not exported": valid.replace('0xffffffff', '0x0') + other + launcher,
+    "missing exported": valid.replace(exported, ''),
+    "integer instead of exported boolean": valid.replace('(type 0x12)', '(type 0x10)'),
+}
 positives = {
     "valid": valid,
+    "valid with nonzero typed boolean": valid.replace('0xffffffff', '0x1'),
     "valid with unrelated activity first": header + other + launcher + activity + launcher + vr + metadata,
     "valid with unrelated activity last": valid + other + launcher,
 }
@@ -109,6 +115,10 @@ with tempfile.TemporaryDirectory() as directory:
     run(mutated, False, 'configured permission required')
     run(manifest, False, 'contest rejects configured source permission', contest=True)
     run(mutated, True, 'contest accepts source with configured permission absent', contest=True)
+    mutated.write_text(source.replace('<uses-permission ', '<uses-permission-sdk-23 '))
+    run(mutated, True, 'SDK-23 source permission satisfies requirement')
+    run(mutated, False, 'contest rejects SDK-23 source permission', contest=True,
+        error='contest build ships permission ' + permission)
     for label, text in {
         'VR': stripped_source.replace('com.oculus.intent.category.VR', 'com.example.UNRELATED'),
         'theme': stripped_source.replace('@style/BaseUnityGameActivityTheme', '@style/OtherTheme'),
@@ -130,10 +140,10 @@ with tempfile.TemporaryDirectory() as directory:
     decoder.chmod(0o755)
     (path / 'fixture.apk.resources').write_text('spec resource 0x7f030001 com.example:style/BaseUnityGameActivityTheme: flags=0x00000000\n')
 
-    def make_apk(*, payload=True, mic=True, application_id=package):
+    def make_apk(*, payload=True, mic=True, application_id=package, permission_tag='uses-permission'):
         badging = f"package: name='{application_id}'\nlaunchable-activity: name='{game}'\n"
         if mic:
-            badging += f"uses-permission: name='{permission}'\n"
+            badging += f"{permission_tag}: name='{permission}'\n"
         (path / 'fixture.apk.badging').write_text(badging)
         with zipfile.ZipFile(apk, 'w') as archive:
             archive.writestr('AndroidManifest.xml', 'decoded manifest supplied by synthetic aapt')
@@ -153,7 +163,19 @@ with tempfile.TemporaryDirectory() as directory:
         (path / 'fixture.apk.xmltree').write_text(tree)
         make_apk(payload=False, mic=False)
         run(apk, label in positives, f'contest APK {label}', contest=True)
+    for label, tree in export_mutations.items():
+        (path / 'fixture.apk.xmltree').write_text(tree)
+        make_apk()
+        run(apk, False, f'APK {label}', error='GameActivity not exported')
+        make_apk(payload=False, mic=False)
+        run(apk, False, f'contest APK {label}', contest=True, error='GameActivity not exported')
+
     (path / 'fixture.apk.xmltree').write_text(valid)
+    make_apk(permission_tag='uses-permission-sdk-23')
+    run(apk, True, 'SDK-23 APK permission satisfies requirement')
+    make_apk(payload=False, permission_tag='uses-permission-sdk-23')
+    run(apk, False, 'contest rejects SDK-23 APK permission', contest=True,
+        error='contest build ships permission ' + permission)
     for payload, mic in ((True, False), (False, True), (True, True)):
         make_apk(payload=payload, mic=mic)
         run(apk, False, f'contest rejects configured payload={payload} permission={mic}', contest=True)
