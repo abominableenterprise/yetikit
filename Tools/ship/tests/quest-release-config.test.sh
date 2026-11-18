@@ -56,7 +56,7 @@ done
 for expression in '.quest.launchLogTags = "Unity"' '.quest.launchLogTags = null' \
   '.quest.launchLogTags = [7]' '.quest.launchLogTags = [""]' '.quest.launchLogTags = ["bad\ntag"]' \
   '.quest.launchLogTags = ["Worker ", "Worker"]' '.quest.launchLogTags = ["Network: Client", "Network"]' \
-  '.quest.launchLogTags = ["Worker(123): child", "Worker"]' \
+  '.quest.launchLogTags = ["Worker:", "Worker"]' '.quest.launchLogTags = ["Worker(123): child", "Worker"]' \
   '.quest.launchLogTags = ["Worker( 123): child"]' \
   '.quest.launcherChecks.assets = [{"glob":"/assets/*"}]' '.quest.launcherChecks.assets = [{"glob":"assets/../*"}]' \
   '.quest.launcherChecks.assets = [{"glob":""}]' '.quest.launcherChecks.assets = [{"glob":7}]' \
