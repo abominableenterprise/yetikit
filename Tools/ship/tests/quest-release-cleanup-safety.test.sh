@@ -29,6 +29,17 @@ case "$1" in
     [ "${FIXTURE_HEAD_FAIL:-0}" = 0 ] || exit 128
     printf '%s\n' "$QR_SHA"
     ;;
+  update-ref)
+    [ "$*" = 'update-ref --stdin' ] || exit 97
+    IFS= read -r line && [ "$line" = start ] || exit 98
+    printf 'start: ok\n'
+    for expected in 'option no-deref' "verify HEAD $QR_SHA" prepare; do
+      IFS= read -r line && [ "$line" = "$expected" ] || exit 98
+    done
+    printf 'prepare: ok\n'
+    # Keep the synthetic transaction open until the operation closes stdin.
+    ! IFS= read -r line
+    ;;
   worktree)
     [ "$2" = remove ] || exit 93
     printf '%s\n' "$*" >> "$FIXTURE_CALLS"
@@ -42,6 +53,8 @@ SH
 chmod +x "$tmp/bin/git"
 export PATH="$tmp/bin:$PATH"
 source "$tool_dir/quest-release/prepare.sh"
+# The real Git flow fixture verifies the registration and transaction behavior.
+qr_registered_worktree() { return 0; }
 qr_log() { printf '%s\n' "$*" >&2; }
 failures=0
 check() {
@@ -118,7 +131,7 @@ preserves_unreadable_head() {
   if result="$(FIXTURE_HEAD_FAIL=1 qr_cleanup_one "$wt")"; then
     return 1
   fi
-  [ -d "$wt" ] && [ ! -s "$FIXTURE_CALLS" ] && [ "$result" = 'kept (expected detached HEAD not verified)' ]
+  [ -d "$wt" ] && [ ! -s "$FIXTURE_CALLS" ] && [ "$result" = 'kept or removal failed' ]
 }
 check preserves_unreadable_head
 [ "$failures" = 0 ]
