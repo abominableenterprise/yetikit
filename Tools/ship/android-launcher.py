@@ -103,7 +103,7 @@ def source(path, package, checks, contest=False):
     # Unity source manifests may omit package; the build then supplies the ID.
     require(root.get("package", package) == package, "wrong application ID")
     permissions = {p.get(ANDROID + "name") for p in root
-                   if p.tag in ("uses-permission", "uses-permission-sdk-23")}
+                   if p.tag in ("uses-permission", "uses-permission-sdk-23", "uses-permission-sdk-m")}
     for permission in checks.get("permissions", []):
         payload_check(permission in permissions, contest, "permission " + permission)
     activities = root.findall("./application/activity")
@@ -131,6 +131,51 @@ def aapt_path():
     return str(max(versions, key=version) / "aapt")
 
 
+def apk_exported(value, resources):
+    if value == "true":
+        return True
+    if not value or not re.fullmatch(r"@0x[0-9a-fA-F]+", value):
+        return False
+
+    entries = {}
+    defaults = set()
+    is_default = False
+    for line in resources.splitlines():
+        line = line.strip()
+        if line.startswith("config "):
+            is_default = line == "config (default):"
+        entry = re.fullmatch(r"resource (0x[0-9a-fA-F]+) \S+: (.*)", line)
+        if entry:
+            resource = int(entry[1], 16)
+            entries.setdefault(resource, set()).add(entry[2])
+            if is_default:
+                defaults.add(resource)
+
+    # The offline check has no device configuration. Require a default and
+    # reject any alternative that can resolve to false or an unknown value.
+    resolving = set()
+    verified = set()
+
+    def is_true(resource):
+        if resource in verified:
+            return True
+        if resource not in defaults or resource in resolving:
+            return False
+        resolving.add(resource)
+        for entry in entries[resource]:
+            typed = re.match(r"t=(0x[0-9a-fA-F]+) d=(0x[0-9a-fA-F]+)(?=\s|$)", entry)
+            if not typed:
+                return False
+            kind, data = (int(field, 16) for field in typed.groups())
+            if not ((kind == 0x12 and data != 0) or (kind == 0x01 and is_true(data))):
+                return False
+        resolving.remove(resource)
+        verified.add(resource)
+        return True
+
+    return is_true(int(value[1:], 16))
+
+
 def apk(path, package, checks, contest=False):
     tools = aapt_path()
     badging = subprocess.check_output([tools, "dump", "badging", path], text=True)
@@ -145,10 +190,10 @@ def apk(path, package, checks, contest=False):
     activities = [a for a in root.findall("./application/activity") if a.get(ANDROID + "name") == GAME]
     require(len(activities) == 1, "expected one UnityPlayerGameActivity in merged manifest")
     activity = activities[0]
-    require(activity.get(ANDROID + "exported") == "true", "GameActivity not exported")
+    resources = subprocess.check_output([tools, "dump", "resources", path], text=True)
+    require(apk_exported(activity.get(ANDROID + "exported"), resources), "GameActivity not exported")
     game_contract(activity)
     # AAPT resolves theme references to resource IDs; inspect the resource table's style name.
-    resources = subprocess.check_output([tools, "dump", "resources", path], text=True)
     match = re.search(r"(?:spec )?resource (0x[0-9a-fA-F]+) .*:style/BaseUnityGameActivityTheme:", resources)
     require(match, "missing Unity GameActivity theme resource")
     require(activity.get(ANDROID + "theme", "").lower() == "@" + match.group(1).lower(),

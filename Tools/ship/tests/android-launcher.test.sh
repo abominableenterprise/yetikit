@@ -115,10 +115,11 @@ with tempfile.TemporaryDirectory() as directory:
     run(mutated, False, 'configured permission required')
     run(manifest, False, 'contest rejects configured source permission', contest=True)
     run(mutated, True, 'contest accepts source with configured permission absent', contest=True)
-    mutated.write_text(source.replace('<uses-permission ', '<uses-permission-sdk-23 '))
-    run(mutated, True, 'SDK-23 source permission satisfies requirement')
-    run(mutated, False, 'contest rejects SDK-23 source permission', contest=True,
-        error='contest build ships permission ' + permission)
+    for tag in ('uses-permission-sdk-23', 'uses-permission-sdk-m'):
+        mutated.write_text(source.replace('<uses-permission ', f'<{tag} '))
+        run(mutated, True, f'{tag} source permission satisfies requirement')
+        run(mutated, False, f'contest rejects {tag} source permission', contest=True,
+            error='contest build ships permission ' + permission)
     for label, text in {
         'VR': stripped_source.replace('com.oculus.intent.category.VR', 'com.example.UNRELATED'),
         'theme': stripped_source.replace('@style/BaseUnityGameActivityTheme', '@style/OtherTheme'),
@@ -138,7 +139,9 @@ with tempfile.TemporaryDirectory() as directory:
     decoder = path / 'aapt'
     decoder.write_text('#!/bin/sh\ncase "$2" in\n badging|xmltree|resources) cat "$3.$2" ;;\n *) exit 1 ;;\nesac\n')
     decoder.chmod(0o755)
-    (path / 'fixture.apk.resources').write_text('spec resource 0x7f030001 com.example:style/BaseUnityGameActivityTheme: flags=0x00000000\n')
+    resources = path / 'fixture.apk.resources'
+    theme = 'spec resource 0x7f030001 com.example:style/BaseUnityGameActivityTheme: flags=0x00000000\n'
+    resources.write_text(theme)
 
     def make_apk(*, payload=True, mic=True, application_id=package, permission_tag='uses-permission'):
         badging = f"package: name='{application_id}'\nlaunchable-activity: name='{game}'\n"
@@ -169,6 +172,32 @@ with tempfile.TemporaryDirectory() as directory:
         run(apk, False, f'APK {label}', error='GameActivity not exported')
         make_apk(payload=False, mic=False)
         run(apk, False, f'contest APK {label}', contest=True, error='GameActivity not exported')
+
+    # Match aapt dump xmltree/resources output for a compiled @bool reference.
+    tree = valid.replace('(type 0x12)0xffffffff', '@0x7f040000')
+    (path / 'fixture.apk.xmltree').write_text(tree)
+    export_spec = '      spec resource 0x7f040000 com.example:bool/launcher_exported: flags=0x00000000\n'
+    export_entry = '        resource 0x7f040000 com.example:bool/launcher_exported: '
+    alias_entry = '        resource 0x7f040001 com.example:bool/export_alias: '
+    true_value = 't=0x12 d=0xffffffff (s=0x0008 r=0x00)\n'
+    false_value = 't=0x12 d=0x00000000 (s=0x0008 r=0x00)\n'
+    default = '      config (default):\n'
+    for label, resolved, values in (
+        ('true bool reference', True, default + export_entry + true_value),
+        ('false bool reference', False, default + export_entry + false_value),
+        ('unresolved bool reference', False, ''),
+        ('non-boolean resource', False, default + export_entry + true_value.replace('t=0x12', 't=0x10')),
+        ('bool alias', True, default + export_entry + 't=0x01 d=0x7f040001\n' + alias_entry + true_value),
+        ('cyclic alias', False, default + export_entry + 't=0x01 d=0x7f040000\n'),
+        ('false override', False, default + export_entry + true_value + '      config v26:\n' + export_entry + false_value),
+        ('no default', False, '      config v26:\n' + export_entry + true_value),
+    ):
+        resources.write_text(theme + export_spec + values)
+        for contest in (False, True):
+            make_apk(payload=not contest, mic=not contest)
+            run(apk, resolved, f'APK {label}, contest={contest}', contest=contest,
+                error=None if resolved else 'GameActivity not exported')
+    resources.write_text(theme)
 
     (path / 'fixture.apk.xmltree').write_text(valid)
     make_apk(permission_tag='uses-permission-sdk-23')
