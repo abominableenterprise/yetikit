@@ -14,6 +14,12 @@ def noise_keys: ["artRoot", "atlasPath", "codeRegex", "fixedTimestepCount", "fon
   "generatorsRegex", "propsDir", "protectedRegex", "repackRegex", "sourceRegex",
   "specularMaterialPath", "timeManagerPath"];
 def envname: if nonempty then test("^[A-Za-z_][A-Za-z0-9_]*$") else false end;
+# Bash locals can shadow exported signing inputs, including in children such as keytool.
+# Lowercase names and the runner's QR_ namespace are not consumer signing inputs.
+def signing_envname:
+  if nonempty then test("^[A-Z][A-Z0-9_]*$") and (startswith("QR_") | not) else false end;
+def invalid_signing_env($field):
+  invalid("quest.signing.\($field) (use an uppercase variable name starting with A-Z; QR_ is reserved)");
 def packageid: if nonempty then test("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$") else false end;
 # Backup destinations must also be distinct on default case-insensitive macOS volumes.
 def basenames:
@@ -61,10 +67,10 @@ elif has("quest") and (.quest | has("perfLogTag")) and (.quest.perfLogTag | none
 elif has("quest") and (.quest | has("whatsNewEnv")) and (.quest.whatsNewEnv | envname | not) then invalid("quest.whatsNewEnv")
 elif has("quest") and (.quest | has("prevShaEnv")) and (.quest.prevShaEnv | envname | not) then invalid("quest.prevShaEnv")
 elif has("quest") and (.quest | has("signing")) and (.quest.signing | type) != "object" then invalid("quest.signing")
-elif has("quest") and (.quest | has("signing")) and (.quest.signing.keystorePathEnv | envname | not) then invalid("quest.signing.keystorePathEnv")
-elif has("quest") and (.quest | has("signing")) and (.quest.signing.storePassEnv | envname | not) then invalid("quest.signing.storePassEnv")
-elif has("quest") and (.quest | has("signing")) and (.quest.signing.keyAliasEnv | envname | not) then invalid("quest.signing.keyAliasEnv")
-elif has("quest") and (.quest.signing // {} | has("keyPassEnv")) and (.quest.signing.keyPassEnv | envname | not) then invalid("quest.signing.keyPassEnv")
+elif has("quest") and (.quest | has("signing")) and (.quest.signing.keystorePathEnv | signing_envname | not) then invalid_signing_env("keystorePathEnv")
+elif has("quest") and (.quest | has("signing")) and (.quest.signing.storePassEnv | signing_envname | not) then invalid_signing_env("storePassEnv")
+elif has("quest") and (.quest | has("signing")) and (.quest.signing.keyAliasEnv | signing_envname | not) then invalid_signing_env("keyAliasEnv")
+elif has("quest") and (.quest.signing // {} | has("keyPassEnv")) and (.quest.signing.keyPassEnv | signing_envname | not) then invalid_signing_env("keyPassEnv")
 elif has("quest") and (.quest | has("dataFiles")) and (.quest.dataFiles | basenames | not) then invalid("quest.dataFiles")
 elif has("quest") and (.quest | has("launchArgs")) and (.quest.launchArgs | strings | not) then invalid("quest.launchArgs")
 elif has("quest") and (.quest | has("launchLogTags")) and (.quest.launchLogTags | strings | not) then invalid("quest.launchLogTags")
