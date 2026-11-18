@@ -119,27 +119,6 @@ qr_backup() {
   printf '%s\n' "$dir"
 }
 
-qr_permission_states() {
-  local dump unavailable=''
-  [ -n "${QR_PERMISSIONS:-}" ] || { printf 'none configured\n'; return; }
-  dump="$(qr_adb shell dumpsys package "$QR_PKG" 2>/dev/null)" || { dump=''; unavailable=1; }
-  PERMISSIONS="$QR_PERMISSIONS" UNAVAILABLE="$unavailable" awk '
-    { sub(/\r$/, "") }
-    $2 ~ /^granted=(true|false),?$/ && $1 ~ /:$/ && !($1 in states) {
-      sub(/,$/, "", $2); states[$1] = $2
-    }
-    END {
-      n = split(ENVIRON["PERMISSIONS"], names, "\n")
-      for (i = 1; i <= n; i++) {
-        key = names[i] ":"
-        state = ENVIRON["UNAVAILABLE"] ? "unavailable" : (key in states ? states[key] : "not requested")
-        printf "%s%s %s", (i == 1 ? "" : "; "), names[i], state
-      }
-      printf "\n"
-    }
-  ' <<< "$dump"
-}
-
 # install -r $1 with idle check, verified backup and before/after hashes of every configured data file.
 # $2 = 1 for --force, $3 = label, $4 = extra flags (rollback: -d permits a lower versionCode).
 qr_install_apk() {
