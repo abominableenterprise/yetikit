@@ -31,7 +31,7 @@ import sys
 import time
 
 sys.path.insert(0, sys.argv[2])
-from proc_inspection import require
+from proc_inspection import cleanup_session, require, wait_marked
 
 if not require('timing observer leak regressions'):
     raise SystemExit(0)
@@ -58,40 +58,6 @@ def until(predicate, runner=None, seconds=10):
         if time.monotonic() >= deadline:
             raise AssertionError('fixture readiness/cleanup timed out')
         time.sleep(.02)
-
-
-def live(pid):
-    try:
-        return Path(f'/proc/{pid}/stat').read_text().rsplit(') ', 1)[1].split()[0] != 'Z'
-    except FileNotFoundError:
-        return False
-
-
-def marked(marker):
-    found = []
-    for entry in Path('/proc').glob('[0-9]*'):
-        try:
-            if marker in (entry / 'environ').read_bytes().split(b'\0') and live(int(entry.name)):
-                found.append(int(entry.name))
-        except (FileNotFoundError, ProcessLookupError, PermissionError):
-            pass
-    return found
-
-
-def cleanup(runner, marker=None):
-    # Kill only this isolated fixture's group and run marker, even after a
-    # failing assertion. An orphan observer must not escape into the test suite.
-    if marker:
-        for pid in marked(marker):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-    try:
-        os.killpg(runner.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    runner.wait(timeout=5)
 
 
 # Drive the observer's *actual EOF polls* with a sleep shim. No timing race:
@@ -149,7 +115,7 @@ for name, chunks, final in [
                       'editor-launch-import start', 'editor-launch-import end',
                       'compile start', 'compile end'])
         finally:
-            cleanup(runner)
+            cleanup_session(runner)
 
 
 def start_run(label):
@@ -178,10 +144,8 @@ def observer_ready():
 # A second command is refused by the shared cleanup lock or write_pidfile. It
 # must not change timing output belonging to the still-running owner.
 runner = start_run('owner')
-marker = None
 try:
     until(observer_ready, runner)
-    marker = run_marker(runner)
     pidfile = (out / 'linux-unity.pid').read_bytes()
     stages = (out / 'test-stages.log').read_bytes()
     with (root / 'contender.log').open('w') as log:
@@ -200,7 +164,7 @@ try:
     (root / 'editor-release').touch()
     check('owning test still succeeds after contention', runner.wait(timeout=15) == 0)
 finally:
-    cleanup(runner, marker)
+    cleanup_session(runner)
 
 
 # Real command/EXIT traps, not a sourced approximation. Group INT models Ctrl-C;
@@ -209,7 +173,6 @@ finally:
 for label, sig, group in [('group-int', signal.SIGINT, True),
                           ('wrapper-term', signal.SIGTERM, False)]:
     runner = start_run(label)
-    marker = None
     try:
         until(observer_ready, runner)
         marker = run_marker(runner)
@@ -223,14 +186,14 @@ for label, sig, group in [('group-int', signal.SIGINT, True),
         (root / 'editor-release').touch()
         rc = runner.wait(timeout=15)
         check(f'{label}: cancellation preserves exit {128 + sig}', rc == 128 + sig)
-        deadline = time.monotonic() + 2
-        while marked(marker) and time.monotonic() < deadline:
-            time.sleep(.02)
-        check(f'{label}: no live timing observer or editor descendant remains', not marked(marker))
+        scan_label = f'{label}: no live timing observer or editor descendant remains'
+        remaining = wait_marked(scan_label, marker, runner.pid)
+        if remaining is not None:
+            check(scan_label, not remaining)
         check(f'{label}: observer completion files are removed', not list(out.glob('.test-stage.*')))
         check(f'{label}: command pidfile is released', not (out / 'linux-unity.pid').exists())
     finally:
-        cleanup(runner, marker)
+        cleanup_session(runner)
 
 if failures:
     raise SystemExit(f'{len(failures)} failed: ' + '; '.join(failures))
