@@ -93,7 +93,7 @@ class Case:
         self.env = dict(os.environ, RUNNER_CASE=str(self.state),
                         RUNNER_REGRESSION_MARKER=self.marker.decode().split('=', 1)[1],
                         PATH=f'{self.bin}:{os.environ["PATH"]}')
-        for key in ('TEST_JOBS', 'SHIP_TEST_JOBS', 'TEST_FILE_TIMEOUT'):
+        for key in ('TEST_JOBS', 'SHIP_TEST_JOBS', 'TEST_FILE_TIMEOUT', 'SHIP_TEST_FILE_TIMEOUT'):
             self.env.pop(key, None)
         self.log = self.root / 'output'
         self.process = None
@@ -112,7 +112,7 @@ class Case:
         if jobs is not None:
             self.env['SHIP_TEST_JOBS' if self.kind == 'full' else 'TEST_JOBS'] = str(jobs)
         if timeout is not None:
-            self.env['TEST_FILE_TIMEOUT'] = str(timeout)
+            self.env['SHIP_TEST_FILE_TIMEOUT' if self.kind == 'full' else 'TEST_FILE_TIMEOUT'] = str(timeout)
         with self.log.open('w') as log:
             self.process = subprocess.Popen(LAUNCHER + [str(self.runner)]
                                             + ([] if self.kind == 'full' else ['--all']),
@@ -194,6 +194,9 @@ for directory in "$HOME" "$TMPDIR" "$SHM_DIR" "$XDG_STATE_HOME" "$XDG_CONFIG_HOM
 done
 printf '%s\\n' "$HOME" "$TMPDIR" "$SHM_DIR" "$XDG_STATE_HOME" > "$RUNNER_CASE/paths-''' + str(i) + '''"
 [ -z "${UNITY_SECRET+x}" ]; [ -z "${THEROBOTS_TASK_TOKEN+x}" ]
+for name in RETURN_ATTEMPTED ACTIVATION_FD EXIT_RC LINUX_UNITY_RUN; do
+  if [[ -v $name ]]; then echo "inherited runner variable: $name"; exit 1; fi
+done
 ''')
     inherited_home = case.root / 'inherited-home'
     inherited_tmp = case.root / 'inherited-tmp'
@@ -201,7 +204,8 @@ printf '%s\\n' "$HOME" "$TMPDIR" "$SHM_DIR" "$XDG_STATE_HOME" > "$RUNNER_CASE/pa
         directory.mkdir()
         (directory / 'keep').touch()
     case.env.update(UNITY_SECRET='synthetic', THEROBOTS_TASK_TOKEN='synthetic',
-                    HOME=str(inherited_home), TMPDIR=str(inherited_tmp))
+                    HOME=str(inherited_home), TMPDIR=str(inherited_tmp),
+                    RETURN_ATTEMPTED='1', ACTIVATION_FD='99', EXIT_RC='42', LINUX_UNITY_RUN='1')
     case.start(jobs=2)
     case.finish()
     paths = [(case.state / f'paths-{i}').read_text().splitlines() for i in range(2)]
@@ -266,18 +270,27 @@ wait
 def timeout(case):
     case.fixture('0-hung', '''
 trap 'echo cleaned > "$RUNNER_CASE/cleaned"' EXIT
-bash -c 'trap "" TERM; echo $$ > "$RUNNER_CASE/stubborn.pid"; exec sleep 300' &
+echo $$ > "$RUNNER_CASE/fixture.pid"
+timeout -k 60 300 bash -c 'trap "" TERM; echo $$ > "$RUNNER_CASE/stubborn.pid"; exec sleep 300' &
 wait
 ''')
     case.fixture('1-next', 'echo next > "$RUNNER_CASE/next"')
-    case.start(jobs=1, timeout=1)
-    output = case.finish(124)
-    assert 'timed out after 1 s' in output, output
+    runner = case.start(jobs=1, timeout=4)
+    ready = case.state / 'stubborn.pid'
+    until(lambda: fixture_pid(ready) is not None, runner)
+    pid = fixture_pid(ready)
+    fixture = fixture_pid(case.state / 'fixture.pid')
+    assert live(pid) and os.getpgid(pid) != os.getpgid(fixture), 'nested group was not exercised'
+    output = case.finish(1 if case.kind == 'full' else 124)
     assert (case.state / 'next').exists(), 'timeout stopped remaining files'
     assert (case.state / 'cleaned').exists(), 'timeout skipped EXIT cleanup'
-    pid = fixture_pid(case.state / 'stubborn.pid')
-    assert pid is not None, 'missing complete stubborn PID after timeout'
-    assert not live(pid)
+    label = f'{case.kind}: file timeout left a marked descendant'
+    remaining = wait_marked(label, case.marker, runner.pid, seconds=3)
+    if remaining is not None:
+        assert not remaining, (label, remaining)
+    until(lambda: not live(pid), seconds=3)
+    expected = 'FAILED: 0-hung.test.sh (exit 124)' if case.kind == 'full' else 'timed out after 4 s'
+    assert expected in output, output
 
 
 with tempfile.TemporaryDirectory(prefix='runner-regressions-') as directory:
@@ -291,4 +304,5 @@ with tempfile.TemporaryDirectory(prefix='runner-regressions-') as directory:
         for sig in (signal.SIGTERM, signal.SIGINT):
             check(kind, f'cancel-{sig.name}', lambda case, sig=sig: cancellation(case, sig))
     check('shared', 'delayed-pid-write', delayed_pid_write)
-    check('shared', 'bounded-file-timeout', timeout)
+    for kind in ('full', 'shared'):
+        check(kind, 'bounded-file-timeout', timeout)

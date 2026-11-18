@@ -2,6 +2,7 @@
 # Focused harness prerequisites: standalone fixtures never escalate; CI uses GNU timeout.
 set -euo pipefail
 ship="$(cd "$(dirname "$0")/.." && pwd)"
+caller_path="$PATH"
 repo="$(cd "$ship/../.." && pwd)"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
@@ -88,6 +89,31 @@ check 'opt-in process view excludes host processes but retains tracked inspectio
   [ "$(PATH="$tmp/view-bin:$PATH" readlink /proc/1/exe)" = /fixture/host-process ] &&
   [ "$(PATH="$tmp/view-bin:$PATH" readlink ordinary-link)" = delegated:ordinary-link ]'
 unset SHIP_FIXTURE_PIDS
+
+apk_timeout_assertion_rejects_wrong_default() (
+  # Break only the timeout contract in a disposable Ship copy. The APK test
+  # still runs the synthetic editor and must report its failed assertion.
+  cp -R "$ship" "$tmp/timeout-mutation"
+  python3 - "$tmp/timeout-mutation/linux-unity.sh" <<'PY'
+from pathlib import Path
+import sys
+
+runner = Path(sys.argv[1])
+source = runner.read_text()
+original = 'APK_TIMEOUT="${APK_TIMEOUT:-5400}"'
+assert source.count(original) == 1
+runner.write_text(source.replace(original, 'APK_TIMEOUT="${APK_TIMEOUT:-1800}"'))
+PY
+  unset APK_TIMEOUT
+  rc=0
+  PATH="$caller_path" bash "$tmp/timeout-mutation/tests/linux-unity-apk-swap-recovery.test.sh" > "$tmp/timeout.log" 2>&1 || rc=$?
+  [ "$rc" = 1 ] && grep -qF 'FAIL apk: the editor runs under APK_TIMEOUT' "$tmp/timeout.log" &&
+    grep -qx '1 failed' "$tmp/timeout.log" || {
+    cat "$tmp/timeout.log" >&2
+    return 1
+  }
+)
+check 'APK timeout assertion fails on the wrong default even after stub cleanup' 'apk_timeout_assertion_rejects_wrong_default'
 
 mkdir -p "$tmp/non-gnu"
 cat > "$tmp/non-gnu/timeout" <<'EOF'

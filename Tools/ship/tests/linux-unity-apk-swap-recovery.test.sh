@@ -23,7 +23,15 @@ cp "$tmp/ulf.good" "$ULF"
 check "a stale swapfile of a KILLed run is swapped off and removed; one of a live run is kept" \
   'sleep 30 & live=$!; : > "$tmp/swap/linux-unity-apk.swap.999999"; : > "$tmp/swap/linux-unity-apk.swap.$live"; : > "$tmp/swap-calls"; lu apk; rc=$?; kill "$live"; [ "$rc" = 0 ] && [ ! -e "$tmp/swap/linux-unity-apk.swap.999999" ] && grep -q "^swapoff $tmp/swap/linux-unity-apk.swap.999999" "$tmp/swap-calls" && [ -e "$tmp/swap/linux-unity-apk.swap.$live" ] && rm -f "$tmp/swap/linux-unity-apk.swap.$live"'
 
-check "apk: the editor runs under APK_TIMEOUT (default 5400 s), not UNITY_TIMEOUT" \
-  'printf "#!/usr/bin/env bash\necho \"\$*\" > \"%s/timeout-args\"\nshift 3; exec \"\$@\"\n" "$tmp" > "$tmp/bin/timeout" && chmod +x "$tmp/bin/timeout" && lu apk && grep -q "^-s KILL 5400 " "$tmp/timeout-args" && APK_TIMEOUT=9 lu apk && grep -q "^-s KILL 9 " "$tmp/timeout-args"; rm -f "$tmp/bin/timeout"'
+check_apk_timeout() {
+  local rc=0
+  printf '#!/usr/bin/env bash\necho "$*" > "%s/timeout-args"\nshift 3; exec "$@"\n' "$tmp" > "$tmp/bin/timeout" &&
+    chmod +x "$tmp/bin/timeout" &&
+    lu apk && grep -q '^-s KILL 5400 ' "$tmp/timeout-args" &&
+    APK_TIMEOUT=9 lu apk && grep -q '^-s KILL 9 ' "$tmp/timeout-args" || rc=$?
+  rm -f "$tmp/bin/timeout" || return
+  return "$rc"
+}
+check "apk: the editor runs under APK_TIMEOUT (default 5400 s), not UNITY_TIMEOUT" 'check_apk_timeout'
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
