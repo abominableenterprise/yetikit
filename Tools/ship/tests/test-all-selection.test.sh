@@ -22,11 +22,18 @@ case "$1" in
   merge-base) echo fixture-base ;;
   diff|ls-files)
     command=$1
-    while [ "$1" != -- ]; do shift; done
     shift
+    nul=0
+    while [ "$1" != -- ]; do
+      [ "$1" != -z ] || nul=1
+      shift
+    done
+    shift
+    [ "$nul" = 1 ] || exit 2
     [ "$1" = "${EXPECTED_PREFIX:-Tools/ship}/" ] || exit 2
     [ "$2" = .github/workflows/ship.yml ] || exit 2
-    if [ "$command" = diff ]; then cat "$CHANGED_PATHS"; else cat "$UNTRACKED_PATHS"; fi ;;
+    if [ "$command" = diff ]; then cat "$CHANGED_PATHS"; else cat "$UNTRACKED_PATHS"; fi
+    [ "$command" != "${FAKE_PATH_FAILURE:-}" ] || exit 2 ;;
   *) exit 2 ;;
 esac
 EOF
@@ -53,19 +60,19 @@ done
 printf 'echo quick >> "$RUN_LOG"\n' > "$tmp/Tools/ship/tests/quick.test.sh"
 printf '# test-all: slow\n# helper.sh\necho legacy >> "$RUN_LOG"\n' > "$tmp/Tools/ship/tests/legacy.test.sh"
 
-printf 'Tools/ship/test-all.sh\nTools/ship/helper.sh\n' > "$CHANGED_PATHS"
+printf '%s\0' Tools/ship/test-all.sh Tools/ship/helper.sh > "$CHANGED_PATHS"
 check $'quick\n' --changed
 check $'quick\n'
 echo 'ok   default and explicit changed selection ignore incidental slow references'
 
-printf 'Tools/ship/linux-unity.sh\n' > "$CHANGED_PATHS"
+printf '%s\0' Tools/ship/linux-unity.sh > "$CHANGED_PATHS"
 slow=$'linux-unity-apk\nlinux-unity-test-pr\nlinux-unity-timeout\n'
 check "$slow"$'quick\n' --changed
 check $'linux-unity-apk\n' --changed HEAD apk
 check $'quick\n' --changed HEAD --fast
 echo 'ok   changed tested script selects its slow fixtures; filters and --fast intersect'
 
-printf 'Tools/ship/lib/android.sh\n' > "$CHANGED_PATHS"
+printf '%s\0' Tools/ship/lib/android.sh > "$CHANGED_PATHS"
 check $'linux-unity-apk\nquick\n' --changed
 check $'quick\n' --changed HEAD --fast
 echo 'ok   APK tag names the extracted Android helper by basename'
@@ -73,25 +80,35 @@ echo 'ok   APK tag names the extracted Android helper by basename'
 # Quick tests retain broad tooling/workflow coverage, even without references.
 for path in Tools/ship/not-linux-unity.sh Tools/ship/lib/not-android.sh \
             Tools/ship/lib/config.json .github/workflows/ship.yml; do
-  printf '%s\n' "$path" > "$CHANGED_PATHS"
+  printf '%s\0' "$path" > "$CHANGED_PATHS"
   check $'quick\n' --changed
 done
 echo 'ok   unrelated scripts, resources and workflow changes select only quick tests'
 
 for name in linux-unity-apk linux-unity-test-pr linux-unity-timeout legacy; do
-  printf 'Tools/ship/tests/%s.test.sh\n' "$name" > "$CHANGED_PATHS"
+  printf 'Tools/ship/tests/%s.test.sh\0' "$name" > "$CHANGED_PATHS"
   check "$name"$'\n' --changed
   check '' --changed HEAD --fast
 done
 : > "$CHANGED_PATHS"
-printf 'Tools/ship/tests/linux-unity-apk.test.sh\n' > "$UNTRACKED_PATHS"
+printf '%s\0' Tools/ship/tests/linux-unity-apk.test.sh > "$UNTRACKED_PATHS"
 check $'linux-unity-apk\n' --changed
-printf 'Tools/ship/lib/android.sh\n' > "$UNTRACKED_PATHS"
+printf '%s\0' Tools/ship/lib/android.sh > "$UNTRACKED_PATHS"
 check $'linux-unity-apk\nquick\n' --changed
 : > "$UNTRACKED_PATHS"
 check '' --changed
 check ''
 echo 'ok   own changes and untracked paths select fixtures; no changes select none'
+
+printf '%s\0' Tools/ship/helper.sh > "$CHANGED_PATHS"
+for producer in diff ls-files; do
+  : > "$RUN_LOG"
+  if FAKE_PATH_FAILURE="$producer" bash "$runner" --changed > "$tmp/out" 2>&1; then
+    fail "runner ignored failed git $producer"
+  fi
+  [ ! -s "$RUN_LOG" ] || fail "runner selected tests after failed git $producer"
+done
+echo 'ok   either Git producer failing aborts before launching tests'
 
 check $'legacy\n'"$slow"$'quick\n' --all
 check "$slow" --all linux-unity
@@ -105,16 +122,16 @@ for prefix in Tools/yetikit Tools/vendor/yetikit; do
   mkdir -p "$tmp/$prefix"
   cp -R "$tmp/Tools/ship/"* "$tmp/$prefix/"
   runner="$tmp/$prefix/test-all.sh"
-  printf '%s/helper.sh\n' "$prefix" > "$CHANGED_PATHS"
+  printf '%s/helper.sh\0' "$prefix" > "$CHANGED_PATHS"
   check $'quick\n' --changed
-  printf '%s/tests/legacy.test.sh\n' "$prefix" > "$CHANGED_PATHS"
+  printf '%s/tests/legacy.test.sh\0' "$prefix" > "$CHANGED_PATHS"
   check $'legacy\n' --changed
   : > "$CHANGED_PATHS"
-  printf '%s/helper.sh\n' "$prefix" > "$UNTRACKED_PATHS"
+  printf '%s/helper.sh\0' "$prefix" > "$UNTRACKED_PATHS"
   check $'quick\n' --changed
   : > "$UNTRACKED_PATHS"
   check '' --changed
-  printf '.github/workflows/ship.yml\n' > "$CHANGED_PATHS"
+  printf '%s\0' .github/workflows/ship.yml > "$CHANGED_PATHS"
   check $'quick\n' --changed
 done
 unset EXPECTED_PREFIX
@@ -124,14 +141,14 @@ ln -s "$tmp" "$tmp-linked"
 # Keep the sibling link out of the temp tree to avoid recursive copies.
 trap 'rm -f "$tmp-linked"; rm -rf "$tmp"' EXIT
 runner="$tmp-linked/Tools/ship/test-all.sh"
-printf 'Tools/ship/helper.sh\n' > "$CHANGED_PATHS"
+printf '%s\0' Tools/ship/helper.sh > "$CHANGED_PATHS"
 check $'quick\n' --changed
 : > "$CHANGED_PATHS"
 check '' --changed
 echo 'ok   symlinked checkout paths map to the physical repository root'
 
 runner="$tmp/Tools/ship/test-all.sh"
-printf 'Tools/ship/helper.sh\n' > "$CHANGED_PATHS"
+printf '%s\0' Tools/ship/helper.sh > "$CHANGED_PATHS"
 export FAKE_REV_PARSE_FAIL=1
 check $'quick\n' --changed
 unset FAKE_REV_PARSE_FAIL
