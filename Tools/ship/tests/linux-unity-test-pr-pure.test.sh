@@ -47,9 +47,10 @@ check 'a same-line namespace and class is selected alongside smoke' \
 rm "$t/Props/InlineTests.cs"
 
 printf '// This changed source declares no class.\n' > "$t/Props/Unresolved.cs"
+echo '// another runtime change' >> "$proj/Assets/Scripts/Props/Spray/Spray.cs"
 pr HEAD
-check 'a changed test source without a discovered class forces full pure even with smoke' \
-  'full && grep -Fq "no classes found in changed test Assets/Tests/EditMode/Props/Unresolved.cs" "$stages"'
+check 'an unresolved changed test source forces full pure even with smoke and an earlier area match' \
+  'full && grep -Fq "no classes found in changed test Assets/Tests/EditMode/Props/Unresolved.cs" "$stages" && ! grep -Fq "pure selected" "$stages"'
 rm "$t/Props/Unresolved.cs"
 
 # Run from a vendored layout. Moving the tool directory must not hard-code its old prefix.
