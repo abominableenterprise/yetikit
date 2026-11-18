@@ -1,10 +1,7 @@
 # shellcheck shell=bash
-# quest-release `wait [minutes]`: block until the current run (release-logs/current.env + run.lock) is finished, so a host
-# task makes one tool call instead of `sleep 85` polls. Finished: the lock is gone or its PID is dead (kill -0, never a
-# process search) AND the run folder has a summary.txt written after the run started. Then prints summary.txt and exits 0
-# when the install says ok (or a gate-only run's gate passed), 1 otherwise; 124 on timeout with the logs' last lines.
-# Read-only: takes no lock, writes nothing (no qr_log to release.log, no qr_set). Sourced by Tools/ship/quest-release.sh;
-# bash 3.2 compatible.
+# quest-release `wait [minutes]`: watch the current lock generation, then print its frozen report and return
+# 0 for success, 1 for failure or missing result, 124 on timeout with the logs' last lines.
+# Read-only: takes no lock and writes nothing. Sourced by Tools/ship/quest-release.sh; Bash 3.2 compatible.
 
 qr_wait_now() { date +%s; }
 qr_wait_say() { printf '[quest-release] wait: %s\n' "$*" >&2; }
@@ -76,31 +73,38 @@ qr_wait_tails() {
   done
 }
 
-# Snapshot the atomic last-result once: PID (when observed), freshness and run folder must identify the watched
-# invocation. A pre-prepare failure may have no run folder, but cannot certify an older summary as successful.
-# $1 PID, $2 start time, $3 run folder (empty if unresolved). Only a pinned PID with a known start time may
-# resolve an unknown folder from this record. Prints the folder, "rc cmd", then the optional list report.
+# A keyed waiter reads only its invocation's record, never a successor's last-result.
+# Legacy locks have only a PID and use the old freshness and run-folder checks.
+# $1 PID, $2 start time, $3 run folder, $4 invocation key. Emits folder, rc, command,
+# frozen verdict (blank for a legacy mutable summary), then the optional report.
 qr_wait_result() {
-  local f="$QR_LOGS/last-result" record header p rc cmd run
-  [ -f "$f" ] || return 1
-  record="$(cat "$f")"
-  header="${record%%$'\n'list-summary:$'\n'*}"
+  local f="$QR_LOGS/last-result" record header p rc cmd run verdict marker=$'\nreport:'
+  if [ -n "$4" ]; then
+    [[ "$4" =~ ^run\.[a-zA-Z0-9]{10}$ ]] || return 1
+    f="$QR_LOGS/invocations/$4/result"
+  fi
+  record="$(cat "$f" 2>/dev/null)" || return 1
+  if [[ "$record" != *"$marker"* ]]; then marker=$'\nlist-summary:'; fi
+  header="${record%%"$marker"*}"
   p="$(printf '%s\n' "$header" | sed -n 's/^pid=//p')"
   rc="$(printf '%s\n' "$header" | sed -n 's/^rc=//p')"
   cmd="$(printf '%s\n' "$header" | sed -n 's/^cmd=//p')"
   run="$(printf '%s\n' "$header" | sed -n 's/^run=//p')"
+  verdict="$(printf '%s\n' "$header" | sed -n 's/^verdict=//p')"
   [ -z "$1" ] || [ "$p" = "$1" ] || return 1
-  perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$(qr_wait_mtime "$f")" "${2:-0}" || return 1
+  [ -n "$4" ] || perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$(qr_wait_mtime "$f")" "${2:-0}" || return 1
   [ "$run" = "$3" ] \
-    || { [ -z "$3" ] && [ -n "$1" ] && [ -n "$2" ]; } \
+    || { [ -z "$3" ] && { [ -n "$4" ] || { [ -n "$1" ] && [ -n "$2" ]; }; }; } \
     || { [ -z "$run" ] && [ "$rc" != 0 ]; } || return 1
-  printf '%s\n%s %s\n' "$run" "$rc" "$cmd"
-  if [ "$header" != "$record" ]; then printf '%s\n' "${record#*$'\n'list-summary:$'\n'}"; fi
+  if [ "$header" != "$record" ] && [ -z "$verdict" ]; then verdict="$rc"; fi # old list report
+  [ -z "$4" ] || [ "$verdict" = 0 ] || [ "$verdict" = 1 ] || return 1
+  printf '%s\n%s %s %s\n' "$run" "$rc" "$cmd" "$verdict"
+  if [ "$header" != "$record" ]; then printf '%s' "${record#*"$marker"}"; fi
 }
 
 qr_wait() {
   local minutes="${1:-45}" poll="${QUEST_WAIT_POLL:-5}" grace="${QUEST_WAIT_GRACE:-15}" t0 now deadline
-  local last_line seen=0 start="" run="" st wpid="" res terminal
+  local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict
   case "$minutes" in ''|*[!0-9]*) qr_wait_say "usage: wait [minutes]"; return 2 ;; esac
   minutes=$((10#$minutes))
   t0="$(qr_wait_now)"; deadline=$((t0 + minutes * 60)); last_line="$t0"
@@ -113,24 +117,27 @@ qr_wait() {
         ''|*[!0-9]*)
           # A short-lived invocation can finish before our first poll, without ever preparing a run folder.
           # Its published identity, not historical current.env, selects the required terminal result.
-          if [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$QR_LOGS/current-invocation" ]; then
-            wpid="$(cat "$QR_LOGS/current-invocation")"
+          if [ "$st" != 0 ] && [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$QR_LOGS/current-invocation" ]; then
+            read -r wpid key < "$QR_LOGS/current-invocation"
             case "$wpid" in ''|*[!0-9]*) qr_wait_say "invalid invocation identity"; return 1 ;; esac
             seen=1; run=""; start="$(qr_wait_mtime "$QR_LOGS/current-invocation")"
           fi ;;
-        *) wpid="$QR_LOCK_PID"; seen=1; run=""
-           start="$(qr_wait_mtime "$(qr_lock_dir)/pid")"
-           [ -n "$start" ] || start="$(qr_wait_mtime "$(qr_lock_dir)")" ;;
+        *) wpid="$QR_LOCK_PID"; key="$QR_LOCK_INVOCATION"; seen=1; run=""
+           if [ -z "$key" ]; then
+             start="$(qr_wait_mtime "$(qr_lock_dir)/pid")"
+             [ -n "$start" ] || start="$(qr_wait_mtime "$(qr_lock_dir)")"
+           fi ;;
       esac
     fi
     # Never cache current.env for a pinned pending prepare: it may describe the previous run. Once concrete,
     # keep the folder even if the lock disappears; only this PID's lock or validated result may resolve it.
     if [ -z "$wpid" ]; then
-      run="$(qr_wait_run_dir)"
-    elif [ "$QR_LOCK_PID" = "$wpid" ] && [ -z "$run" ] && [ -d "${QR_LOCK_RUN:-}" ]; then
+      if [ "$st" = 0 ]; then run=""; else run="$(qr_wait_run_dir)"; fi
+    elif [ "$QR_LOCK_PID" != "$wpid" ] || [ "$QR_LOCK_INVOCATION" != "$key" ]; then
+      st=1
+    elif [ -z "$run" ] && [ -d "${QR_LOCK_RUN:-}" ]; then
       run="$QR_LOCK_RUN"
     fi
-    [ -z "$wpid" ] || [ "$QR_LOCK_PID" = "$wpid" ] || st=1
     now="$(qr_wait_now)"
     if [ "$st" != 0 ]; then
       # No lock at all: the run is over, or (just after a nohup start) not locked yet; after a short grace the run's
@@ -141,19 +148,20 @@ qr_wait() {
       fi
       if [ "$seen" = 1 ]; then
         # Without an observed lock, current.env supplies the earliest valid result time and the run identity.
-        if res="$(qr_wait_result "$wpid" "$start" "$run")"; then
+        if res="$(qr_wait_result "$wpid" "$start" "$run" "$key")"; then
           [ -n "$run" ] || run="${res%%$'\n'*}"
           res="${res#*$'\n'}"
           terminal="${res%%$'\n'*}"
-          qr_wait_say "the run (${terminal#* }, pid ${wpid:-of the last run}) exited ${terminal%% *}"
-          if [ "$terminal" != "$res" ]; then
-            printf '%s\n' "${res#*$'\n'}"
-            [ "${terminal%% *}" = 0 ]; return $?
+          read -r rc cmd verdict <<< "$terminal"
+          qr_wait_say "the run ($cmd, pid ${wpid:-of the last run}) exited $rc"
+          if [ -n "$verdict" ]; then
+            [ "$terminal" = "$res" ] || printf '%s\n' "${res#*$'\n'}"
+            [ "$rc" = 0 ] && [ "$verdict" = 0 ]; return $?
           fi
           [ -f "$run/summary.txt" ] && cat "$run/summary.txt"
-          [ "${terminal%% *}" = 0 ] && [ -f "$run/summary.txt" ] \
+          [ "$rc" = 0 ] && [ -f "$run/summary.txt" ] \
             && perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$(qr_wait_mtime "$run/summary.txt")" "${start:-0}" \
-            && qr_wait_verdict "$run" "${terminal#* }"
+            && qr_wait_verdict "$run" "$cmd"
           return
         fi
         qr_wait_say "the run ${wpid:+(pid $wpid) }ended (lock gone) without writing its result (killed?)"

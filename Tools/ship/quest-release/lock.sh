@@ -16,12 +16,22 @@ qr_lock_dir() { printf '%s/run.lock\n' "$QR_LOGS"; }
 # (another run is writing it), stale after that.
 qr_lock_read() {
   local d group status=0; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
-  QR_LOCK_PID=""; QR_LOCK_RUN=""
-  [ -d "$d" ] || return 1
-  QR_LOCK_PID="$(cat "$d/pid" 2>/dev/null)"
-  QR_LOCK_RUN="$(cat "$d/run_dir" 2>/dev/null)"
+  QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
+  # Read all fields from one directory generation. A release or stale reclaim
+  # can otherwise replace the lock between reading its PID and invocation key.
+  local metadata
+  metadata="$(
+    cd "$d" 2>/dev/null || exit 1
+    printf '%s\n' "$(cat pid 2>/dev/null)" "$(cat invocation 2>/dev/null)" "$(cat group 2>/dev/null)"
+    cat run_dir 2>/dev/null || true
+  )" || return 1
+  {
+    IFS= read -r QR_LOCK_PID
+    IFS= read -r QR_LOCK_INVOCATION
+    IFS= read -r group
+    IFS= read -r QR_LOCK_RUN
+  } <<< "$metadata"
   QR_LOCK_RUN="${QR_LOCK_RUN:--}"
-  group="$(cat "$d/group" 2>/dev/null)"
   case "$group" in
     ''|0|*[!0-9]*) ;;
     *) qr_group_alive "$group" || status=$?
@@ -41,14 +51,21 @@ qr_lock_read() {
 
 # Take the lock for this process ($$), or refuse at once when a live run holds it. A stale lock is removed (logged).
 qr_lock_acquire() {
-  local d st _ publish="${1:-1}"
+  local d st _ publish="${1:-1}" invocation_dir
   d="$(qr_lock_dir)"
   for _ in 1 2; do
     if mkdir "$d" 2>/dev/null; then
-      if ! { printf '%s\n' "$$" > "$d/pid" &&
+      QR_INVOCATION=""
+      if ! { { [ "$publish" = 0 ] ||
+               { mkdir -p "$QR_LOGS/invocations" &&
+                 invocation_dir="$(mktemp -d "$QR_LOGS/invocations/run.XXXXXXXXXX")" &&
+                 QR_INVOCATION="${invocation_dir##*/}" &&
+                 printf '%s\n' "$QR_INVOCATION" > "$d/invocation"; }; } &&
              printf '%s\n' "${QR_RUN_DIR:-pending}" > "$d/run_dir" &&
+             # Publish pid last, atomically: wait must not pin a partial PID or miss its invocation key.
+             [ ! -d "$d/pid" ] && printf '%s\n' "$$" > "$d/pid.tmp" && mv -f "$d/pid.tmp" "$d/pid" &&
              { [ "$publish" = 0 ] ||
-               { printf '%s\n' "$$" > "$QR_LOGS/current-invocation.$$" &&
+               { printf '%s %s\n' "$$" "$QR_INVOCATION" > "$QR_LOGS/current-invocation.$$" &&
                  mv -f "$QR_LOGS/current-invocation.$$" "$QR_LOGS/current-invocation"; }; }; }; then
         qr_log "error: cannot write lock metadata in $d"
         rm -rf "$d"
@@ -105,18 +122,24 @@ qr_lock_note_run() {
   printf '%s\n' "$QR_RUN_DIR" > "$(qr_lock_dir)/run_dir" 2>/dev/null || true
 }
 
-# Publish while holding the run lock. For list releases ($3=1), rc already
-# contains the aggregate verdict. Bundle the report too, since a successor can
-# overwrite the shared summary in the same run folder before wait polls again.
+# Publish before unlocking. Freeze both the verdict and its report: even a
+# successor in the same run folder cannot change what a pinned waiter sees.
+# $3 is 0 for a single-command summary, 1 for an aggregate, absent for early failures.
 qr_lock_result() {
   [ "${QR_LOCK_HELD:-}" = 1 ] || return 0
-  local result="$QR_LOGS/last-result"
+  local result="$QR_LOGS/last-result" verdict=1 report=""
+  if [ -n "${QR_INVOCATION:-}" ]; then result="$QR_LOGS/invocations/$QR_INVOCATION/result"; fi
+  if [ -n "${3:-}" ] && [ -n "${QR_RUN_DIR:-}" ] && [ -f "$QR_RUN_DIR/summary.txt" ]; then
+    report="$QR_RUN_DIR/summary.txt"
+    if [ "$2" = 0 ] && { [ "$3" = 1 ] || qr_wait_verdict "$QR_RUN_DIR" "$1"; }; then verdict=0; fi
+  fi
   (
-    printf 'pid=%s\ncmd=%s\nrc=%s\nrun=%s\n' "$$" "$1" "$2" "${QR_RUN_DIR:-}" || exit 1
-    if [ "${3:-0}" = 1 ]; then
-      printf 'list-summary:\n' && cat "$QR_RUN_DIR/summary.txt" || exit 1
-    fi
-  ) > "$result.$$" && mv -f "$result.$$" "$result"
+    printf 'pid=%s\ncmd=%s\nrc=%s\nrun=%s\nverdict=%s\nreport:\n' "$$" "$1" "$2" "${QR_RUN_DIR:-}" "$verdict" || exit 1
+    if [ -n "$report" ]; then cat "$report" || exit 1; fi
+  ) > "$result.tmp" && mv -f "$result.tmp" "$result" || return 1
+  if [ -n "${QR_INVOCATION:-}" ]; then
+    cp "$result" "$QR_LOGS/last-result.$$" && mv -f "$QR_LOGS/last-result.$$" "$QR_LOGS/last-result"
+  fi
 }
 
 # Run the foreground step as a job in its own process group. Bash handles a trapped signal promptly while in
@@ -193,7 +216,7 @@ qr_cancel() {
   if [ "$cmd" = perf ] || [ -f "$(qr_state_file)" ]; then qr_load_state; fi
   [ "$cmd" != perf ] || qr_perf_cancel
   qr_summary
-  qr_lock_result "$cmd" 1
+  qr_lock_result "$cmd" 1 0
   exit 1
 }
 
