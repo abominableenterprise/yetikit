@@ -125,8 +125,9 @@ test_editor_end() {
 # Keep test orchestration here to leave linux-unity.sh below its size ceiling.
 cmd_test() {
   parse_keep "$@"
-  set -- ${RUN_ARGS[@]+"${RUN_ARGS[@]}"}
-  validate_test_args "$@"
+  local TEST_ARGS=()
+  normalize_test_args ${RUN_ARGS[@]+"${RUN_ARGS[@]}"}
+  set -- ${TEST_ARGS[@]+"${TEST_ARGS[@]}"}
   local before rc=0 nrc=0
   mkdir -p "$OUT_DIR"
   if [ -z "${TEST_STAGES_LOG:-}" ]; then test_stages_begin; fi
