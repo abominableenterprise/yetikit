@@ -91,7 +91,9 @@ qr_verify() {
   got="$(sed -n 's/^Signer #1 certificate SHA-256 digest:[[:space:]]*//p' "$QR_RUN_DIR/verify-apksigner.log" | head -n1)"
   got="$(qr_norm_hex "$got")"
   sha="$(qr_sha256 "$apk")"
-  qr_set apk "$apk"
+  # List operations verify a temporary copy but keep the source path for
+  # subsequent commands. The hash always describes the bytes verified here.
+  qr_set apk "${2:-$apk}"
   qr_set apk_sha256 "$sha"
   printf 'apk sha256: %s\n' "$sha"
   if [ "$rc" != 0 ] || [ -z "$got" ]; then

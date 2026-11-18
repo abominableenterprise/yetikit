@@ -63,14 +63,16 @@ qr_parallel_unity() {
 qr_verify_base="$(declare -f qr_verify)"
 eval "${qr_verify_base/qr_verify ()/qr_fixture_real_verify ()}"
 qr_verify() {
-  printf 'verify %s\n' "$1" >> "$tmp/steps"
+  printf 'verify %s\n' "${1##*/}" >> "$tmp/steps"
+  if [ -f "$1" ]; then command cat "$1" >> "$tmp/verified-bytes"; fi
   # Exercise the production early missing-file failure, without SDK/device work.
   [ -f "$1" ] || qr_fixture_real_verify "$@"
+  qr_set apk "${2:-$1}"
 }
 qr_backup() { printf '%s\n' "$tmp/backup-$QUEST_SERIAL"; }
 qr_cleanup() { echo cleanup >> "$tmp/steps"; }
 qr_apk_commit() {
-  case "$1" in "$tmp/new.apk") echo aaaaaaaaa ;; "$tmp/old.apk") echo fffffffff ;; esac
+  case "$(command cat "$1")" in new) echo aaaaaaaaa ;; old) echo fffffffff ;; esac
 }
 qr_timestamp() { printf '20990101-000001\n'; }
 sleep() {
@@ -103,7 +105,15 @@ adb() {
     wait-for-device) return 1 ;;
     install)
       [ "$fault" != install ] || { echo 'synthetic transport failure' >&2; return 1; }
+      command cat "${@: -1}" >> "$state/installed-bytes" || return 99
       printf '%s\n' "$*" >> "$state/installed"
+      if [ "$id" = a ] && [ "${replace_apks:-0}" = 1 ] && [ ! -f "$tmp/replaced" ]; then
+        local name
+        for name in new old; do
+          printf 'replacement\n' > "$tmp/$name.next" && mv -f "$tmp/$name.next" "$tmp/$name.apk" || return 99
+        done
+        : > "$tmp/replaced"
+      fi
       echo Success ;;
     logcat)
       if [ "$2" = -d ]; then
@@ -160,7 +170,9 @@ reset_case() {
     mkdir -p "$tmp/state/$id"
     echo healthy > "$tmp/state/$id/fault"
   done
-  : > "$tmp/steps"; : > "$tmp/adb.log"
+  replace_apks=0; rm -f "$tmp/replaced"
+  printf 'new\n' > "$tmp/new.apk"; printf 'old\n' > "$tmp/old.apk"
+  : > "$tmp/steps"; : > "$tmp/adb.log"; : > "$tmp/verified-bytes"
 }
 run() {
   QUEST_SERIAL="$1"; export QUEST_SERIAL; shift
@@ -180,7 +192,7 @@ result_is() {
 # Serial IDs above contain no regexp characters; Wi-Fi assertions use fixed text.
 no_rollback() { ! grep -q '^install -r -d ' "$tmp/state/$1/adb.log" 2>/dev/null; }
 installed_once() { [ -f "$tmp/state/$1/installed" ] && [ "$(wc -l < "$tmp/state/$1/installed")" -eq 1 ]; }
-rolled_back() { grep -Fxq "install -r -d $tmp/old.apk" "$tmp/state/$1/installed"; }
+rolled_back() { grep -Eq '^install -r -d .*/old\.apk$' "$tmp/state/$1/installed"; }
 wait_run() {
   wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
 }
@@ -191,7 +203,7 @@ wait_result_is() {
 reset_case
 run "$a,$b" all --rollback "$tmp/old.apk"
 check 'healthy comma list builds and verifies the new APK exactly once' \
-  '[ "$rc" = 0 ] && [ "$(grep -c "^prepare$" "$tmp/steps")" = 1 ] && [ "$(grep -c "^build$" "$tmp/steps")" = 1 ] && [ "$(grep -Fxc "verify $tmp/new.apk" "$tmp/steps")" = 1 ]'
+  '[ "$rc" = 0 ] && [ "$(grep -c "^prepare$" "$tmp/steps")" = 1 ] && [ "$(grep -c "^build$" "$tmp/steps")" = 1 ] && [ "$(grep -Fxc "verify new.apk" "$tmp/steps")" = 1 ]'
 check 'healthy devices install in input order, each exactly once, without rollback' \
   'installed_once a && installed_once b && no_rollback a && no_rollback b && [ "$(grep "|install " "$tmp/adb.log" | cut -d "|" -f1)" = "$(printf "%s\n%s" "$a" "$b")" ]'
 check 'each device completes launch before the next install begins' \
@@ -230,12 +242,32 @@ run "$a $b" all --rollback "$tmp/old.apk"
 check 'B crash fails all and rolls back only B, leaving A healthy' \
   '[ "$rc" = 1 ] && installed_once a && no_rollback a && rolled_back b && [ "$(wc -l < "$tmp/state/b/installed")" -eq 2 ] && result_is launch "$a" OK && result_is launch "$b" CRASH && result_is rollback "$b" OK'
 check 'primary and rollback APKs are each verified once, not once per device' \
-  '[ "$(grep -Fxc "verify $tmp/new.apk" "$tmp/steps")" = 1 ] && [ "$(grep -Fxc "verify $tmp/old.apk" "$tmp/steps")" = 1 ]'
+  '[ "$(grep -Fxc "verify new.apk" "$tmp/steps")" = 1 ] && [ "$(grep -Fxc "verify old.apk" "$tmp/steps")" = 1 ]'
 check 'B rollback has its own artifacts without overwriting B install or A files' \
   '[ -s "$run_dir/devices/$b/install-adb.log" ] && [ -s "$run_dir/devices/$b/rollback-adb.log" ] && [ ! -e "$run_dir/devices/$a/rollback-adb.log" ]'
 wait_run
 check 'wait fails after B crash even though rollback succeeded and A is healthy' \
   '[ "$wrc" = 1 ] && wait_result_is launch "$a" OK && wait_result_is launch "$b" CRASH && wait_result_is rollback "$b" OK'
+
+reset_case
+replace_apks=1
+echo crash > "$tmp/state/b/fault"
+run "$a,$b" all --rollback "$tmp/old.apk"
+check 'list all installs the verified primary and rollback bytes after both source paths are replaced' \
+  '[ "$rc" = 1 ] && [ -f "$tmp/replaced" ] && [ "$(command cat "$tmp/verified-bytes")" = "$(printf "new\nold")" ] &&
+    [ "$(command cat "$tmp/state/a/installed-bytes")" = new ] &&
+    [ "$(command cat "$tmp/state/b/installed-bytes")" = "$(printf "new\nold")" ] && result_is rollback "$b" OK'
+
+for operation in install rollback; do
+  reset_case
+  replace_apks=1
+  if [ "$operation" = install ]; then payload=new; else payload=old; fi
+  run "$a,$b" "$operation" "$tmp/$payload.apk"
+  check "standalone list $operation keeps installing verified bytes after source replacement" \
+    '[ "$rc" = 0 ] && [ -f "$tmp/replaced" ] && [ "$(command cat "$tmp/verified-bytes")" = "$payload" ] &&
+      cmp -s "$tmp/state/a/installed-bytes" "$tmp/verified-bytes" && cmp -s "$tmp/state/b/installed-bytes" "$tmp/verified-bytes" &&
+      [ "$(command cat "$run_dir/summary/apk")" = "$tmp/$payload.apk" ] && [ ! -e "$QUEST_LOG_ROOT/run.lock" ]'
+done
 
 reset_case
 echo infra > "$tmp/state/b/fault"

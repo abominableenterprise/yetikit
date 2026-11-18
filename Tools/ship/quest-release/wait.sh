@@ -79,26 +79,28 @@ qr_wait_tails() {
 # Snapshot the atomic last-result once: PID (when observed), freshness and run folder must identify the watched
 # invocation. A pre-prepare failure may have no run folder, but cannot certify an older summary as successful.
 # $1 PID, $2 start time, $3 run folder (empty if unresolved). Only a pinned PID with a known start time may
-# resolve an unknown folder from this record. Prints the folder, then "rc cmd"; returns 1 if there is no match.
+# resolve an unknown folder from this record. Prints the folder, "rc cmd", then the optional list report.
 qr_wait_result() {
-  local f="$QR_LOGS/last-result" record p rc cmd run
+  local f="$QR_LOGS/last-result" record header p rc cmd run
   [ -f "$f" ] || return 1
   record="$(cat "$f")"
-  p="$(printf '%s\n' "$record" | sed -n 's/^pid=//p')"
-  rc="$(printf '%s\n' "$record" | sed -n 's/^rc=//p')"
-  cmd="$(printf '%s\n' "$record" | sed -n 's/^cmd=//p')"
-  run="$(printf '%s\n' "$record" | sed -n 's/^run=//p')"
+  header="${record%%$'\n'list-summary:$'\n'*}"
+  p="$(printf '%s\n' "$header" | sed -n 's/^pid=//p')"
+  rc="$(printf '%s\n' "$header" | sed -n 's/^rc=//p')"
+  cmd="$(printf '%s\n' "$header" | sed -n 's/^cmd=//p')"
+  run="$(printf '%s\n' "$header" | sed -n 's/^run=//p')"
   [ -z "$1" ] || [ "$p" = "$1" ] || return 1
   perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$(qr_wait_mtime "$f")" "${2:-0}" || return 1
   [ "$run" = "$3" ] \
     || { [ -z "$3" ] && [ -n "$1" ] && [ -n "$2" ]; } \
     || { [ -z "$run" ] && [ "$rc" != 0 ]; } || return 1
   printf '%s\n%s %s\n' "$run" "$rc" "$cmd"
+  if [ "$header" != "$record" ]; then printf '%s\n' "${record#*$'\n'list-summary:$'\n'}"; fi
 }
 
 qr_wait() {
   local minutes="${1:-45}" poll="${QUEST_WAIT_POLL:-5}" grace="${QUEST_WAIT_GRACE:-15}" t0 now deadline
-  local last_line seen=0 start="" run="" st wpid="" res
+  local last_line seen=0 start="" run="" st wpid="" res terminal
   case "$minutes" in ''|*[!0-9]*) qr_wait_say "usage: wait [minutes]"; return 2 ;; esac
   minutes=$((10#$minutes))
   t0="$(qr_wait_now)"; deadline=$((t0 + minutes * 60)); last_line="$t0"
@@ -142,11 +144,16 @@ qr_wait() {
         if res="$(qr_wait_result "$wpid" "$start" "$run")"; then
           [ -n "$run" ] || run="${res%%$'\n'*}"
           res="${res#*$'\n'}"
+          terminal="${res%%$'\n'*}"
+          qr_wait_say "the run (${terminal#* }, pid ${wpid:-of the last run}) exited ${terminal%% *}"
+          if [ "$terminal" != "$res" ]; then
+            printf '%s\n' "${res#*$'\n'}"
+            [ "${terminal%% *}" = 0 ]; return $?
+          fi
           [ -f "$run/summary.txt" ] && cat "$run/summary.txt"
-          qr_wait_say "the run (${res#* }, pid ${wpid:-of the last run}) exited ${res%% *}"
-          [ "${res%% *}" = 0 ] && [ -f "$run/summary.txt" ] \
+          [ "${terminal%% *}" = 0 ] && [ -f "$run/summary.txt" ] \
             && perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$(qr_wait_mtime "$run/summary.txt")" "${start:-0}" \
-            && qr_wait_verdict "$run" "${res#* }"
+            && qr_wait_verdict "$run" "${terminal#* }"
           return
         fi
         qr_wait_say "the run ${wpid:+(pid $wpid) }ended (lock gone) without writing its result (killed?)"
