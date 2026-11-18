@@ -18,17 +18,42 @@ QR_LAUNCH_INFRA=3
 qr_adb() { adb -s "$QUEST_SERIAL" "$@"; }
 qr_adb_shell() { qr_adb shell "$@" 2>/dev/null | tr -d '\r'; }
 
-# Prints why the Quest cannot be used and returns 1, or prints its state and returns 0. Read-only (doctor uses it).
+# Read-only: prints either the validated device or the failure reason. Doctor
+# requests status 2 for recognized transport failures; other callers get 1.
 qr_device_status() {
-  local state maker
-  state="$(qr_adb get-state 2>/dev/null)" || { echo "Quest $QUEST_SERIAL: adb get-state failed"; return 1; }
+  local state maker mode="${1:-}"
+  state="$(qr_device_probe "$mode" get-state)" || {
+    local rc=$?
+    echo "Quest $QUEST_SERIAL: adb get-state failed"
+    return "$rc"
+  }
   state="${state//$'\r'/}"
-  [ "$state" = device ] || { echo "Quest $QUEST_SERIAL is not connected (adb state '${state:-none}')"; return 1; }
-  maker="$(qr_adb shell getprop ro.product.manufacturer 2>/dev/null)" \
-    || { echo "Quest $QUEST_SERIAL: adb manufacturer query failed"; return 1; }
+  if [ "$state" != device ]; then
+    echo "Quest $QUEST_SERIAL is not connected (adb state '${state:-none}')"
+    if [ "$mode" = doctor ] && [ "$state" = offline ]; then return 2; fi
+    return 1
+  fi
+  maker="$(qr_device_probe "$mode" shell getprop ro.product.manufacturer)" || {
+    local rc=$?
+    echo "Quest $QUEST_SERIAL: adb manufacturer query failed"
+    return "$rc"
+  }
   maker="${maker//$'\r'/}"
   [ "$maker" = Oculus ] || { echo "device $QUEST_SERIAL is made by '${maker:-unknown}', not Oculus: refusing"; return 1; }
   echo "Quest $QUEST_SERIAL: adb state device, manufacturer Oculus"
+}
+
+qr_device_probe() {
+  local mode="$1" err; shift
+  if [ "$mode" != doctor ]; then qr_adb "$@" 2>/dev/null || return 1; return 0; fi
+  # Keep stdout for the state/manufacturer, using only stderr to classify a
+  # failed probe. Even a successful probe can print adb daemon startup chatter.
+  { err="$(LC_ALL=C qr_adb "$@" 2>&1 >&3)"; } 3>&1 && return 0
+  if printf '%s\n' "$err" | tr -d '\r' | grep -Eq \
+    "^(adb: (error: )?|error: )(device offline|no devices/emulators found|device '[^']+' not found|device not found|closed)$"; then
+    return 2
+  fi
+  return 1
 }
 
 qr_check_device() { local why; why="$(qr_device_status)" || qr_die "$why"; }

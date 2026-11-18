@@ -334,8 +334,15 @@ independently with `keytool`. It has **no baked-in value**. Without signing
 config, builds drop `XDG_CONFIG_HOME` so the debug path uses that same keystore;
 custom-signing builds preserve the inherited environment.
 `doctor` checks Java, apksigner, keystore, editor, free disk, adb, idle status
-and concurrent runs, without creating logs, starting Unity or changing a device.
-No real headset or Mac is needed for the synthetic shell tests.
+and concurrent runs without creating a release log or worktree, starting Unity
+or changing headset app data. If the selected adb transport drops or is offline,
+`doctor` tries one serial-scoped reconnect, waits for the device and rechecks
+its state and manufacturer, all under one `QR_DEVICE_CHECK_WAIT` deadline.
+It never resets other transports or retries an unauthorized or non-Oculus
+headset. Set `QUEST_SERIAL` explicitly when the headset is absent from
+`adb devices`; `doctor` does not guess which device to wait for. A timeout
+fails the device check and skips the idle probe. No real headset or Mac is
+needed for the synthetic shell tests.
 
 ### Configuration
 
@@ -473,6 +480,14 @@ Tools/yetikit/quest-release.sh wait 28
 `cleanup` removes only clean worktrees, without forcing Git removal. Any local
 change (even a material/settings re-save) is preserved for manual inspection;
 file extensions alone never prove disposable noise.
+
+`prepare` (also used by `all`) fetches origin without prompting. Quest release
+retries Git `fetch`, `pull` and `ls-remote` on recognized transient transport
+errors (for example, connection timeouts or HTTP 503). It makes at most three
+attempts, waiting one second before the second and two before the third. This
+caps attempts, not the duration of an individual Git command. Authentication,
+missing refs and local Git errors are not retried. Exhausted retries report
+failure and stop `prepare` before worktree creation.
 
 `all` fetches origin and resolves a commit, creates separate detached test/build
 worktrees with independent cloned Libraries, runs gate/build in parallel, then
@@ -710,6 +725,7 @@ retains its existing 0-success / 1-failure contract.
 | `QR_GATE_TIMEOUT`, `QR_BUILD_TIMEOUT` | `1800` seconds each. Compatibility aliases: `QUEST_GATE_TIMEOUT`, `QUEST_BUILD_TIMEOUT`. |
 | `QR_BUILD_STALL_SECONDS` | `300` seconds without log growth; one retry. |
 | `QR_ADB_WAIT`, `QR_LAUNCH_WAIT` | `120` / `60` seconds. Compatibility aliases: `QUEST_ADB_WAIT`, `QUEST_LAUNCH_WAIT`. |
+| `QR_DEVICE_CHECK_WAIT` | `10` seconds (positive integer) for doctor's selected-device probe, reconnect/wait and recheck combined. |
 | `QR_PERF_PID_WAIT`, `QR_PERF_RESTORE_WAIT` | `20` / `10` seconds (positive integers): initial perf PID discovery / each proximity restoration attempt. |
 | `QUEST_GATE_CATEGORIES` | `Gfx;MacOnly`; `--full` removes the category filter. |
 | `QUEST_KNOWN_FLAKES` | Configured `knownFlakes`, otherwise no list. |

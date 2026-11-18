@@ -14,8 +14,8 @@ qr_check_disk() {
   qr_log "disk: ${free} GB free (need ${QR_MIN_FREE_GB})"
 }
 
-# git in the main repository (where this script lives).
-qr_git() { git -C "$QR_REPO" "$@"; }
+# shellcheck source=Tools/ship/quest-release/git-retry.sh
+. "$(dirname "${BASH_SOURCE[0]}")/git-retry.sh"
 
 # APFS copy-on-write clone of directory $1 to $2: /bin/cp explicitly, as GNU coreutils' cp (no -c) may shadow it on PATH.
 # A real directory, never a symlink: two editors must not share one Library.
@@ -155,7 +155,7 @@ qr_prepare() {
     return 127 # no executable: do not let bare env print the release environment
   }'
   GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$ssh_wrapper; ${ssh_assignments}qr_ssh $ssh_prefixes $ssh_command" \
-    qr_git fetch --quiet origin || qr_die "git fetch origin failed (non-interactive): authenticate with git / load your SSH key into ssh-agent, then retry prepare"
+    qr_git fetch --quiet origin || qr_die "git fetch origin failed (non-interactive): check the network or authenticate with git / load your SSH key into ssh-agent, then retry prepare"
   sha="$(qr_git rev-parse --verify --quiet "$ref^{commit}")" || qr_die "unknown ref $ref"
   qr_new_run "$sha" "$ref" pending
   qr_lock_note_run

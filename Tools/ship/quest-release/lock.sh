@@ -39,14 +39,15 @@ qr_lock_read() {
 
 # Take the lock for this process ($$), or refuse at once when a live run holds it. A stale lock is removed (logged).
 qr_lock_acquire() {
-  local d st _
+  local d st _ publish="${1:-1}"
   d="$(qr_lock_dir)"
   for _ in 1 2; do
     if mkdir "$d" 2>/dev/null; then
       if ! { printf '%s\n' "$$" > "$d/pid" &&
              printf '%s\n' "${QR_RUN_DIR:-pending}" > "$d/run_dir" &&
-             printf '%s\n' "$$" > "$QR_LOGS/current-invocation.$$" &&
-             mv -f "$QR_LOGS/current-invocation.$$" "$QR_LOGS/current-invocation"; }; then
+             { [ "$publish" = 0 ] ||
+               { printf '%s\n' "$$" > "$QR_LOGS/current-invocation.$$" &&
+                 mv -f "$QR_LOGS/current-invocation.$$" "$QR_LOGS/current-invocation"; }; }; }; then
         qr_log "error: cannot write lock metadata in $d"
         rm -rf "$d"
         return 1
