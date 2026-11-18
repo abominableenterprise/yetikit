@@ -4,6 +4,7 @@ def relpath:
   if nonempty then (startswith("/") | not) and
     (split("/") | all(. != "..")) and . != "."
   else false end;
+def subdir: relpath and (split("/") | any(. != "" and . != "."));
 def apk_asset:
   if type == "object" then keys == ["glob"] and (.glob | relpath)
   else relpath end;
@@ -105,10 +106,10 @@ elif has("noise") and (.noise | has("fixedTimestepCount")) and (.noise.fixedTime
 elif has("noise") and ([.noise | to_entries[] | select(.key == "atlasPath" or .key == "timeManagerPath" or .key == "specularMaterialPath" or .key == "propsDir") | select(.value | relpath | not) | .key] | length) > 0 then
   invalid("noise." + ([.noise | to_entries[] | select(.key == "atlasPath" or .key == "timeManagerPath" or .key == "specularMaterialPath" or .key == "propsDir") | select(.value | relpath | not) | .key][0]))
 elif has("tests") and (.tests | type) != "object" then invalid("tests")
-elif has("tests") and (.tests | has("root")) and (.tests.root | relpath | not) then invalid("tests.root")
-elif has("tests") and (.tests | has("editModeRoot")) and (.tests.editModeRoot | relpath | not) then invalid("tests.editModeRoot")
-elif has("tests") and (.tests | has("scriptsRoot")) and (.tests.scriptsRoot | relpath | not) then invalid("tests.scriptsRoot")
-elif has("tests") and (.tests | has("editorRoot")) and (.tests.editorRoot | relpath | not) then invalid("tests.editorRoot")
+elif has("tests") and (.tests | has("root")) and (.tests.root | subdir | not) then invalid("tests.root")
+elif has("tests") and (.tests | has("editModeRoot")) and (.tests.editModeRoot | subdir | not) then invalid("tests.editModeRoot")
+elif has("tests") and (.tests | has("scriptsRoot")) and (.tests.scriptsRoot | subdir | not) then invalid("tests.scriptsRoot")
+elif has("tests") and (.tests | has("editorRoot")) and (.tests.editorRoot | subdir | not) then invalid("tests.editorRoot")
 elif has("tests") and (.tests | has("builderFixtures")) and (.tests.builderFixtures | type) != "object" then invalid("tests.builderFixtures")
 elif has("tests") and (.tests | has("builderFixtures")) and (.tests.builderFixtures | all(.[]; methods) | not) then invalid("tests.builderFixtures")
 elif (.tests // {} | has("prPure")) and (.tests.prPure | type) != "object" then invalid("tests.prPure")

@@ -50,10 +50,11 @@ cs_declared_types() {
     }' "$1" | sort -u
 }
 
-# Paths changed since the merge-base $1: committed and uncommitted (tracked) changes, plus untracked files.
+# NUL-delimited project-relative paths changed since the merge-base $1, plus untracked files.
+# Keep both sides of renames (e.g. moved builders or pure-test infrastructure).
 pr_changed_paths() {
-  git diff --name-only "$1" --
-  git ls-files --others --exclude-standard
+  git diff --no-renames --name-only --relative -z "$1" -- &&
+    git ls-files --others --exclude-standard -z
 }
 
 # The configured EditMode test folder for a scripts area, otherwise the folder
@@ -85,11 +86,10 @@ pr_test_files() {
 # Explicit builder-to-fixture dependencies, independent of scene-area membership. These fixtures exercise the
 # builder's output but are not area tests; keep their real Gfx categories as the source of render-pass eligibility.
 pr_builder_tests() {
-  local p fixtures
-  fixtures="$(ship_config_get '.tests.builderFixtures // {} | to_entries[] | .key as $path | .value[] | [$path, .] | @tsv')" || return
-  while IFS= read -r p; do
-    awk -F '\t' -v path="$p" '$1 == path { print $2 }' <<< "$fixtures"
-  done | sort -u
+  # Compare Git paths directly to JSON keys, without TSV or awk escape processing.
+  jq -Rrs --slurpfile config <(printf '%s\n' "$SHIP_CONFIG_JSON") '
+    split("\u0000")[] | select(length > 0) | $config[0].tests.builderFixtures[.][]?
+  ' | sort -u
 }
 
 # Gfx fixtures touched since $1 (stdout only); selection reasons go to stderr. Runtime types only search their
@@ -107,7 +107,8 @@ pr_gfx_fixtures() {
   max="$(awk -v n="$max" 'BEGIN { printf "%.0f", n }')"
   tagged="$(find "$tests_root" -name '*.cs' 2>/dev/null | sort | cs_classes 1)"
   [ -n "$tagged" ] || return 0
-  rows="$( { while IFS= read -r p; do
+  rows="$( {
+  pr_changed_paths "$1" | LC_ALL=C sort -zu | while IFS= read -r -d '' p; do
     files=""; reason=""
     case "$p" in
       "$edit_root/"*.cs) files="$p"; reason="changed test $p" ;;
@@ -130,17 +131,17 @@ pr_gfx_fixtures() {
         printf '%s\t%s\t%s\n' "$fixture" "$f" "$reason"
       done < <(cs_classes 0 <<< "$f")
     done <<< "$files"
-  done < <(pr_changed_paths "$1" | sort -u)
+  done || exit 1
   # Explicit dependencies need not mention a builder identifier in test source.
-  while IFS= read -r fixture; do
+  pr_changed_paths "$1" | pr_builder_tests | while IFS= read -r fixture; do
     [ -n "$fixture" ] || continue
     grep -Fxq -- "$fixture" <<< "$tagged" || continue
     while IFS= read -r f; do
       cs_classes 0 <<< "$f" | grep -Fxq -- "$fixture" || continue
       printf '%s\t%s\t%s\n' "$fixture" "$f" 'configured builder dependency'
     done < <(find "$tests_root" -name '*.cs' 2>/dev/null | sort)
-  done < <(pr_changed_paths "$1" | pr_builder_tests)
-  } | sort -u)"
+  done
+  } | sort -u)" || return
   [ -n "$rows" ] || return 0
   selected="$(cut -f1 <<< "$rows" | sort -u)"
   count="$(wc -l <<< "$selected")"
@@ -187,7 +188,7 @@ pr_gfx_budget() {
   log "test pr: selected $count Gfx fixtures; estimated tests ${estimate} s (90 s/fixture, rough; heavy fixtures can exceed this); editor-inclusive timeout $UNITY_GFX_TIMEOUT s"
 }
 
-# The scene areas a change set (stdin, one path per line) touches, one per line: a <Area>.prefab (or its .meta)
+# The scene areas a NUL-delimited change set on stdin touches, one per line: a <Area>.prefab (or its .meta)
 # under scene.areasDir, or a file the $SCENE_AREAS table (scene.areasFile) lists as that area's builder
 # ("<Area> <path glob>..." per line, # comments). Both sources are optional.
 pr_areas() {
@@ -195,7 +196,7 @@ pr_areas() {
   areas_dir="$(ship_config_get '.scene.areasDir // ""')" || return
   areas_dir="${areas_dir%/}"
   local -a patterns
-  while IFS= read -r p; do
+  while IFS= read -r -d '' p; do
     if [ -n "$areas_dir" ]; then
       case "$p" in
         "$areas_dir/"*.prefab|"$areas_dir/"*.prefab.meta)

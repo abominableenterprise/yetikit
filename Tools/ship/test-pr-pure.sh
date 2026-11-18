@@ -19,8 +19,7 @@ pr_pure_fixtures() {
   if [ "$max" = 0 ]; then pr_pure_full 'max is 0'; return; fi
   regex="$(ship_config_get '.tests.prPure.fallbackRegex // empty')" || return
   # Keep both sides of renames for infrastructure checks and preserve literal paths.
-  { git diff --no-renames --name-only --relative -z "$1" -- && git ls-files --others --exclude-standard -z; } |
-    pr_pure_select "$max" "$regex"
+  pr_changed_paths "$1" | pr_pure_select "$max" "$regex"
 }
 
 pr_pure_select() {
