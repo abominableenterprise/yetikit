@@ -9,7 +9,7 @@ qr_discard_noise() (
   common="$(git rev-parse --path-format=absolute --git-common-dir)" || return 2
   expected="$(qr_git rev-parse --path-format=absolute --git-common-dir)" || return 2
   [ "$top" = "$PWD" ] && [ "$common" -ef "$expected" ] &&
-    [ "$(git rev-parse HEAD)" = "$QR_SHA" ] || return 2
+    qr_cleanup_expected_head . || return 2
 
   scratch="$(mktemp -d)" || return 2
   trap 'rm -rf -- "$scratch"' EXIT
@@ -51,6 +51,7 @@ qr_discard_noise() (
   qr_noise_status > "$scratch/current-status" && cmp -s "$scratch/status" "$scratch/current-status" &&
     qr_noise_patch > "$scratch/current-patch" && cmp -s "$scratch/patch" "$scratch/current-patch" || return 2
   [ -s "$scratch/patch" ] || return 2
+  qr_cleanup_expected_head . || return 2
   git -c apply.ignoreWhitespace=no apply --reverse --whitespace=nowarn "$scratch/patch" || return 2
 )
 
