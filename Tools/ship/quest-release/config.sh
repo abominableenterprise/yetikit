@@ -7,9 +7,12 @@ qr_positive_seconds() {
   [ "${#2}" -le 7 ] || { qr_log "error: $1 is too large"; return 1; }
 }
 
+qr_repo_dir() {
+  cd "${PROJECT:-${QUEST_REPO:-$QR_DIR/../..}}" && pwd
+}
+
 qr_config() {
-  QR_REPO="${PROJECT:-${QUEST_REPO:-$(cd "$QR_DIR/../.." && pwd)}}"
-  QR_REPO="$(cd "$QR_REPO" && pwd)" || return 1
+  QR_REPO="$(qr_repo_dir)" || return 1
   QR_CONFIG_FILE="${YETIKIT_CONFIG:-$QR_REPO/yetikit.json}"
   case "$QR_CONFIG_FILE" in /*) ;; *) QR_CONFIG_FILE="$PWD/$QR_CONFIG_FILE" ;; esac
   command -v jq >/dev/null 2>&1 || { qr_log 'error: jq is required'; return 1; }

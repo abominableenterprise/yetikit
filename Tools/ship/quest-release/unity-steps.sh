@@ -165,7 +165,8 @@ qr_last_installed_sha() {
       grep -qE '^(install|rollback) ok' "$d/summary/install" 2>/dev/null || continue
       ts="$(printf '%s\n' "${d##*/}" | sed -n 's/.*-\([0-9]\{8\}-[0-9]\{6\}\).*/\1/p')"
       sha=""
-      apk="$(sed -n '1s/^[^(]*(\(.*\)), playtest\.json CHANGED$/\1/p; 1s/^[^(]*(\(.*\))$/\1/p' "$d/summary/install")"
+      # Match a historical basename without consulting today's config: the file list may have changed.
+      apk="$(LC_ALL=C sed -nE '1s/^(install|rollback) ok \((.*)\)(, [A-Za-z0-9_.-]+ CHANGED)?$/\2/p' "$d/summary/install")"
       if [ -f "$apk" ]; then sha="$(qr_apk_commit "$apk")"; fi
       # A missing explicit APK cannot be tied to this run's prepared commit. Leave the baseline unknown
       # (last eight merges) unless installed_commit or byte-matched immutable build evidence identifies it.
