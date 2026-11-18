@@ -96,11 +96,11 @@ qr_parallel_unity() {
 }
 
 qr_all() {
-  local ref="" rollback="" force="" full="" apk rc=0
+  local ref="" rollback="" force=0 full="" apk rc=0 rollback_snapshot='' snapshot
   while [ $# -gt 0 ]; do
     case "$1" in
       --rollback) rollback="${2:-}"; [ -n "$rollback" ] || qr_die "--rollback needs an APK"; shift ;;
-      --force) force=--force ;;
+      --force) force=1 ;;
       --full) full=--full ;;
       --notes) qr_notes_option "${2:-}"; shift ;;
       -*) qr_die "all: unknown option $1" ;;
@@ -108,7 +108,11 @@ qr_all() {
     esac
     shift
   done
-  [ -z "$rollback" ] || [ -f "$rollback" ] || qr_die "--rollback APK $rollback does not exist"
+  if [ -n "$rollback" ]; then
+    [ -f "$rollback" ] || qr_die "--rollback APK $rollback does not exist"
+    # The next build may replace the retained path supplied as --rollback.
+    rollback_snapshot="$(qr_apk_snapshot "$rollback" rollback)" || return 1
+  fi
   # Unlike single-device all, list all sends Java failures through list reporting.
   if [ "${#QR_SERIALS[@]}" -gt 1 ]; then qr_java_setup || return 1; fi
   ( qr_prepare "$ref" ) || return 1
@@ -137,33 +141,20 @@ qr_all() {
     return 1
   fi
   if [ "${#QR_SERIALS[@]}" -gt 1 ]; then
-    local force_value=0 snapshot
-    [ -z "$force" ] || force_value=1
-    if ! snapshot="$(qr_multi_snapshot "$apk" primary)" || ! ( qr_verify "$snapshot" "$apk" ); then
+    if ! snapshot="$(qr_apk_snapshot "$apk" primary)" || ! ( qr_verify "$snapshot" "$apk" ); then
       qr_set install 'skipped: verify failed'
       return 3
     fi
-    qr_multi all "$snapshot" "$force_value" "$rollback" || rc=$?
+    qr_multi all "$snapshot" "$force" "$rollback_snapshot" "$rollback" || rc=$?
     ( qr_cleanup ) || true
     return "$rc"
   fi
   ( qr_verify "$apk" ) || { qr_set install "skipped: verify failed"; return 1; }
   QR_VERIFIED_APK="$apk"
-  # shellcheck disable=SC2086 # $force is empty or --force
-  ( qr_install "$apk" $force ) || return 1
-  ( qr_launch ) || rc=$?
-  case "$rc" in
-    "$QR_LAUNCH_OK") ;;
-    "$QR_LAUNCH_CRASH")
-      if [ -n "$rollback" ]; then
-        qr_log "launch shows a crash: rolling back to $rollback"
-        # shellcheck disable=SC2086 # $force is empty or the user's --force
-        ( qr_rollback "$rollback" $force ) || qr_log "rollback failed"
-      else
-        qr_log "launch shows a crash and no --rollback <apk> was given"
-      fi ;;
-    *) qr_log "launch could not be verified (infrastructure): not rolling back" ;;
-  esac
+  qr_set launch ''
+  qr_device_locked qr_all_device_locked "$apk" "$force" "$rollback_snapshot" "$rollback" || rc=$?
+  # Keep worktrees on an install or device-lock failure, as before.
+  [ -n "$(qr_get launch '')" ] || return 1
   ( qr_cleanup ) || true
   return "$rc"
 }

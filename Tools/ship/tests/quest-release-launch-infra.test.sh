@@ -109,6 +109,7 @@ run() {
   rc=0; ( qr_main "$@" ) > "$tmp/out" 2> "$tmp/err" || rc=$?
   summary="$(find "$tmp/wt/release-logs" -name summary.txt | head -n1)"
 }
+rolled_back() { grep -q '^install -r -d .*/rollback/old[.]apk$' "$tmp/installed"; }
 no_rollback() { [ "$(wc -l < "$tmp/installed")" = 1 ] && ! grep -q 'install -r -d' "$tmp/adb.log"; }
 infra() { [ "$rc" = 3 ] && grep -q '^launch:      INFRA:' "$summary"; }
 fault=healthy busy=0
@@ -133,7 +134,7 @@ for fault in blocked gone; do
 done
 for fault in fatal never-fatal never-anr dies blocked-fatal blocked-dies; do
   run all --rollback "$tmp/old.apk"
-  check "all $fault is a confirmed CRASH and rolls back" '[ "$rc" = 1 ] && grep -q "^launch:      CRASH:" "$summary" && grep -q "install -r -d $tmp/old.apk" "$tmp/installed"'
+  check "all $fault is a confirmed CRASH and rolls back" '[ "$rc" = 1 ] && grep -q "^launch:      CRASH:" "$summary" && rolled_back'
 done
 # With no crash records, only the initial PID and its later absence can justify
 # rollback. A simultaneous OS block must not turn that disappearance into INFRA.
@@ -144,13 +145,13 @@ for fault in dies-no-records blocked-dies-no-records; do
   check "$fault has no crash records" \
     '[ -f "$logcat" ] && ! grep -Eq "FATAL|Process:" "$logcat" && [ -f "$crashes" ] && [ ! -s "$crashes" ]'
   check "all $fault is a CRASH from disappearance and rolls back" \
-    '[ "$rc" = 1 ] && grep -q "^launch:      CRASH:.*fatal 0, alive no" "$summary" && grep -Fxq "install -r -d $tmp/old.apk" "$tmp/installed"'
+    '[ "$rc" = 1 ] && grep -q "^launch:      CRASH:.*fatal 0, alive no" "$summary" && rolled_back'
 done
 fault=fatal busy=1
 run all --rollback "$tmp/old.apk"
 check 'crash rollback respects idle check without user force' '[ "$rc" = 1 ] && no_rollback && grep -q "headset in use" "$tmp/err" && grep -q "IN USE.*refused" "$summary"'
 run all --force --rollback "$tmp/old.apk"
-check 'user force is forwarded to crash rollback' '[ "$rc" = 1 ] && grep -q "install -r -d $tmp/old.apk" "$tmp/installed" && grep -q "IN USE.*--force given" "$summary"'
+check 'user force is forwarded to crash rollback' '[ "$rc" = 1 ] && rolled_back && grep -q "IN USE.*--force given" "$summary"'
 fault=other-blocked busy=0
 run all --rollback "$tmp/old.apk"
 check 'another package sharing our activity does not block a healthy launch' '[ "$rc" = 0 ] && no_rollback'

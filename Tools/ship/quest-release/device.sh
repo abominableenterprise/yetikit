@@ -148,9 +148,11 @@ qr_install_apk() {
 
 qr_install_apk_locked() {
   local apk="$1" force="$2" label="$3" flags="${4:-}" after dir out rc=0 f before_file installed_sha
+  local baseline='' recorded before
   # This attempt is the step's latest result even when the APK check stops it (any earlier success is stale).
   qr_set install "$label stopped before adb install (see release.log)"
   qr_set permissions "-"
+  qr_set data_hash "not checked for this $label"
   [ -f "$apk" ] || qr_die "$label: no APK at '$apk'"
   # Explicit APKs and rollbacks must pass the same launcher/signer gate as `all`.
   if [ "$apk" != "${QR_VERIFIED_APK:-}" ] && [ "$apk" != "${QR_VERIFIED_ROLLBACK_APK:-}" ]; then
@@ -160,14 +162,17 @@ qr_install_apk_locked() {
   qr_await_device
   qr_idle_check "$force"
   before_file="$QR_RUN_DIR/$label-data-before.txt"
-  : > "$before_file"
   for f in $QR_DATA_FILES; do
-    after="$(qr_device_sha "$f")"
-    [ "$after" != unknown ] || qr_die "$label: cannot hash $f on the device"
-    printf '%s %s\n' "$after" "$f" >> "$before_file"
+    before="$(qr_device_sha "$f")"
+    [ "$before" != unknown ] || qr_die "$label: cannot hash $f on the device"
+    baseline="${baseline:+$baseline$'\n'}$before $f"
   done
+  printf '%s\n' "$baseline" > "$before_file" || qr_die "$label: cannot write data baseline"
   dir="$(qr_backup)" || exit 1
   qr_set backup "$dir (verified against the device)"
+  recorded="$(cat "$before_file")" && [ "$recorded" = "$baseline" ] \
+    || qr_die "$label: missing or incomplete data baseline before install"
+  qr_idle_check "$force"
   qr_log "$label: adb install -r${flags:+ $flags} $apk"
   # shellcheck disable=SC2086 # $flags is empty or -d
   out="$(qr_adb install -r $flags "$apk" 2>&1)" || rc=$?
@@ -185,8 +190,10 @@ qr_install_apk_locked() {
   qr_set installed_commit "$installed_sha"
   qr_set installed_at "$(qr_timestamp)"
   qr_set install "$label: adb install ok ($apk), data checks not finished"
-  local before
+  recorded="$(cat "$before_file")" && [ "$recorded" = "$baseline" ] \
+    || qr_die "$label: missing or incomplete data baseline after install; backup: $dir"
   while read -r before f; do
+    [ -n "$f" ] || continue # no files configured
     after="$(qr_device_sha "$f")"
     [ "$after" != unknown ] || qr_die "$label: cannot hash $f after install; backup: $dir"
     if [ "$after" != "$before" ]; then
@@ -194,7 +201,7 @@ qr_install_apk_locked() {
       qr_set install "$label ok ($apk), data CHANGED"
       qr_die "$label: $f changed during install ($before -> $after); backup: $dir"
     fi
-  done < "$before_file"
+  done <<< "$recorded"
   local permissions
   permissions="$(qr_permission_states)"
   qr_set permissions "$permissions"
@@ -324,13 +331,41 @@ qr_launch() (
   # Replace stale success/crash even if the device lock refuses before launch.
   qr_set launch "INFRA: launch did not complete (device lock or setup failed; see release.log)"
   qr_device_locked qr_launch_locked "$@" || rc=$?
-  case "$rc" in
+  qr_launch_result "$rc"
+)
+
+qr_launch_result() {
+  case "$1" in
     "$QR_LAUNCH_OK") return "$QR_LAUNCH_OK" ;;
     "$QR_LAUNCH_CRASH")
       case "$(qr_get launch)" in CRASH:*) return "$QR_LAUNCH_CRASH" ;; esac ;;
   esac
   return "$QR_LAUNCH_INFRA"
-)
+}
+
+# Single-device `all` retains the root summary and holds the headset lock for
+# the entire transaction. Isolate commands that can exit via qr_die.
+qr_all_device_locked() {
+  local apk="$1" force="$2" rollback="$3" rollback_source="$4" rc=0
+  ( qr_install_apk_locked "$apk" "$force" install ) || return 1
+  qr_set launch 'INFRA: launch did not complete (see release.log)'
+  ( qr_launch_locked ) || rc=$?
+  qr_launch_result "$rc"; rc=$?
+  case "$rc" in
+    "$QR_LAUNCH_OK") ;;
+    "$QR_LAUNCH_CRASH")
+      if [ -n "$rollback" ]; then
+        qr_log "launch shows a crash: rolling back to the staged copy of $rollback_source"
+        ( qr_verify_rollback_snapshot "$rollback" "$rollback_source" &&
+          QR_VERIFIED_ROLLBACK_APK="$rollback" qr_install_apk_locked "$rollback" "$force" rollback -d
+        ) || qr_log "rollback failed"
+      else
+        qr_log 'launch shows a crash and no --rollback <apk> was given'
+      fi ;;
+    *) qr_log 'launch could not be verified (infrastructure): not rolling back' ;;
+  esac
+  return "$rc"
+}
 
 qr_launch_locked() {
   local cat="$QR_RUN_DIR/launch-logcat.txt" fps errs fatal alive=no pid start_pid findings crash=0 crashes blocked

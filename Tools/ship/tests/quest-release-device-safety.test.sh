@@ -19,7 +19,8 @@ qr_die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 qr_log() { printf '%s\n' "$*" >&2; }
 qr_set() { printf '%s\n' "$2" > "$QR_RUN_DIR/$1"; }
 qr_get() { :; }
-qr_timestamp() { printf '20260101-000000\n'; }
+tick=0
+qr_timestamp() { printf '20260101-%06d\n' "$tick"; }
 qr_sha256() { sha256sum "$1" | awk '{print $1}'; }
 # This fixture tests device safety, not release-build provenance.
 qr_apk_commit() { :; }
@@ -27,7 +28,11 @@ qr_record_latest_install() { :; }
 qr_check_device() { :; }
 qr_java_setup() { :; }
 qr_device_locked() { "$@"; } # Lock protocol is covered independently.
-qr_idle_check() { :; }
+qr_idle_check() {
+  if [ "${BUSY_AFTER_BACKUP:-0}" = 1 ] && [ -f "$tmp/backup-read" ]; then
+    qr_die 'headset in use after backup'
+  fi
+}
 # Standalone installation must verify the APK before touching device data.
 qr_verify() { printf '%s\n' "$1" >> "$tmp/verify-count"; [ "${VERIFY_FAIL:-0}" = 0 ]; }
 
@@ -60,9 +65,10 @@ adb() {
           bash -c "$1" ;;
         *) bash -c "$1" ;;
       esac ;;
-    exec-out) [ "$2" = cat ] && cat "$3" ;;
+    exec-out) : > "$tmp/backup-read"; [ "$2" = cat ] && cat "$3" ;;
     install) printf 'installed\n' >> "$tmp/install-count"; printf 'Success\n'
-      if [ "${AFTER_INSTALL_ERROR:-0}" = 1 ]; then : > "$tmp/after-install-error"; fi ;;
+      if [ "${AFTER_INSTALL_ERROR:-0}" = 1 ]; then : > "$tmp/after-install-error"; fi
+      if [ "${LOSE_BASELINE:-0}" = 1 ]; then : > "$QR_RUN_DIR/install-data-before.txt"; fi ;;
     *) return 1 ;;
   esac
 }
@@ -70,7 +76,8 @@ adb() {
 fails=0
 check() { if eval "$2"; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s\n' "$1"; fails=$((fails+1)); fi; }
 run() {
-  rm -f "$tmp/install-count" "$tmp/after-install-error" "$tmp/verify-count"
+  tick=$((tick + 1))
+  rm -f "$tmp/install-count" "$tmp/after-install-error" "$tmp/verify-count" "$tmp/backup-read" "$QR_RUN_DIR/data_hash"
   rc=0
   ( qr_install_apk "$tmp/game.apk" 0 install ) > "$tmp/out" 2> "$tmp/err" || rc=$?
 }
@@ -97,6 +104,21 @@ check 'unreadable optional throws.csv blocks backup and install' \
 SHELL_ERROR=1 run
 check 'adb shell status failure with hash-like stdout blocks install' \
   '[ "$rc" != 0 ] && [ ! -f "$tmp/install-count" ]'
+
+BUSY_AFTER_BACKUP=1 run
+check 'a headset that becomes busy during backup is not installed over' \
+  '[ "$rc" != 0 ] && [ ! -f "$tmp/install-count" ] && grep -q "in use after backup" "$tmp/err"'
+
+baseline="$QR_RUN_DIR/install-data-before.txt"
+rm -f "$baseline"; mkdir "$baseline"
+run
+check 'an unwritable baseline prevents install' \
+  '[ "$rc" != 0 ] && [ ! -f "$tmp/install-count" ]'
+rmdir "$baseline"
+
+LOSE_BASELINE=1 run
+check 'a truncated baseline cannot report data unchanged after install' \
+  '[ "$rc" != 0 ] && [ -f "$tmp/install-count" ] && ! grep -qs "unchanged" "$QR_RUN_DIR/data_hash"'
 
 # A read failure AFTER a successful install must be reported as a failed safety check, not a valid changed hash.
 # Use a dedicated stub state file because install runs in a command substitution.
