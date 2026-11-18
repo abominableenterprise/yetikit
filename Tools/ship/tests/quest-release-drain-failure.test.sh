@@ -27,21 +27,25 @@ fake_zombie_group() {
   if [ "$scenario" = timebox ]; then [ "$1" != "$step_group" ]; else [ "$1" = "$step_group" ]; fi
 }
 kill() {
-  local pgid="${3:-}" probes
+  local pgid="${3:-}" probes escalations=0
   pgid="${pgid#-}"
   case "$*" in
     '-0 -- -'*)
       fake_zombie_group "$pgid" || return 1
       if [ -s "$QR_LOGS/escalated" ]; then
         read -r probes < "$QR_LOGS/probes" || exit 98
-        # A backstop so an unbounded loop fails instead of hanging the suite.
+        # Bound each post-escalation poll loop even if it never signals again.
         [ "$probes" -lt 60 ] || exit 99
         printf '%s\n' "$((probes + 1))" > "$QR_LOGS/probes"
       fi ;;
     '-TERM -- -'*|'-CONT -- -'*) : ;;
     '-KILL -- -'*)
       fake_zombie_group "$pgid" || exit 98
-      [ -s "$QR_LOGS/probes" ] || printf '0\n' > "$QR_LOGS/probes"
+      if [ -s "$QR_LOGS/escalations" ]; then read -r escalations < "$QR_LOGS/escalations"; fi
+      # The owner can retry the timebox's drain once, but neither drain may loop on KILL.
+      [ "$escalations" -lt 2 ] || exit 99
+      printf '%s\n' "$((escalations + 1))" > "$QR_LOGS/escalations"
+      printf '0\n' > "$QR_LOGS/probes"
       printf '%s\n' "$pgid" > "$QR_LOGS/escalated" ;;
     *) builtin kill "$@" ;;
   esac
