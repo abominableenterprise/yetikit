@@ -217,14 +217,17 @@ qr_drain_group() {
   kill -TERM -- "-$group" 2>/dev/null || true
   kill -CONT -- "-$group" 2>/dev/null || true
   while qr_own_group_alive "$group"; do
-    if [ "$SECONDS" -ge "$deadline" ]; then kill -KILL -- "-$group" 2>/dev/null || true; fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      qr_group_escalate "$group" || return 1
+      break
+    fi
     sleep 0.1
   done
   wait "$group" 2>/dev/null || true
 }
 
 qr_lock_drain_step() {
-  qr_drain_group "$QR_ACTIVE_STEP"
+  qr_drain_group "$QR_ACTIVE_STEP" || return 1
   qr_workers_drain "$QR_ACTIVE_STEP_DIR" || return 1
   rm -rf "$QR_ACTIVE_STEP_DIR" || return 1
   QR_ACTIVE_STEP=""; QR_ACTIVE_STEP_DIR=""
@@ -237,7 +240,10 @@ qr_cancel() {
   trap '' HUP INT TERM
   if [ -n "$group" ]; then
     # Perf recovery still needs the old group ID to resume its device lock.
-    qr_lock_drain_step || exit 1
+    if ! qr_lock_drain_step; then
+      qr_lock_result "$cmd" 1
+      exit 1
+    fi
   fi
   if [ "$cmd" = perf ] || [ -f "$(qr_state_file)" ]; then qr_load_state; fi
   [ "$cmd" != perf ] || qr_perf_cancel

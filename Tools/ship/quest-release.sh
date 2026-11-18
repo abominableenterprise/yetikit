@@ -258,14 +258,17 @@ qr_main() {
   if [ "$list_release" = 1 ]; then
     qr_lock_note_run
     [ "$(qr_get multi_command '')" = "$cmd" ] || qr_multi_begin "$cmd"
+    # The device verdict cannot certify success if workers are still unconfirmed.
+    if [ -n "${QR_ACTIVE_STEP:-}" ]; then qr_set multi_result 3; fi
     rc=0; qr_multi_finish || rc=$?
+    if [ -n "${QR_ACTIVE_STEP:-}" ]; then rc=3; fi
   fi
   qr_summary
   if ! qr_lock_result "$cmd" "$rc" "$list_release"; then
     qr_log "error: cannot persist the $cmd result in $QR_LOGS"
     [ "$rc" != 0 ] || rc=1
   fi
-  qr_lock_release
+  qr_lock_release || true # An unconfirmed worker exit intentionally retains the lock.
   return "$rc"
 }
 

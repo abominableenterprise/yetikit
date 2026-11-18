@@ -26,13 +26,28 @@ qr_worker_await() {
   return 1
 }
 
+# KILL does not remove an unreaped zombie or guarantee immediate exit.
+# Bound polling even if ps keeps failing and kill -0 still sees the group.
+qr_group_escalate() {
+  local pgid="$1" polls=20
+  kill -KILL -- "-$pgid" 2>/dev/null || true
+  while qr_own_group_alive "$pgid"; do
+    if [ "$polls" -le 0 ]; then
+      printf '[quest-release] error: cleanup failed: could not confirm exit of process group %s\n' "$pgid" >&2
+      return 1
+    fi
+    polls=$((polls - 1))
+    command sleep 0.1
+  done
+}
+
 qr_worker_drain_group() {
   local pgid="$1" deadline=$((SECONDS + 2))
   qr_own_group_alive "$pgid" || return 0
   kill -TERM -- "-$pgid" 2>/dev/null || true
   kill -CONT -- "-$pgid" 2>/dev/null || true
   while qr_own_group_alive "$pgid"; do
-    if [ "$SECONDS" -ge "$deadline" ]; then kill -KILL -- "-$pgid" 2>/dev/null || true; fi
+    if [ "$SECONDS" -ge "$deadline" ]; then qr_group_escalate "$pgid"; return $?; fi
     command sleep 0.1
   done
 }
@@ -62,8 +77,7 @@ qr_workers_drain() {
       [ -d "$entry" ] || continue
       pgid="${entry##*.}"
       [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || return 1
-      qr_worker_drain_group "$pgid"
-      qr_workers_drain "$entry" || return 1
+      qr_worker_drain_group "$pgid" && qr_workers_drain "$entry" || return 1
     done
     rm -rf "$slot" || return 1
   done

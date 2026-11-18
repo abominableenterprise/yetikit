@@ -47,12 +47,12 @@ qr_timebox_drain() {
     # If the wrapper is gone, give surviving children at most two seconds.
     # The longer editor grace is for the command itself to shut down cleanly.
     if [ "$cancel_ticks" -le 0 ] || [ "$orphan_ticks" -le 0 ] || [ "$ticks" -le 0 ]; then
-      kill -KILL -- "-$group" 2>/dev/null || true
-    else
-      ticks=$((ticks - 1))
-      [ "$cancelled" != 1 ] || cancel_ticks=$((cancel_ticks - 1))
-      kill -0 "$group" 2>/dev/null || orphan_ticks=$((orphan_ticks - 1))
+      qr_group_escalate "$group"
+      return $?
     fi
+    ticks=$((ticks - 1))
+    [ "$cancelled" != 1 ] || cancel_ticks=$((cancel_ticks - 1))
+    kill -0 "$group" 2>/dev/null || orphan_ticks=$((orphan_ticks - 1))
     command sleep 0.1
   done
 }
@@ -72,6 +72,7 @@ qr_timebox_supervise() {
   set -m
   (
     set +m
+    unset QR_TIMEBOX_WORKERS # Nested timeboxes use their own registered parent.
     qr_worker_await "$slot" "$supervisor" || exit 1
     case "$(type -t -- "$1")" in
       function|builtin) "$@" ;;
@@ -100,15 +101,18 @@ qr_timebox_finish() {
   # Additional signals only update the outcome while cleanup is running.
   trap 'timed_out=1' ALRM
   trap 'cancelled=1' HUP INT TERM
-  qr_timebox_drain
+  local drain_failed=0
+  qr_timebox_drain || drain_failed=1
   if [ -n "$timer" ]; then
     kill -TERM "$timer" 2>/dev/null || true
     wait "$timer" 2>/dev/null || true
     timer=''
   fi
+  # Neither wait nor discard the worker record until the group is gone.
+  [ "$drain_failed" = 0 ] || exit 1
   wait "$group" 2>/dev/null || true
   if [ -n "$slot" ]; then
-    qr_workers_drain "$slot/group.$group" && rm -rf "$slot" || rc=1
+    qr_workers_drain "$slot/group.$group" && rm -rf "$slot" || exit 1
   fi
   if [ "$timed_out" = 1 ]; then exit 124; fi
   if [ "$cancelled" = 1 ]; then exit 143; fi
@@ -117,12 +121,14 @@ qr_timebox_finish() {
 
 qr_timebox() {
   local secs="$1" rc=0 grace="${QR_TIMEBOX_KILL_AFTER:-60}"
+  # Every step-owned timebox needs a record to retain if its drain fails.
+  local QR_TIMEBOX_WORKERS="${QR_TIMEBOX_WORKERS:-${QR_WORKER_ROOT:-}}"
   shift
   if command -v gtimeout >/dev/null 2>&1; then
     # GNU timeout signals the supervisor, which owns TERM/CONT/KILL and reaping.
-    # ALRM distinguishes the deadline from a release cancellation via TERM.
-    QR_TIMEBOX_WORKERS="${QR_TIMEBOX_WORKERS:-}" \
-      gtimeout --foreground -s ALRM "$secs" bash "$QR_SHIP_DIR/quest-release/timebox.sh" '' "$grace" "$@" || rc=$?
+    # Keep the supervisor's verdict: it returns 124 on timeout only if cleanup succeeds.
+    QR_TIMEBOX_WORKERS="$QR_TIMEBOX_WORKERS" \
+      gtimeout --foreground --preserve-status -s ALRM "$secs" bash "$QR_SHIP_DIR/quest-release/timebox.sh" '' "$grace" "$@" || rc=$?
   else
     ( qr_timebox_supervise "$secs" "$grace" "$@" ) || rc=$?
   fi

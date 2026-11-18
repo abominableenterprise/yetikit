@@ -36,7 +36,7 @@ timeout_bin="$(command -v gtimeout || command -v timeout || true)"
 if [ -n "$timeout_bin" ]; then
   ln -s "$timeout_bin" "$tmp/bin/gtimeout"
 else
-  printf '#!/bin/sh\n[ "$1" = --foreground ] || exit 99\nshift 4\nexec "$@"\n' > "$tmp/bin/gtimeout"
+  printf '#!/bin/sh\n[ "$1 $2" = "--foreground --preserve-status" ] || exit 99\nshift 5\nexec "$@"\n' > "$tmp/bin/gtimeout"
   chmod +x "$tmp/bin/gtimeout"
 fi
 export PATH="$tmp/bin:$PATH"
