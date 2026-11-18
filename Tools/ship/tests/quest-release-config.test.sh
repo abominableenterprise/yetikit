@@ -55,6 +55,9 @@ for expression in '.schema = 2' 'del(.quest.package)' '.quest.package = ""' '.qu
 done
 for expression in '.quest.launchLogTags = "Unity"' '.quest.launchLogTags = null' \
   '.quest.launchLogTags = [7]' '.quest.launchLogTags = [""]' '.quest.launchLogTags = ["bad\ntag"]' \
+  '.quest.launchLogTags = ["Worker ", "Worker"]' '.quest.launchLogTags = ["Network: Client", "Network"]' \
+  '.quest.launchLogTags = ["Worker:", "Worker"]' '.quest.launchLogTags = ["Worker(123): child", "Worker"]' \
+  '.quest.launchLogTags = ["Worker( 123): child"]' \
   '.quest.launcherChecks.assets = [{"glob":"/assets/*"}]' '.quest.launcherChecks.assets = [{"glob":"assets/../*"}]' \
   '.quest.launcherChecks.assets = [{"glob":""}]' '.quest.launcherChecks.assets = [{"glob":7}]' \
   '.quest.launcherChecks.assets = [{"glob":"assets/*","other":true}]'; do
@@ -62,7 +65,7 @@ for expression in '.quest.launchLogTags = "Unity"' '.quest.launchLogTags = null'
   key="${expression%% =*}"
   check "rejects $expression by key" '[ "$rc" != 0 ] && grep -Fq "${key#.}" "$tmp/err"'
 done
-mutate '.quest.launchLogTags = ["Unity", "Synthetic.Tag"] | .quest.launcherChecks.assets = ["assets/exact.bin", {"glob":"assets/*.bin"}]'
+mutate '.quest.launchLogTags = ["Unity", " Worker", "Worker child(123)", "Synthetic:Part"] | .quest.launcherChecks.assets = ["assets/exact.bin", {"glob":"assets/*.bin"}]'
 load
 check 'schema accepts literal launch tags and mixed exact/glob APK assets' '[ "$rc" = 0 ]'
 for value in null 42 '""' '"../outside-"' '"/tmp/backup-"' '"nested/backup-"' '".hidden-"' '"backup\n-"'; do

@@ -461,6 +461,13 @@ Counts use the exact tag field, not message text, in the final device-wide
 logcat snapshot, not the overlapping early snapshot. They do not affect the
 launch verdict.
 
+Leading spaces and punctuation such as `Synthetic:Part` are literal. Configured
+count tags must not end in a space or colon, or contain `: ` (colon-space)
+or a brief PID lookalike such as `(123):` or `( 123):`. Logcat pads the end of
+the tag field (which can turn a final colon into colon-space) and does not
+escape delimiters, so unsupported tags can look like shorter tags in the dump. Use unambiguous names in the
+emitter as well as in `launchLogTags` when relying on these counts.
+
 `quest.serial` is rejected: the headset serial belongs **only** in environment
 variable `QUEST_SERIAL`. For `install`, `launch`, `rollback` and `all`, it accepts
 an ordered comma- or whitespace-separated list, for example
