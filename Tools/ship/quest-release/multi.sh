@@ -12,13 +12,13 @@ qr_serials() {
   QUEST_SERIAL="${QR_SERIALS[0]}"
 }
 
-# Collision-free byte encoding, including percent, dot, slash and colon. LC_ALL
-# makes Bash 3.2 substring indexing byte-based even for non-ASCII input.
+# Escape uppercase too, so case-folding filesystems cannot alias distinct
+# serials. LC_ALL makes Bash 3.2 index bytes even for non-ASCII input.
 qr_serial_path() {
   local LC_ALL=C value="$1" c i
   for ((i=0; i<${#value}; i++)); do
     c="${value:i:1}"
-    case "$c" in [a-zA-Z0-9_-]) printf '%s' "$c" ;; *) printf '%%%02X' "'$c" ;; esac
+    case "$c" in [a-z0-9_-]) printf '%s' "$c" ;; *) printf '%%%02X' "'$c" ;; esac
   done
 }
 
@@ -72,29 +72,62 @@ qr_multi_device() (
     all) qr_multi_record install 3 'device lock/setup failed'; qr_multi_record launch 3 'skipped: device lock/setup failed' ;;
     *) qr_multi_record "$cmd" 3 'device lock/setup failed' ;;
   esac
-  qr_set launch 'INFRA: launch did not complete (see release.log)'
+  case "$cmd" in all|launch) qr_set launch 'INFRA: launch did not complete (see release.log)' ;; esac
   qr_device_locked qr_multi_device_locked "$cmd" "$apk" "$force" "$rollback" || rc=$?
   if [ "$rc" = 1 ]; then
-    case "$(qr_get outcome-launch '')" in CRASH:*) ;; *) rc=3 ;; esac
+    case "$cmd:$(qr_get outcome-launch '')" in all:CRASH:*|launch:CRASH:*) ;; *) rc=3 ;; esac
   fi
   return "$rc"
 )
+
+qr_multi_steps() {
+  case "$1" in all) printf '%s\n' install launch rollback ;; *) printf '%s\n' "$1" ;; esac
+}
+
+qr_multi_begin() {
+  local cmd="$1" step
+  qr_set device_results ''
+  qr_set multi_command "$cmd"
+  qr_set multi_result 3
+  qr_set overall 'INFRA: device work did not complete'
+  # Replace only the step results owned by this invocation. In particular,
+  # standalone launch must not overwrite the latest list install results.
+  while IFS= read -r step; do
+    qr_set "device_results_$step" ''
+  done < <(qr_multi_steps "$cmd")
+  # Root device fields belong to the old single-device attempt, not this list.
+  for step in idle backup install data_hash permissions launch; do
+    qr_set "$step" "not run at root (list $cmd; see per-device results)"
+  done
+}
+
+qr_multi_append() {
+  local key="device_results_$1" previous
+  previous="$(qr_get "$key" '')"
+  qr_set "$key" "${previous:+$previous$'\n'}$1[$2]: $3"
+}
+
+qr_multi_finish() {
+  local step rows summary='' rc result
+  for step in install launch rollback; do
+    rows="$(qr_get "device_results_$step" '')"
+    [ -z "$rows" ] || summary="${summary:+$summary$'\n'}$rows"
+  done
+  qr_set device_results "$summary"
+  # The device reducer alone can certify a crash or success. An exit 1 from
+  # argument parsing, preparation or verification is not evidence of a crash.
+  rc="$(qr_get multi_result 3)"
+  case "$rc" in 0) result=OK ;; 1) result=CRASH ;; *) result=INFRA; rc=3 ;; esac
+  qr_set overall "$result (exit $rc)"
+  return "$rc"
+}
 
 # Primary APK has already been verified for all. Standalone installs verify once
 # here, before any headset work. Rollback verification has separate logs and may
 # never replace the primary APK/provenance fields in the run's summary.
 qr_multi() {
   local cmd="$1" apk="${2:-}" force="${3:-0}" rollback="${4:-}" serial path step result rc total=0
-  local run="$QR_RUN_DIR" verified_dir previous
-  qr_set device_results ''
-  qr_set multi_command "$cmd"
-  qr_set multi_result 3
-  qr_set overall 'INFRA: device work did not complete'
-  # Root device fields belong to the old single-device attempt, not this list.
-  # Invalidate them before verification can stop us without any device rows.
-  for step in idle backup install data_hash permissions launch; do
-    qr_set "$step" "not run at root (list $cmd; see per-device results)"
-  done
+  local run="$QR_RUN_DIR" verified_dir
   if [ "$cmd" = install ] || [ "$cmd" = rollback ]; then
     ( qr_java_setup && qr_verify "$apk" ) || return 3
   fi
@@ -108,25 +141,32 @@ qr_multi() {
   fi
   for serial in "${QR_SERIALS[@]}"; do
     path="$(qr_serial_path "$serial")"
-    mkdir -p "$run/devices/$path" || return 3
+    if ! mkdir -p "$run/devices/$path"; then
+      qr_log "error: cannot create device directory for $serial: $run/devices/$path"
+      if [ "$cmd" = all ]; then
+        qr_multi_append install "$serial" 'INFRA: device directory unavailable'
+        qr_multi_append launch "$serial" 'INFRA: skipped: device directory unavailable'
+      else
+        qr_multi_append "$cmd" "$serial" 'INFRA: device directory unavailable'
+      fi
+      total="$(qr_worst "$total" 3)"
+      continue
+    fi
     rc=0
     ( QUEST_SERIAL="$serial"; QR_RUN_DIR="$run/devices/$path"
       QR_BACKUP_DEVICE_SUFFIX="-$path"
-      rm -f "$QR_RUN_DIR"/summary/outcome-*
+      # Only all has an optional outcome that might otherwise be stale.
+      if [ "$cmd" = all ]; then rm -f "$QR_RUN_DIR/summary/outcome-rollback"; fi
       qr_multi_device "$cmd" "$apk" "$force" "$rollback"
     ) || rc=$?
     total="$(qr_worst "$total" "$rc")"
-    for step in install launch rollback; do
+    while IFS= read -r step; do
       result="$(QR_RUN_DIR="$run/devices/$path" qr_get "outcome-$step" '')"
       [ -n "$result" ] || continue
-      # Append via qr_set so summaries remain atomic; no raw serial in a filename.
-      previous="$(qr_get device_results '')"
-      qr_set device_results "${previous:+$previous$'\n'}$step[$serial]: $result"
-    done
+      qr_multi_append "$step" "$serial" "$result"
+    done < <(qr_multi_steps "$cmd")
   done
   qr_set multi_result "$total"
-  case "$total" in 0) result=OK ;; 1) result=CRASH ;; *) result=INFRA ;; esac
-  qr_set overall "$result (exit $total)"
   return "$total"
 }
 

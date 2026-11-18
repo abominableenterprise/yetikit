@@ -40,6 +40,7 @@ export QUEST_ADB_WAIT=1 QUEST_LAUNCH_WAIT=1 QUEST_WAIT_GRACE=0
 # Unique IDs cannot collide with a real device's shared lock.
 token="${tmp##*/}"; token="${token//./-}"
 a="synthetic-perf-A_$token"; b="synthetic-perf-B_$token"
+a_path="$(qr_serial_path "$a")"; b_path="$(qr_serial_path "$b")"
 sha='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 fixture_id() {
   case "$1" in "$a") echo a ;; "$b") echo b ;; *) return 99 ;; esac
@@ -565,7 +566,7 @@ for outcomes in healthy-healthy healthy-infra infra-healthy fail-infra infra-fai
   esac
   run "$a,$b" perf
   check "multi-serial $outcomes continues in order with worst precedence 1 > 3 > 0" \
-    '[ "$rc" = "$expected" ] && restored a && restored b && [ "$(grep "|shell am start " "$tmp/adb.log" | cut -d "|" -f1)" = "$(printf "a\nb")" ] && [ -s "$run_dir/devices/$a/perf-summary.json" ] && [ -s "$run_dir/devices/$b/perf-summary.json" ] && [ ! -e "$run_dir/perf-summary.json" ] && grep -Fq "perf[$a]:" "$run_dir/summary.txt" && grep -Fq "perf[$b]:" "$run_dir/summary.txt"'
+    '[ "$rc" = "$expected" ] && restored a && restored b && [ "$(grep "|shell am start " "$tmp/adb.log" | cut -d "|" -f1)" = "$(printf "a\nb")" ] && [ -s "$run_dir/devices/$a_path/perf-summary.json" ] && [ -s "$run_dir/devices/$b_path/perf-summary.json" ] && [ ! -e "$run_dir/perf-summary.json" ] && grep -Fq "perf[$a]:" "$run_dir/summary.txt" && grep -Fq "perf[$b]:" "$run_dir/summary.txt"'
 done
 
 wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
@@ -623,7 +624,7 @@ if declare -F qr_perf >/dev/null; then
   ) & watchdog=$!
   if [ "$cancel_fault" = report-blocked ]; then
     # A directory in place of the report simulates a write failure even as root.
-    mkdir "$run_dir/devices/$a/perf-summary.json"
+    mkdir "$run_dir/devices/$a_path/perf-summary.json"
   fi
   cancel_started=$SECONDS
   kill -TERM "$owner" 2>/dev/null || true
@@ -654,7 +655,7 @@ if declare -F qr_perf >/dev/null; then
   elif [ "$cancel_fault" = report-blocked ]; then
     recovery="adb -s $a shell am broadcast -a com.oculus.vrpowermanager.automation_disable"
     check 'failed per-device publication puts manual recovery in the owner summary and keeps the pending record' \
-      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ -d "$run_dir/devices/$a/perf-summary.json" ] && [ -s "$tmp/state/a/restore-attempts" ] && ! restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && pending "$a" && grep -Fq "$recovery" "$run_dir/summary.txt" && grep -Fq "$recovery" "$tmp/cancel.out"'
+      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ -d "$run_dir/devices/$a_path/perf-summary.json" ] && [ -s "$tmp/state/a/restore-attempts" ] && ! restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && pending "$a" && grep -Fq "$recovery" "$run_dir/summary.txt" && grep -Fq "$recovery" "$tmp/cancel.out"'
   else
     check 'hung restore after TERM is bounded, warns in the per-device summary and keeps the pending record' \
       '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ "$((SECONDS - cancel_started))" -le 8 ] && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && pending "$a" && json_is '\''.overall == "INFRA" and (.message | contains("WARN:"))'\'' && grep -Fq "shell am broadcast -a com.oculus.vrpowermanager.automation_disable" "$run_dir/perf-summary.txt" && grep -q "^rc=1$" "$QUEST_LOG_ROOT/last-result"'

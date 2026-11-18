@@ -58,6 +58,7 @@ fi
 tmp="$(mktemp -d)"; owner=''
 token="${tmp##*/}"; token="${token//./-}"
 a="synthetic-manual-A-$token"; b="synthetic-manual-B-$token"
+a_path="$(qr_serial_path "$a")"; b_path="$(qr_serial_path "$b")"
 export QR_MANUAL_TMP="$tmp" QR_MANUAL_A="$a" QR_MANUAL_B="$b"
 export QUEST_REPO="$tmp" QUEST_LOG_ROOT="$tmp/logs" QUEST_WT_ROOT="$tmp/wt"
 export QUEST_ADB_WAIT=1 QR_PERF_RESTORE_WAIT=1
@@ -93,7 +94,7 @@ clock b 1700000100.750000000 2000
 rc=0; QUEST_SERIAL="$a,$b" bash "$0" --worker start > "$tmp/out" 2>&1 || rc=$?
 run_dir="$(. "$QUEST_LOG_ROOT/current.env" && printf '%s' "$QR_RUN_DIR")"
 check 'start reserves each running app without launching or clearing logs' \
-  '[ "$rc" = 0 ] && [ -f "$tmp/a.override" ] && [ -f "$tmp/b.override" ] && ! grep -Eq "am start|logcat" "$tmp/events" && [ ! -e "$run_dir/devices/$a/perf-summary.json" ] && [ ! -e "$run_dir/devices/$b/perf-summary.json" ]'
+  '[ "$rc" = 0 ] && [ -f "$tmp/a.override" ] && [ -f "$tmp/b.override" ] && ! grep -Eq "am start|logcat" "$tmp/events" && [ ! -e "$run_dir/devices/$a_path/perf-summary.json" ] && [ ! -e "$run_dir/devices/$b_path/perf-summary.json" ]'
 key_a="$(marker_for a)"; key_b="$(marker_for b)"
 check 'device edges are persisted independently' \
   'json '\''.start == "1700000000.250000001"'\'' "$key_a" && json '\''.start == "1700000100.750000000"'\'' "$key_b"'
@@ -127,9 +128,9 @@ clock b 1700000102.750000000 4000
 rc=0; QUEST_SERIAL="$b,$a" bash "$0" --worker stop > "$tmp/out" 2>&1 || rc=$?
 run_dir="$(. "$QUEST_LOG_ROOT/current.env" && printf '%s' "$QR_RUN_DIR")"
 check 'stop bounds both logcat artifacts and emits the normal text and JSON from persisted edges' \
-  '[ "$rc" = 1 ] && json '\''.overall == "PASS" and .samples == 2 and .p95AppMs == 6 and .seconds == 2 and .warmupSeconds == 0 and .scene == "unavailable" and .versionName == "synthetic-build" and .apkSha256 == "unavailable" and .thermalStart == "unavailable"'\'' "$run_dir/devices/$a/perf-summary.json" && grep -q "Quest performance: PASS" "$run_dir/devices/$a/perf-summary.txt" && ! grep -q "999ms" "$run_dir"/devices/*/perf-logcat.txt'
+  '[ "$rc" = 1 ] && json '\''.overall == "PASS" and .samples == 2 and .p95AppMs == 6 and .seconds == 2 and .warmupSeconds == 0 and .scene == "unavailable" and .versionName == "synthetic-build" and .apkSha256 == "unavailable" and .thermalStart == "unavailable"'\'' "$run_dir/devices/$a_path/perf-summary.json" && grep -q "Quest performance: PASS" "$run_dir/devices/$a_path/perf-summary.txt" && ! grep -q "999ms" "$run_dir"/devices/*/perf-logcat.txt'
 check 'missing gate input stays unavailable and both sensors are restored under lock' \
-  'json '\''.overall == "FAIL" and .samples == 2 and .gates.app.value == "unavailable"'\'' "$run_dir/devices/$b/perf-summary.json" && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/b.override" ] && [ ! -e "$tmp/unlocked-restore" ] && [ ! -e "$key_a" ] && [ ! -e "$key_b" ]'
+  'json '\''.overall == "FAIL" and .samples == 2 and .gates.app.value == "unavailable"'\'' "$run_dir/devices/$b_path/perf-summary.json" && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/b.override" ] && [ ! -e "$tmp/unlocked-restore" ] && [ ! -e "$key_a" ] && [ ! -e "$key_b" ]'
 run "$a" perf stop
 check 'a completed stop cannot reuse its start' '[ "$rc" = 3 ] && grep -q "no matching perf start" "$tmp/out"'
 
