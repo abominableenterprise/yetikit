@@ -19,7 +19,8 @@ middle-finger extension without assigning it an action.
   `TeleportationProvider`. Give it a line and reticle to show the preview.
   Assign the controller's teleport ray to share its arc settings. Configure
   the teleport **interaction** layer (default `Teleport`) in the project and
-  use it on the teleportation areas.
+  use it on XRI `TeleportationArea` surfaces. Anchors and anchor volumes
+  are not freeform landing surfaces.
 - The hands share an aim lease through their tracking-space parent. Assign the
   same `rig` on both components if their parents differ. External aim adapters
   can claim the same lease and supply an optional preemption policy. Set

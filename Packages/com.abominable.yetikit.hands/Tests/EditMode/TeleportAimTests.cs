@@ -82,6 +82,19 @@ namespace YetiKit.Hands.Tests
         }
 
         [Test]
+        public void AnAnchorIsNotAFreeformLandingSurface()
+        {
+            var floor = area.gameObject;
+            Object.DestroyImmediate(area);
+            var anchor = floor.AddComponent<TeleportationAnchor>();
+            anchor.interactionLayers = InteractionLayerMask.GetMask(Layer);
+            Cast();
+            Preview();
+            Assert.That(aim.HasTarget, Is.False);
+            Assert.That(reticle.activeSelf, Is.False);
+        }
+
+        [Test]
         public void TheReticleStaysAtTheLandingWhenTheHandMoves()
         {
             Cast();

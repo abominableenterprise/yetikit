@@ -77,7 +77,8 @@ namespace YetiKit.Hands
         bool AllowsLanding(RaycastHit hit, BaseTeleportationInteractable area)
         {
             var collider = hit.collider;
-            return area && area.isActiveAndEnabled && (area.interactionLayers & teleportMask) != 0
+            // The request uses the hit point, not an anchor's independently authored pose.
+            return area is TeleportationArea && area && area.isActiveAndEnabled && (area.interactionLayers & teleportMask) != 0
                 && collider && collider.enabled && collider.gameObject.activeInHierarchy && hit.normal.y >= MinUp
                 && !HandUiGuard.Near(hit.point, UiReach) && (LandingAllowed?.Invoke(hit) ?? true);
         }
