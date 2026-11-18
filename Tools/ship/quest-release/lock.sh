@@ -73,9 +73,9 @@ qr_lock_workers_busy() {
   return 1
 }
 
-# Take the lock for this process ($$), or refuse at once when a live run holds it. A stale lock is removed (logged).
+# Take the lock for the caller (normally $$), or refuse at once when a live run holds it. A stale lock is removed (logged).
 qr_lock_acquire() {
-  local d st _ publish="${1:-1}" invocation_dir
+  local d st _ publish="${1:-1}" owner_pid="${2:-$$}" invocation_dir
   d="$(qr_lock_dir)"
   for _ in 1 2; do
     if mkdir "$d" 2>/dev/null; then
@@ -87,7 +87,7 @@ qr_lock_acquire() {
                  printf '%s\n' "$QR_INVOCATION" > "$d/invocation"; }; } &&
              printf '%s\n' "${QR_RUN_DIR:-pending}" > "$d/run_dir" &&
              # Publish pid last, atomically: wait must not pin a partial PID or miss its invocation key.
-             [ ! -d "$d/pid" ] && printf '%s\n' "$$" > "$d/pid.tmp" && mv -f "$d/pid.tmp" "$d/pid" &&
+             [ ! -d "$d/pid" ] && printf '%s\n' "$owner_pid" > "$d/pid.tmp" && mv -f "$d/pid.tmp" "$d/pid" &&
              { [ "$publish" = 0 ] ||
                { printf '%s %s\n' "$$" "$QR_INVOCATION" > "$QR_LOGS/current-invocation.$$" &&
                  mv -f "$QR_LOGS/current-invocation.$$" "$QR_LOGS/current-invocation"; }; }; }; then
@@ -258,6 +258,6 @@ qr_lock_release() {
   local d; d="$(qr_lock_dir)"
   # A failed/interrupted drain must never drop the only record of a survivor.
   [ -z "${QR_ACTIVE_STEP:-}" ] || [ ! "${QR_ACTIVE_STEP_DIR%/*}" -ef "$d" ] || return 1
-  [ "$(cat "$d/pid" 2>/dev/null)" = "$$" ] && rm -rf "$d"
+  [ "$(cat "$d/pid" 2>/dev/null)" = "${1:-$$}" ] && rm -rf "$d"
   QR_LOCK_HELD=""
 }

@@ -125,5 +125,54 @@ rc=0
 check 'cancelled headset lock becomes reclaimable only after owner and worker group drain' \
   '[ "$cancel_rc" != 0 ] && ! qr_group_alive "$cancel_group" && [ "$rc" = 0 ] && [ -f "$tmp/after-drain-mutation" ]'
 exec 7>&- 9>&-
+
+# Doctor has no release run lock. Kill its real shell PID after the fake adb
+# reconnect starts, leaving the isolated recovery worker in flight.
+cat > "$tmp/doctor-owner.sh" <<'OWNER'
+. "$QR_TEST_RELEASE"
+QR_LOGS="$QR_TEST_LOCK_TMP/doctor-consumer/logs"
+QR_DEVICE_CHECK_WAIT=15
+qr_doctor_line() { :; }
+qr_device_status() {
+  [ -f "$QR_TEST_LOCK_TMP/doctor-done" ] || { echo offline; return 2; }
+}
+qr_idle_verdict() { :; }
+adb() {
+  [ "$1" = -s ] && [ "$2" = "$QUEST_SERIAL" ] || return 99
+  case "$3" in
+    reconnect)
+      qr_fixture_ready "$QR_TEST_LOCK_TMP/doctor-ready" ready
+      read -r -t 15 _ <&8 ;;
+    wait-for-device) touch "$QR_TEST_LOCK_TMP/doctor-done" ;;
+    *) return 99 ;;
+  esac
+}
+. "${QR_TEST_RELEASE%/*}/tests/lib/quest-release-fixture.sh"
+qr_doctor_device
+OWNER
+QUEST_SERIAL="synthetic-doctor-${tmp##*/}"
+doctor_lock="/tmp/yetikit-quest-device-locks-$UID/$(printf '%s' "$QUEST_SERIAL" | qr_sha256).lock"
+exec 8<> "$tmp/release"
+bash "$tmp/doctor-owner.sh" > "$tmp/doctor.out" 2>&1 & owner=$!
+ready=1; qr_fixture_wait_ready "$tmp/doctor-ready" "$owner" || ready=0
+kill -KILL "$owner" 2>/dev/null || ready=0
+wait "$owner" 2>/dev/null || true
+owner=''
+QR_LOGS="$tmp/doctor-successor/logs"
+rc=0; qr_device_locked touch "$tmp/during-reconnect-mutation" > "$tmp/out" 2>&1 || rc=$?
+check 'headset stays locked when the doctor owner dies during reconnect' \
+  '[ "$ready" = 1 ] && [ "$rc" != 0 ] && [ ! -f "$tmp/doctor-done" ] && [ ! -f "$tmp/during-reconnect-mutation" ] && grep -q "another quest-release run is active" "$tmp/out"'
+printf 'finish\n' >&8
+exec 8>&-
+# Give the surviving supervisor time to reap and release before retrying.
+doctor_deadline=$((SECONDS + 10))
+until [ -f "$tmp/doctor-done" ] && [ ! -e "$doctor_lock" ]; do
+  [ "$SECONDS" -lt "$doctor_deadline" ] || break
+  sleep 0.05
+done
+released=0; [ -e "$doctor_lock" ] || released=1
+rc=0; qr_device_locked touch "$tmp/after-reconnect-mutation" > "$tmp/out" 2>&1 || rc=$?
+check 'headset can be acquired after orphaned doctor recovery drains' \
+  '[ -f "$tmp/doctor-done" ] && [ "$released" = 1 ] && [ "$rc" = 0 ] && [ -f "$tmp/after-reconnect-mutation" ]'
 [ "$fails" = 0 ] || { echo "$fails failed"; exit 1; }
 echo 'all passed'

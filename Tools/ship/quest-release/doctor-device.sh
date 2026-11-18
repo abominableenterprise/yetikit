@@ -4,7 +4,11 @@
 qr_doctor_reconnect() {
   local remaining=$((deadline - SECONDS))
   [ "$remaining" -gt 0 ] || return 124
-  ( qr_timebox_supervise "$remaining" 0 qr_doctor_reconnect_probe "$1" </dev/null )
+  # Run in the lock-owning shell. Publish the isolated worker in this lock's
+  # generation before it can reconnect, even if the supervisor later dies.
+  local QR_TIMEBOX_WORKERS
+  QR_TIMEBOX_WORKERS="$(mktemp -d "$device_lock/step.XXXXXXXXXX")" || return 1
+  qr_timebox_supervise "$remaining" 0 qr_doctor_reconnect_probe "$1" </dev/null
 }
 
 qr_doctor_reconnect_probe() {

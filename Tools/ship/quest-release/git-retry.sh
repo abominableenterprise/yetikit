@@ -14,6 +14,7 @@ qr_git_transient() {
     -e '^(fatal: unable to access .*: |ssh: connect to host .* port [0-9]+: |(fatal: )?(ssh: )?(read|write): ).*(timed out|timeout|connection reset by peer|connection refused|temporary failure in name resolution)$' \
     -e '^fatal: unable to access .*: could not resolve (host|proxy): ' \
     -e '^ssh: could not resolve hostname .*: (temporary failure in name resolution|try again)$' \
+    -e '^kex_exchange_identification: read: connection reset by peer$' \
     -e '^(fatal: unable to access .*: |error: RPC failed; )The requested URL returned error: (502|503|504)$' \
     -e '^error: RPC failed; curl (18|28|52|55|56) ' "$1"
 }
