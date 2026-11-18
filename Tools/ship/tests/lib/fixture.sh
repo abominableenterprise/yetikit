@@ -10,6 +10,17 @@ ship_wait_until() {
     /bin/sleep 0.02
   done
 }
+# Read a complete, nonempty record from a single open. In particular, read
+# returns failure on EOF before newline, even if a PID prefix is all digits.
+ship_read_line() {
+  local line
+  { IFS= read -r line < "$1"; } 2>/dev/null && [ -n "$line" ] && printf '%s\n' "$line"
+}
+ship_read_pid() {
+  local pid
+  pid="$(ship_read_line "$1")" && [[ "$pid" =~ ^[1-9][0-9]*$ ]] && printf '%s\n' "$pid"
+}
+ship_wait_for_pid() { ship_wait_until ship_read_pid "$1"; }
 # Opt-in controlled executable view for replacement fixtures without real sudo.
 # Only explicitly tracked synthetic PIDs use real inspection (including failures).
 # Host processes are outside this model; strict scanner failure tests do not use it.

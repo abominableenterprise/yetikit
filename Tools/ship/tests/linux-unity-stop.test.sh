@@ -10,8 +10,7 @@ FAKE_SLEEP=300 FAKE_TMP="$tmp/other" bash -c 'mkdir -p "$FAKE_TMP"; exec "$0"' "
 
 # --- a running test pass -------------------------------------------------------------------------------------------------
 FAKE_XVFB=1 FAKE_SLEEP=300 bash "$script" test editmode >/dev/null 2>&1 & runner=$!
-wait_for "$tmp/unity.pid"; wait_for "$tmp/xvfb.pid"
-editor="$(cat "$tmp/unity.pid")"; xvfb="$(cat "$tmp/xvfb.pid")"
+editor="$(ship_wait_for_pid "$tmp/unity.pid")"; xvfb="$(ship_wait_for_pid "$tmp/xvfb.pid")"
 check "the run writes a pidfile under \$OUT_DIR naming the script's pid" \
   '[ -f "$OUT_DIR/linux-unity.pid" ] && [ "$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")" = "$runner" ]'
 check "the editor and the fake Xvfb are running" 'alive "$editor" && alive "$xvfb"'

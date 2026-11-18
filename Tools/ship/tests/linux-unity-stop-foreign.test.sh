@@ -54,8 +54,7 @@ for scenario in foreign alone; do
     echo "$child" > "$2"
     wait "$child"
   ' _ "$script" "$tmp/owned.pid" >"$tmp/runner.log" 2>&1 & runner=$!; pids+=("$runner")
-  ship_wait_until test -s "$tmp/owned.pid"
-  owned="$(cat "$tmp/owned.pid")"; pids+=("$owned")
+  owned="$(ship_wait_for_pid "$tmp/owned.pid")"; pids+=("$owned")
   export SHIP_FIXTURE_PIDS="${pids[*]}"
   ship_wait_until editor_ready "$owned"
   touch "$SHM_DIR/udsMem-fixture" "$SHM_DIR/sem.udsMem-fixture" "$PROJECT/Temp/UnityLockfile"

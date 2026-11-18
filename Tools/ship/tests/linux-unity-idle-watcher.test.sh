@@ -14,17 +14,21 @@ check 'fresh checkout has no build directory' '[ ! -d "$OUT_DIR" ]'
 lu open
 check 'fresh open starts the idle watcher without a missing-pidfile warning' \
   '[ "$rc" = 0 ] && ! grep -q "No such file or directory" "$tmp/log"'
-for _ in {1..1000}; do [ -s "$idle_dir/unity-idle.pid" ] && break; /bin/sleep 0.02; done
-read -r watcher start < "$idle_dir/unity-idle.pid"
+watcher_ready() {
+  local record
+  record="$(ship_read_line "$idle_dir/unity-idle.pid")" || return 1
+  read -r candidate start _ <<< "$record"
+  [[ "$candidate" =~ ^[1-9][0-9]*$ && "$start" =~ ^[0-9]+$ ]]
+}
+ship_wait_until watcher_ready
+watcher="$candidate"
 lu activate
 check 'detached watcher is live and reused' 'kill -0 "$watcher" && [ "$(cut -d" " -f1 "$idle_dir/unity-idle.pid")" = "$watcher" ]'
 # The old watcher must retire and a real detached replacement must take over on ownership change.
 THEROBOTS_TASK_ID=5632 lu activate
-for _ in {1..1000}; do
-  replacement="$(cut -d' ' -f1 "$idle_dir/unity-idle.pid" 2>/dev/null || true)"
-  [ -n "$replacement" ] && [ "$replacement" != "$watcher" ] && break
-  /bin/sleep 0.02
-done
+replacement_ready() { watcher_ready && [ "$candidate" != "$watcher" ]; }
+ship_wait_until replacement_ready
+replacement="$candidate"
 check 'changed ownership hands off to a live replacement watcher' \
   '[ -n "$replacement" ] && [ "$replacement" != "$watcher" ] && kill -0 "$replacement"'
 kill "$watcher" 2>/dev/null || true
