@@ -42,34 +42,53 @@ def live_session(entry):
     return None if fields[0] in (b'Z', b'X') else int(fields[3])
 
 
-def session_members(session, proc):
+def session_status(entry, session):
+    """True for a live member, False for a nonmember, None if unreadable."""
+    try:
+        return live_session(entry) == session
+    except OSError:
+        return None
+
+
+def session_members(session, entries):
     # Unlike a parent tree, the session still identifies reparented orphans,
     # including children in another process group (e.g. GNU timeout).
-    for entry in proc.iterdir():
-        if entry.name.isdecimal() and live_session(entry) == session:
-            yield entry
+    for entry in entries:
+        if entry.name.isdecimal():
+            status = session_status(entry, session)
+            if status is not False:
+                yield entry, status
 
 
-def marked(label, marker, session, proc=Path('/proc')):
+def marked(label, marker, session, proc=Path('/proc'), *, previous=()):
     """Return known leaks, [] for a complete clean scan, or None if inconclusive."""
     found = []
     incomplete = False
     try:
-        for entry in session_members(session, proc):
-            try:
-                environment = (entry / 'environ').read_bytes()
-                if not environment:
-                    raise OSError('empty fixture environment')
-            except OSError:
-                # A process may exit between stat and environ; only ignore
-                # the error if it is no longer a live member of this session.
-                if live_session(entry) == session:
-                    incomplete = True
-                continue
-            if marker in environment.split(b'\0') and live_session(entry) == session:
-                found.append(int(entry.name))
+        entries = list(proc.iterdir())
     except OSError:
         incomplete = True
+        # A failed listing need not prevent direct checks of known PIDs.
+        entries = [proc / str(pid) for pid in previous]
+    for entry, member in session_members(session, entries):
+        pid = int(entry.name)
+        environment = b''
+        if member:
+            try:
+                environment = (entry / 'environ').read_bytes()
+            except OSError:
+                pass
+            # Recheck for exit between the stat and environment reads.
+            member = session_status(entry, session)
+        if member is False:
+            continue
+        if member is None or not environment:
+            incomplete = True
+            # An unreadable entry does not erase an earlier observation.
+            if pid in previous:
+                found.append(pid)
+        elif marker in environment.split(b'\0'):
+            found.append(pid)
     if incomplete and not found:
         print(f'SKIP: {label}: fixture environment scan is incomplete', flush=True)
         return None
@@ -78,10 +97,12 @@ def marked(label, marker, session, proc=Path('/proc')):
 
 def wait_marked(label, marker, session, seconds=2):
     deadline = time.monotonic() + seconds
+    previous = set()
     while True:
-        remaining = marked(label, marker, session)
+        remaining = marked(label, marker, session, previous=previous)
         if not remaining or time.monotonic() >= deadline:
             return remaining
+        previous = set(remaining)
         time.sleep(.02)
 
 
@@ -94,11 +115,13 @@ def cleanup_session(process):
     except ProcessLookupError:
         pass
     try:
-        for entry in session_members(process.pid, Path('/proc')):
-            try:
-                os.kill(int(entry.name), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        for entry, member in session_members(process.pid, Path('/proc').iterdir()):
+            if member:
+                try:
+                    os.kill(int(entry.name), signal.SIGKILL)
+                except OSError:
+                    # One inaccessible or vanished process must not stop the sweep.
+                    pass
     except OSError:
         # On hosts without proc inspection the original group is still owned.
         pass
