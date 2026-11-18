@@ -178,16 +178,24 @@ qr_save_build_evidence() {
 # Called under the run lock, just after adb confirms install. A blank record
 # represents a real install of an APK with unknown build provenance.
 qr_record_latest_install() {
-  local record="$QR_LOGS/latest-install"
-  printf '%s\n' "$1" > "$record.tmp" && mv -f "$record.tmp" "$record"
+  local record="$QR_LOGS/latest-install" tmp
+  tmp="$(mktemp "$record.XXXXXXXX")" || return 1
+  # Use literal rename(2) on both macOS and Linux: mv may move *into* a directory.
+  if printf '%s\n' "$1" > "$tmp" && perl -e 'rename($ARGV[0], $ARGV[1]) or die "rename latest-install: $!\n"' "$tmp" "$record"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
 }
 
 # The most recent actual adb install, including rollbacks and manual steps in the current run. An unidentifiable
 # APK intentionally returns empty rather than borrowing the prepared commit or an older installed baseline.
 qr_last_installed_sha() {
-  local d ts sha apk
-  if [ -f "$QR_LOGS/latest-install" ]; then
-    head -n1 "$QR_LOGS/latest-install"
+  local d ts sha apk record="$QR_LOGS/latest-install" pending="$QR_LOGS/latest-install.pending"
+  # An interrupted or unrecorded adb success supersedes both sources of older history.
+  if [ -e "$pending" ] || [ -L "$pending" ] || [ -L "$record" ]; then return 0; fi
+  if [ -e "$record" ]; then
+    if [ -f "$record" ]; then head -n1 "$record"; fi
     return
   fi
   # Compatibility for runs created before the ordered record existed.

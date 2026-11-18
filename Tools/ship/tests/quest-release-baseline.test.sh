@@ -22,7 +22,12 @@ QR_DATA_FILES='playtest.json throws.csv'
 qr_device_sha() { echo unchanged; }
 qr_backup() { echo "$tmp/backup"; }
 qr_mic_state() { echo true; }
-qr_adb() { [ "${FAIL_ADB:-0}" = 0 ] || return 1; echo Success; }
+qr_adb() {
+  : > "$tmp/adb-called"
+  [ "${FAIL_ADB:-0}" = 0 ] || return 1
+  if [ "${ADB_CREATES_DIRECTORY:-0}" = 1 ]; then mkdir "$QR_LOGS/latest-install" || return 1; fi
+  echo Success
+}
 qr_timestamp() { printf '%s\n' "$now"; }
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; exit 1; fi; }
 
@@ -72,6 +77,58 @@ check 'latest operation wins even inside an older run directory' '[ "$(qr_last_i
 now=20260106-000000
 if ( FAIL_ADB=1; qr_install_apk "$c" 0 rollback ); then exit 1; fi
 check 'failed install keeps the last actual installed commit' '[ "$(qr_last_installed_sha)" = aaaaaaaaa ]'
+# Fail only the atomic publication, not summary writes or adb. The old file
+# remains on disk alongside a same-second legacy row, but neither is trusted.
+for fault in write rename; do
+  qr_install_apk "$a" 0 install
+  rm -f "$tmp/adb-called"
+  if (
+    mktemp() {
+      case "$fault:$*" in write:*latest-install*) printf '%s\n' "$QR_LOGS/missing/record"; return ;; esac
+      command mktemp "$@"
+    }
+    perl() {
+      case "$fault:${*: -1}" in rename:*/latest-install) return 1 ;; esac
+      command perl "$@"
+    }
+    qr_install_apk "$c" 0 rollback
+  ) > "$tmp/failure.out" 2>&1; then
+    echo "FAIL publication $fault: unexpectedly succeeded"; exit 1
+  fi
+  check "publication $fault: reports real adb success but no authoritative baseline" \
+    '[ -f "$tmp/adb-called" ] && grep -qx Success "$QR_RUN_DIR/rollback-adb.log" &&
+      [[ "$(qr_get install)" == "rollback: adb install ok"*"provenance publication failed"* ]] &&
+      [ "$(head -n1 "$QR_LOGS/latest-install")" = aaaaaaaaa ] && [ -z "$(qr_last_installed_sha)" ]'
+  if ( FAIL_ADB=1; qr_install_apk "$c" 0 rollback ); then exit 1; fi
+  check "publication $fault: later adb failure does not revive the stale baseline" '[ -z "$(qr_last_installed_sha)" ]'
+  qr_install_apk "$c" 0 rollback
+  check "publication $fault: successful retry publishes the new baseline" '[ "$(qr_last_installed_sha)" = ccccccccc ]'
+done
+
+for destination in directory symlink; do
+  rm -f "$tmp/adb-called" "$QR_LOGS/latest-install"
+  if [ "$destination" = directory ]; then
+    dir="$QR_LOGS/latest-install"; mkdir "$dir"
+  else
+    dir="$tmp/link-target"; mkdir "$dir"; ln -s "$dir" "$QR_LOGS/latest-install"
+  fi
+  if ( qr_install_apk "$c" 0 install ) > "$tmp/failure.out" 2>&1; then
+    echo "FAIL $destination destination: unexpectedly succeeded"; exit 1
+  fi
+  check "$destination destination blocks adb and is not used as a legacy baseline or move target" \
+    '[ ! -e "$tmp/adb-called" ] && [ -z "$(ls -A "$dir")" ] && [ -z "$(qr_last_installed_sha)" ]'
+  if [ "$destination" = symlink ]; then rm "$QR_LOGS/latest-install"; fi
+  rmdir "$dir"
+done
+# A directory appearing after preflight must make publication fail rather
+# than silently receive the temp file as a child.
+if ( ADB_CREATES_DIRECTORY=1; qr_install_apk "$c" 0 install ) > "$tmp/failure.out" 2>&1; then
+  echo 'FAIL directory appeared during adb: unexpectedly succeeded'; exit 1
+fi
+check 'directory appearing during adb is not used as a move target' \
+  '[[ "$(qr_get install)" == "install: adb install ok"*"provenance publication failed"* ]] &&
+    [ -z "$(ls -A "$QR_LOGS/latest-install")" ] && [ -z "$(qr_last_installed_sha)" ]'
+rmdir "$QR_LOGS/latest-install"
 qr_install_apk "$unknown" 0 install
 check 'unknown APK clears the baseline instead of claiming the prepared commit' '[ -z "$(qr_last_installed_sha)" ]'
 # Legacy prepared commits are not build evidence for an explicitly supplied, now-missing APK.
