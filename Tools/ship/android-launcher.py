@@ -13,6 +13,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 ANDROID = "{http://schemas.android.com/apk/res/android}"
@@ -38,15 +39,24 @@ def configuration(path):
     checks = quest.get("launcherChecks", {})
     require(isinstance(checks, dict), "quest.launcherChecks must be an object")
     require(checks.get("package", package) == package, "launcherChecks.package must match quest.package")
-    for key in ("permissions", "assets"):
-        values = checks.get(key, [])
-        require(isinstance(values, list) and all(isinstance(value, str) and value
-                and not re.search(r"[\x00-\x1f]", value) for value in values),
-                "launcherChecks." + key + " must be a string array")
-    for asset in checks.get("assets", []):
-        require(not asset.startswith("/") and ".." not in asset.split("/") and asset != ".",
-                "launcherChecks.assets must contain relative APK entry paths")
+    permissions = checks.get("permissions", [])
+    require(isinstance(permissions, list) and all(config_string(value) for value in permissions),
+            "launcherChecks.permissions must be a string array")
+    assets = checks.get("assets", [])
+    require(isinstance(assets, list) and all(asset_requirement(asset) for asset in assets),
+            'launcherChecks.assets must be an array of relative APK entry paths or {"glob": "pattern"} objects')
     return package, checks
+
+
+def config_string(value):
+    return isinstance(value, str) and bool(value) and not re.search(r"[\x00-\x1f]", value)
+
+
+def asset_requirement(asset):
+    if isinstance(asset, dict) and asset.keys() == {"glob"}:
+        asset = asset["glob"]
+    return (config_string(asset) and not asset.startswith("/")
+            and ".." not in asset.split("/") and asset != ".")
 
 
 def game_contract(activity):
@@ -143,7 +153,12 @@ def apk(path, package, checks, contest=False):
         require(archive.testzip() is None, "corrupt APK zip entry")
         names = set(archive.namelist())
         for asset in checks.get("assets", []):
-            payload_check(asset in names, contest, "APK asset " + asset)
+            if isinstance(asset, str):
+                payload_check(asset in names, contest, "APK asset " + asset)
+            else:
+                pattern = asset["glob"]
+                present = any(not name.endswith("/") and fnmatchcase(name, pattern) for name in names)
+                payload_check(present, contest, "APK asset matching glob " + pattern)
     print("APK: Quest launcher, Unity theme, configured permissions/assets and ZIP integrity OK")
 
 

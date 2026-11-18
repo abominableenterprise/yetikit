@@ -357,13 +357,20 @@ projects must supply a development execute method for this runner).
     "worktreeRoot": "$HOME/wt/consumer",
     "apkKeepName": "game-dev-{sha}.apk",
     "perfLogTag": "[GamePerf]",
+    "launchLogTags": [
+      "Unity",
+      "Synthetic.Tag"
+    ],
     "launcherChecks": {
       "package": "com.example.game",
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ],
       "assets": [
-        "assets/synthetic-content.bin"
+        "assets/synthetic-content.bin",
+        {
+          "glob": "assets/bundles/*.bundle"
+        }
       ]
     },
     "whatsNewEnv": "YETIKIT_WHATS_NEW",
@@ -386,7 +393,8 @@ projects must supply a development execute method for this runner).
 | `launcherChecks` | Optional object; Unity GameActivity/VR launcher/theme and ZIP checks always apply. |
 | `launcherChecks.package` | Optional expected package, must equal `quest.package`. |
 | `launcherChecks.permissions` | Optional array of required permission names; default empty. |
-| `launcherChecks.assets` | Optional array of exact required APK archive paths; default empty. No absolute paths or parent traversal. |
+| `launcherChecks.assets` | Optional array of exact APK entry strings or `{"glob": "pattern"}` objects; default empty. Each requirement must match. No absolute paths or parent traversal. |
+| `launchLogTags` | Optional array of nonempty, literal logcat tags. Omitted or empty means no counts are printed. |
 | `whatsNewEnv` | Build notes environment-variable name; default `YETIKIT_WHATS_NEW`. `--notes` exports the absolute notes filename. |
 | `prevShaEnv` | Previous-installed-commit environment-variable name; default `YETIKIT_PREV_SHA`. Build receives the latest successful install's commit unless already supplied. |
 | `dataFiles` | Optional array of safe basenames to back up and hash-check; default `playtest.json`, `throws.csv`. `SHA256SUMS` is reserved for backup metadata. Empty means no application-specific files. Contents never print. |
@@ -396,6 +404,18 @@ projects must supply a development execute method for this runner).
 | `signing.storePassEnv` | Required when `signing` is present: name of the environment variable containing the keystore password. |
 | `signing.keyAliasEnv` | Required when `signing` is present: name of the environment variable containing the key alias. |
 | `signing.keyPassEnv` | Optional name of the environment variable containing the key password. Not used for certificate lookup; remains inherited by the consumer build. |
+
+Asset globs are matched case-sensitively against full APK file entry names, not
+against files on disk. Shell-style `*`, `?` and bracket classes are supported;
+`*` can span `/`. Strings are always exact paths, even if they contain wildcard
+characters. APK checks fail with the pattern if a glob has no match. In
+`--contest` mode, any match for a configured glob is forbidden instead.
+
+After the launch wait, the runner prints one count (including zero) per
+configured `launchLogTags` entry and saves the counts in `launch-report.txt`.
+Counts use the exact tag field, not message text, in the final device-wide
+logcat snapshot, not the overlapping early snapshot. They do not affect the
+launch verdict.
 
 `quest.serial` is rejected: the headset serial belongs **only** in environment
 variable `QUEST_SERIAL`. For `install`, `launch`, `rollback` and `all`, it accepts
