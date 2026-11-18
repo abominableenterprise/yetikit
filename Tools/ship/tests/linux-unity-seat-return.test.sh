@@ -26,6 +26,50 @@ lu "${hub[@]}" -- return
 check "return without ULF or state: no Licensing Client or release call" \
   '[ "$rc" = 0 ] && [ ! -s "$tmp/curl-calls" ] && [ ! -s "$tmp/lc-calls" ] && grep -Fq "return: licence already returned" "$tmp/log"'
 
+# Inject unlink failures at just the two paths; stdout/stderr and all other
+# filesystem operations still use the real wrapper and fixture files.
+cat > "$tmp/bin/rm" <<'EOF'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [ -n "${FAIL_UNLINK:-}" ] && [ "$arg" = "$FAIL_UNLINK" ]; then
+    echo 'synthetic unlink failure' >&2
+    exit 1
+  fi
+done
+exec /bin/rm "$@"
+EOF
+chmod +x "$tmp/bin/rm"
+
+reset 200; good_ulf_now; echo "5455 1" > "$state"
+lu "${hub[@]}" UNITY_RETURN_ON_EXIT=1 "FAIL_UNLINK=$ULF" -- open
+check 'exit return fails if the returned ULF remains and does not release the seat' \
+  '[ "$rc" != 0 ] && [ -f "$ULF" ] && [ -f "$state" ] && [ "$(calls release)" = 0 ] && grep -qx -- --return-ulf "$tmp/lc-calls"'
+: > "$tmp/runs"; : > "$tmp/lc-calls"
+lu "${hub[@]}" "FAIL_UNLINK=$ULF" -- open
+check 'a subsequent run cannot use or replace the returned ULF' \
+  '[ "$rc" != 0 ] && [ ! -s "$tmp/runs" ] && [ ! -s "$tmp/lc-calls" ] && grep -q "licence return is pending" "$tmp/log"'
+ln -s "$ULF" "$tmp/alias.ulf"
+lu "${hub[@]}" "ULF=$tmp/alias.ulf" -- activate
+check 'explicit activation through a symlink also rejects a ULF pending return cleanup' \
+  '[ "$rc" != 0 ] && [ ! -s "$tmp/lc-calls" ] && grep -q "licence return is pending" "$tmp/log"'
+lu "${hub[@]}" FAKE_RETURN_RC=5 -- return
+check 'retry removes the confirmed returned ULF and releases the seat without calling the client again' \
+  '[ "$rc" = 0 ] && [ ! -f "$ULF" ] && [ ! -f "$state" ] && [ "$(calls release)" = 1 ] && [ ! -s "$tmp/lc-calls" ]'
+lu "${hub[@]}" -- activate
+check 'activation after cleanup acquires a new seat' \
+  '[ "$rc" = 0 ] && [ "$(calls acquire)" = 1 ] && [ -f "$state" ] && [ -f "$ULF" ]'
+
+reset 200; good_ulf_now; echo "5455 1" > "$state"
+lu "${hub[@]}" "FAIL_UNLINK=$state" -- return
+check 'seat marker unlink failure prevents the hub release and fails the return' \
+  '[ "$rc" != 0 ] && [ "$(calls release)" = 0 ] && [ -f "$state" ] && [ ! -f "$ULF" ] && grep -q "could not clear ownership" "$tmp/log"'
+lu "${hub[@]}" -- return
+check 'retry without a ULF clears the seat marker and releases once' \
+  '[ "$rc" = 0 ] && [ "$(calls release)" = 1 ] && [ ! -f "$state" ] && [ "$(grep -c -- --return-ulf "$tmp/lc-calls")" = 1 ]'
+lu "${hub[@]}" -- activate
+check 'activation after the successful hub release must acquire a seat' \
+  '[ "$rc" = 0 ] && [ "$(calls acquire)" = 1 ] && [ -f "$state" ] && [ -f "$ULF" ]'
+
 # --- no Unity credentials: the seat is skipped entirely ---------------------------------------------------------------
 reset 200; rm -f "$ULF" "$state"
 rc=0; env "${hub[@]}" bash "$script" activate > "$tmp/log" 2>&1 || rc=$?

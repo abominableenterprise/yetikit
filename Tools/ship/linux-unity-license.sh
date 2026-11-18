@@ -39,6 +39,15 @@ ulf_problem() {
   if [ -n "$stop" ] && [[ "$stop" < "$now" ]]; then echo "expired (StopDate $stop)"; fi
 }
 
+# A return can invalidate a ULF remotely before local cleanup succeeds. Keep
+# this guard at the canonical path so other checkouts and aliases fail closed.
+require_no_pending_return() {
+  local guard; guard="$(readlink -m "$ULF").returning"
+  if [ -e "$guard" ] || [ -L "$guard" ]; then
+    die "licence return is pending at $ULF; run $SHIP_COMMAND return to finish cleanup"
+  fi
+}
+
 # Move an invalid ULF out of the way (kept for inspection) so the next activation starts clean.
 set_aside_ulf() {
   local bad; bad="$ULF.invalid-$(date -u +%Y%m%dT%H%M%S)"
@@ -107,6 +116,7 @@ cmd_activate() {
   activation_gate
   while :; do
     activation_lock
+    require_no_pending_return
     [ -x "$LC" ] || die "licensing client not found; run \`$SHIP_COMMAND setup\` first"
     if [ -f "$ULF" ]; then
       why="$(ulf_problem)"
@@ -141,9 +151,18 @@ cmd_return() {
   [ "${RETURN_ATTEMPTED:-0}" = 0 ] || return 0
   RETURN_ATTEMPTED=1
   activation_lock
+  local path guard pending=0
+  path="$(readlink -m "$ULF")"; guard="$path.returning"
   if [ ! -f "$ULF" ]; then
-    log "return: licence already returned"; seat_release; return 0
+    log "return: licence already returned"
+    finish_ulf_return "$path" "$guard"
+    return
   fi
+  if [ -f "$guard/returned" ]; then
+    finish_ulf_return "$path" "$guard"
+    return
+  fi
+  if [ -e "$guard" ] || [ -L "$guard" ]; then pending=1; fi
   need_creds
   [ -x "$LC" ] || die "licensing client not found"
   log "returning ULF licence"
@@ -151,7 +170,13 @@ cmd_return() {
   [[ "$limit" =~ ^[1-9][0-9]*$ ]] || die "UNITY_RETURN_TIMEOUT must be positive whole seconds"
   # Keep the supervised shell alive after TERM even if the client exits: timeout must still KILL its group.
   # Capture to a file so an inherited output pipe cannot keep this command (and the activity lock) blocked.
-  capture="$(mktemp)"
+  capture="$(mktemp)" || return 1
+  # Persist the guard before asking the client to invalidate the licence.
+  if ! mkdir -p -- "$guard"; then
+    rm -f "$capture"
+    log "error: cannot guard the licence against reuse during return: $guard"
+    return 1
+  fi
   (licensing_close_locks; exec timeout -k 5 "$limit" bash -c '
     trap "while :; do /bin/sleep 1; done" TERM
     "$@" & wait $!
@@ -163,13 +188,45 @@ cmd_return() {
   if grep -qi 'Ulf license file not found' <<< "$out"; then
     log "return: licence already returned"; rc=0
   fi
-  if [ "$rc" = 0 ]; then rm -f "$(readlink -m "$ULF")"; seat_release; fi
-  return $rc
+  if [ "$rc" = 0 ]; then
+    # Record confirmation before unlinking. A cleanup retry need not contact
+    # the licensing service again once the return has been confirmed.
+    if ! touch -- "$guard/returned"; then
+      log "error: cannot record the licence return at $guard; run $SHIP_COMMAND return to retry"
+      return 1
+    fi
+    finish_ulf_return "$path" "$guard"
+    return
+  fi
+  # A failed retry after an interrupted or unrecorded return is ambiguous.
+  if [ "$pending" = 0 ]; then clear_return_guard "$guard" || :; fi
+  return "$rc"
+}
+
+finish_ulf_return() {
+  local path="$1" guard="$2"
+  if [ -f "$path" ] && ! rm -f -- "$path"; then
+    log "error: cannot remove returned licence at $path; run $SHIP_COMMAND return to retry cleanup"
+    return 1
+  fi
+  clear_return_guard "$guard" || return 1
+  seat_release
+}
+
+clear_return_guard() {
+  local guard="$1"
+  if [ -e "$guard" ] || [ -L "$guard" ]; then
+    if ! rm -f -- "$guard/returned" || ! rmdir -- "$guard"; then
+      log "error: cannot clear pending licence return at $guard; run $SHIP_COMMAND return to retry cleanup"
+      return 1
+    fi
+  fi
 }
 
 # Every editor run needs the ULF. If it vanished (returned, wiped), re-activate once when credentials are set.
 # An invalid one (see ulf_problem) counts as missing.
 ensure_licence() {
+  require_no_pending_return
   local why="missing"
   if [ -f "$ULF" ]; then why="$(ulf_problem)"; [ -n "$why" ] || return 0; fi
   if [ -n "${UNITY_USERNAME:-}" ] && [ -n "${UNITY_PASSWORD:-}" ]; then
