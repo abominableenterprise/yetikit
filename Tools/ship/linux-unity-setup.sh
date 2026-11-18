@@ -97,9 +97,15 @@ pick_image() {
 
 has_android() { [ -d "$UNITY_ROOT/$ANDROID_REL/SDK" ] && [ -d "$UNITY_ROOT/$ANDROID_REL/NDK" ]; }
 
-# Establish process visibility with deletion's privileges.
+# Setup checks process visibility with the privileges used to replace the editor.
+# Ordinary cleanup can retry a read-only scan without prompting for credentials.
 unity_pids_as_root() {
-  as_root env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids \"\$@\"" _ "$@"
+  local -a elevate=(as_root)
+  if [ "${1:-}" = --non-interactive ]; then
+    elevate=(sudo -n --)
+    shift
+  fi
+  "${elevate[@]}" env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids \"\$@\"" _ "$@"
 }
 
 refuse_editor_in_use() {
