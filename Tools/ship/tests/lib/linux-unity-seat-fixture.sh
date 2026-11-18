@@ -1,6 +1,7 @@
 # Shared synthetic seat lease fixture; each worker owns its temporary project and fake hub.
 script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/linux-unity.sh"
 tmp="$(mktemp -d)"
+. "$(dirname "${BASH_SOURCE[0]}")/linux-unity-readiness-runner.sh"
 # Concurrent commands run under timeout (including their children). Open gates on
 # early exit too, then terminate/reap the bounded supervisors before removing files.
 concurrent=()
@@ -9,6 +10,7 @@ cleanup() {
   local pid
   for pid in "${concurrent[@]}"; do kill -TERM "$pid" 2>/dev/null || true; done
   for pid in "${concurrent[@]}"; do wait "$pid" 2>/dev/null || true; done
+  cleanup_readiness_runner
   rm -rf "$tmp"
 }
 trap cleanup EXIT

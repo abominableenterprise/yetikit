@@ -64,7 +64,8 @@ check "distinct OUT_DIR activation/return: return runs after activation and remo
 # --- TERM during the activation: the trap runs ------------------------------------------------------------------------
 reset 200; rm -f "$ULF" "$state"
 printf '#!/bin/sh\necho "$1" >> "%s/lc-calls"\n[ "$1" != --activate-ulf ] || { echo $$ > "%s/lc-started"; exec /bin/sleep 300; }\n' "$tmp" "$tmp" > "$lcdir/Unity.Licensing.Client"
-env UNITY_USERNAME=u UNITY_PASSWORD=p "${hub[@]}" bash "$script" activate > "$tmp/log" 2>&1 & runner=$!
+env SHIP_READINESS_RUN="$tmp" UNITY_USERNAME=u UNITY_PASSWORD=p "${hub[@]}" bash "$script" activate > "$tmp/log" 2>&1 &
+readiness_runner=$!; runner=$readiness_runner
 ship_wait_until test -s "$tmp/lc-started"
 kill -TERM "$runner"
 # Completion is bounded well below the client's 300 s lifetime, not a 2 s scheduler race.
@@ -75,6 +76,8 @@ rc=0; wait "$runner" 2>/dev/null || rc=$?
 check "wrapper-only TERM stops and reaps the client before releasing the seat" \
   '[ "$prompt" = 1 ] && [ "$rc" = 143 ] && ! kill -0 "$(cat "$tmp/lc-started")" 2>/dev/null && [ "$(calls release)" = 1 ] && [ ! -f "$state" ] && no_token'
 
+cleanup_readiness_runner
+
 # A client may finish activation while handling TERM. Wait for it, then keep the valid licence/seat.
 reset 200; rm -f "$ULF" "$state" "$tmp/lc-started"
 cat > "$lcdir/Unity.Licensing.Client" <<'EOF'
@@ -83,7 +86,8 @@ trap 'echo "<root><License/><Signature>x</Signature></root>" > "$ULF"; echo fini
 echo $$ > "$FAKE_TMP/lc-started"
 while :; do /bin/sleep 0.02; done
 EOF
-env UNITY_USERNAME=u UNITY_PASSWORD=p "${hub[@]}" bash "$script" activate > "$tmp/log" 2>&1 & runner=$!
+env SHIP_READINESS_RUN="$tmp" UNITY_USERNAME=u UNITY_PASSWORD=p "${hub[@]}" bash "$script" activate > "$tmp/log" 2>&1 &
+readiness_runner=$!; runner=$readiness_runner
 ship_wait_until test -s "$tmp/lc-started"
 kill -TERM "$runner"
 if ! ship_wait_until runner_exited; then kill -KILL "$runner" "$(cat "$tmp/lc-started")" 2>/dev/null || true; fi
