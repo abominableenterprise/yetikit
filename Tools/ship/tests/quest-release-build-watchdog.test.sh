@@ -30,6 +30,7 @@ check() {
   else echo "FAIL $1"; [ ! -f "$tmp/output" ] || tail -n 25 "$tmp/output"; fails=$((fails + 1)); fi
 }
 qr_need_commit() { :; }
+qr_check_prepared_worktree() { :; } # Covered by the prepared-integrity fixture.
 qr_wt() { printf '%s\n' "$tmp/build"; }
 qr_android_user_home() { printf '%s\n' "$tmp/android home"; }
 qr_last_installed_sha() { :; }

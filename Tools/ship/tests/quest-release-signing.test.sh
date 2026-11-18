@@ -73,7 +73,7 @@ configure
 qr_config || exit 1
 mkdir -p "$QR_LOGS"
 qr_new_run 0123456789012345678901234567890123456789 synthetic
-mkdir -p "$(qr_wt build)"
+qr_check_prepared_worktree() { :; } # Covered by the prepared-integrity fixture.
 # all still calls the real preflight and must stop before parallel editors on failure.
 qr_prepare() { qr_load_state; }
 qr_parallel_unity() { echo parallel >> "$tmp/editor"; QR_GATE_RC=0; QR_BUILD_RC=1; }

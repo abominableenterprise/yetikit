@@ -566,7 +566,19 @@ errors (for example, connection timeouts or HTTP 503). It makes at most three
 attempts, waiting one second before the second and two before the third. This
 caps attempts, not the duration of an individual Git command. Authentication,
 missing refs and local Git errors are not retried. Exhausted retries report
-failure and stop `prepare` before worktree creation.
+failure and stop `prepare` before worktree creation. It refuses release worktree
+symlinks and checks that an existing worktree is registered at its resolved
+path. It stages each Library copy on the same volume and renames it only when
+complete. If an older `Library` lacks the completion marker, move it aside and
+rerun `prepare` rather than reusing an unverified copy.
+
+Before starting the editor, `gate` and `build` check the registered worktree,
+its detached HEAD, and local changes against the prepared commit. Only
+content-verified, unstaged editor edits are allowed; a configured font path
+alone does not qualify. Untracked files are rejected even if Git ignores them,
+except under Unity's root output directories (`Library`, `Temp`, `Obj`,
+`Logs`, `UserSettings`) and the exact regular `.apk` output that `build`
+replaces. Validation does not revert edits.
 
 `all` fetches origin and resolves a commit, creates separate detached test/build
 worktrees with independent cloned Libraries, runs gate/build in parallel, then
