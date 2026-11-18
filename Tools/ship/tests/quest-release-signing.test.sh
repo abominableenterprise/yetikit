@@ -35,7 +35,7 @@ keytool() {
     case "$arg" in -storepass|-keypass) return 1 ;; esac
     prev="$arg"
   done
-  [ "$alias" = release ] && [ "$passenv" = SYNTHETIC_STORE_PASS ] || return 1
+  [ "$alias" = release ] && [ "$passenv" = "${FAKE_STORE_PASS_ENV:-SYNTHETIC_STORE_PASS}" ] || return 1
   [ "$(printenv "$passenv")" = "$SYNTHETIC_STORE_PASS" ] || return 1
   [ "${FAKE_KEYTOOL_RC:-0}" = 0 ] || { echo "SHA256: $cert"; return 1; }
   printf 'Certificate fingerprints:\n  SHA256: %s\n' "$(head -n1 "$path")"
@@ -53,7 +53,7 @@ unity() {
   mkdir -p "$project/Builds/Android"
   echo synthetic-apk > "$project/Builds/Android/consumer-dev.apk"
 }
-qr_java_setup() { return 0; }
+qr_java_setup() { : > "$tmp/java-setup"; }
 qr_last_installed_sha() { :; }
 qr_doctor_java() { return 0; }
 qr_doctor_apksigner() { :; }
@@ -114,6 +114,50 @@ for mapping in keyAliasEnv:name keyAliasEnv:ks storePassEnv:got keyPassEnv:QR_KE
   done
 done
 unset name ks got QR_KEYSTORE_ALIAS
+for variable in JAVA_HOME PATH RANDOM SECONDS SHELLOPTS; do
+  jq --arg variable "$variable" '.quest.signing.storePassEnv = $variable' \
+    "$tmp/no-keypass.json" > "$YETIKIT_CONFIG"
+  rm -f "$tmp/java-setup" "$tmp/keytool.argv" "$tmp/editor"
+  run "reserved-$variable" build
+  check "build rejects $variable before Java setup or signing" \
+    '[ "$rc" != 0 ] && grep -Fq quest.signing.storePassEnv "$tmp/reserved-$variable.err" &&
+      [ ! -e "$tmp/java-setup" ] && [ ! -e "$tmp/keytool.argv" ] && [ ! -e "$tmp/editor" ]'
+done
+
+# Without --notes, either metadata variable can leak the store password into
+# the summary. With --notes, the runner would overwrite the same input.
+: > "$tmp/notes.txt"
+export YETIKIT_WHATS_NEW="$SYNTHETIC_STORE_PASS"
+for mode in read overwrite; do
+  args=()
+  [ "$mode" != overwrite ] || args=(--notes "$tmp/notes.txt")
+  jq '.quest.signing.storePassEnv = "YETIKIT_WHATS_NEW"' "$tmp/no-keypass.json" > "$YETIKIT_CONFIG"
+  rm -f "$tmp/keytool.argv" "$tmp/editor"
+  FAKE_STORE_PASS_ENV=YETIKIT_WHATS_NEW run "notes-$mode" build ${args[@]+"${args[@]}"}
+  check "build rejects default notes collision ($mode) before checking credentials" \
+    '[ "$rc" != 0 ] && grep -Fq quest.signing.storePassEnv "$tmp/notes-$mode.err" &&
+      [ ! -e "$tmp/keytool.argv" ] && [ ! -e "$tmp/editor" ]'
+done
+jq '.quest.signing.storePassEnv = "YETIKIT_WHATS_NEW" | .quest.whatsNewEnv = "SYNTHETIC_NOTES"' \
+  "$tmp/no-keypass.json" > "$YETIKIT_CONFIG"
+FAKE_STORE_PASS_ENV=YETIKIT_WHATS_NEW run notes-noncollision build --notes "$tmp/notes.txt"
+check 'overridden notes name no longer collides with the default name' '[ "$rc" = 0 ]'
+unset YETIKIT_WHATS_NEW
+configure
+cp "$YETIKIT_CONFIG" "$tmp/signing.json"
+for mapping in 'whatsNewEnv:YETIKIT_WHATS_NEW:default' 'prevShaEnv:YETIKIT_PREV_SHA:default' \
+    'whatsNewEnv:SYNTHETIC_NOTES:custom' 'prevShaEnv:SYNTHETIC_PREV:custom'; do
+  setting="${mapping%%:*}"; variable="${mapping#*:}"; variable="${variable%:*}"
+  for field in keystorePathEnv storePassEnv keyAliasEnv keyPassEnv; do
+    jq --arg setting "$setting" --arg variable "$variable" --arg field "$field" --arg mode "${mapping##*:}" \
+      'if $mode == "default" then . else .quest[$setting] = $variable end |
+       .quest.signing[$field] = $variable' "$tmp/signing.json" > "$YETIKIT_CONFIG"
+    run metadata doctor
+    check "doctor rejects $field colliding with $setting ($variable)" \
+      '[ "$rc" != 0 ] && grep -Fq "quest.signing.$field" "$tmp/metadata.err" &&
+        grep -Fq "quest.$setting" "$tmp/metadata.err"'
+  done
+done
 configure
 # Custom signing must not scrub environment names used by the consumer, including XDG_CONFIG_HOME.
 export XDG_CONFIG_HOME="$tmp/xdg"
