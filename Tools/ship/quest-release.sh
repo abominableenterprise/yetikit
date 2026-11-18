@@ -184,12 +184,12 @@ qr_main() {
   local cmd="${1:-}" rc=0 list_release=0
   [ $# -gt 0 ] && shift
   case "$cmd" in ''|-h|--help|help) qr_usage; return 0 ;; esac
-  qr_config || return 1
-  # doctor creates no logs folder, run folder, run lock or summary.
+  # Keep even configuration and discovery diagnostics out of any inherited run log.
   if [ "$cmd" = doctor ]; then
-    qr_select_device || return 1
-    ( qr_doctor "$@" ) || rc=$?; return "$rc"
+    ( unset QR_RUN_DIR; qr_config && qr_select_device && qr_doctor "$@" ) || rc=$?
+    return "$rc"
   fi
+  qr_config || return 1
   # wait is read-only too: it only watches the current run.
   if [ "$cmd" = wait ]; then ( qr_wait "$@" ) || rc=$?; return "$rc"; fi
   # Parse perf overrides in the owner so even a pre-worker cancellation has them.
