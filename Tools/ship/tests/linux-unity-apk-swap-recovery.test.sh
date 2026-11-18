@@ -6,7 +6,7 @@ set -euo pipefail
 # shellcheck source=Tools/ship/tests/lib/linux-unity-apk-fixture.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/linux-unity-apk-fixture.sh"
 apk_module
-swapfiles() { find "$tmp/swap" -name "linux-unity-apk.swap.*" | wc -l; }
+swapfiles() { find "$tmp/swap" -name 'linux-unity-apk.swap*' | wc -l; }
 : > "$tmp/swap-calls"
 
 check "a swapfile that could not be created: warning, build goes on, nothing to remove" \
