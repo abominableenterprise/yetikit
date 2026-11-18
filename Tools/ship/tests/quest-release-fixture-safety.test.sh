@@ -7,30 +7,16 @@ export QR_FIXTURE_TEST_LIB="${QR_FIXTURE_TEST_LIB:-$QR_FIXTURE_REAL_SHIP/tests/l
 python3 -B - <<'PY'
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import tempfile
-import time
 import uuid
 
 lib = Path(os.environ['QR_FIXTURE_TEST_LIB'])
 sys.path.insert(0, str(Path(os.environ['QR_FIXTURE_REAL_SHIP']) / 'tests/helpers'))
-from proc_inspection import require
+from proc_inspection import cleanup_session, require, wait_marked
 
 inspect_processes = require('fixture-safety leak assertions')
-
-def owned(marker):
-    if not inspect_processes:
-        return []
-    result = []
-    for entry in Path('/proc').glob('[0-9]*/environ'):
-        try:
-            if marker.encode() in entry.read_bytes().split(b'\0'):
-                result.append(int(entry.parent.name))
-        except (FileNotFoundError, ProcessLookupError, PermissionError):
-            pass
-    return result
 
 def run(label, body, expected):
     marker = 'QR_FIXTURE_SAFETY_MARKER=' + str(uuid.uuid4())
@@ -44,25 +30,21 @@ set -u
 . "$QR_FIXTURE_TEST_LIB/quest-release-timebox.sh"
 tmp="$QR_FIXTURE_CASE"
 ''' + body, str(lib.parent / 'synthetic.test.sh')], env=env,
-                                       stdout=log, stderr=subprocess.STDOUT)
+                                       stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             try:
                 rc = process.wait(timeout=15)
                 log.seek(0)
                 assert rc == expected, (label, rc, log.read())
                 if inspect_processes:
-                    deadline = time.monotonic() + 2
-                    while owned(marker) and time.monotonic() < deadline:
-                        time.sleep(.02)
-                    assert not owned(marker), (label, 'leaked owned processes', owned(marker))
-                print('ok  ', label, flush=True)
+                    scan_label = f'{label}: no owned process remains'
+                    remaining = wait_marked(scan_label, marker.encode(), process.pid)
+                    if remaining is not None:
+                        assert not remaining, (label, 'leaked owned processes', remaining)
+                        print('ok  ', scan_label, flush=True)
+                print('ok  ', f'{label}: expected exit status', flush=True)
             finally:
                 # A failing-first run must not itself leak the baseline's sleep.
-                for pid in owned(marker):
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                process.wait(timeout=5)
+                cleanup_session(process)
 
 failures = []
 for label, body, expected in [

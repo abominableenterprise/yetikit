@@ -11,7 +11,7 @@ import tempfile
 import time
 import uuid
 
-from proc_inspection import require
+from proc_inspection import cleanup_session, live_session, require, wait_marked
 
 # These lifecycle assertions need process state and environment enumeration.
 if not require('runner lifecycle regressions'):
@@ -37,21 +37,7 @@ def until(predicate, runner=None, seconds=15):
 
 
 def live(pid):
-    try:
-        return Path(f'/proc/{pid}/stat').read_text().rsplit(') ', 1)[1].split()[0] != 'Z'
-    except FileNotFoundError:
-        return False
-
-
-def marked(marker):
-    result = []
-    for path in Path('/proc').glob('[0-9]*/environ'):
-        try:
-            if marker in path.read_bytes().split(b'\0') and live(int(path.parent.name)):
-                result.append(int(path.parent.name))
-        except (FileNotFoundError, ProcessLookupError, PermissionError):
-            pass
-    return result
+    return live_session(Path(f'/proc/{pid}')) is not None
 
 
 class Case:
@@ -114,17 +100,8 @@ class Case:
 
     def cleanup(self):
         # The regression must not leak a stubborn process even when it fails.
-        for pid in marked(self.marker):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
         if self.process is not None:
-            try:
-                os.killpg(self.process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            self.process.wait(timeout=5)
+            cleanup_session(self.process)
 
 
 GATE = '''
@@ -245,7 +222,11 @@ wait
     assert time.monotonic() - started < 15, 'unbounded cancellation'
     until(lambda: not live(pid), seconds=3)
     assert (case.state / 'cleaned').exists(), 'fixture EXIT cleanup skipped'
-    until(lambda: not marked(case.marker), seconds=3)
+    label = f'{case.kind}: cancel-{sig.name}: no marked descendant remains'
+    remaining = wait_marked(label, case.marker, runner.pid, seconds=3)
+    if remaining is not None:
+        assert not remaining, (label, remaining)
+        print(f'ok   {label}', flush=True)
 
 
 def timeout(case):
