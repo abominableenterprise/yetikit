@@ -31,11 +31,18 @@ EOF
 }
 ship_fixture() {
   local project="$1" variant="${2:-scene}" file
-  mkdir -p "$project/Tools/ship" "$project/.ship-test-bin"
+  local bin="$project/.ship-test-bin" tool
+  mkdir -p "$project/Tools/ship" "$bin/swap"
   # Preserve synthetic commands/environment without invoking real sudo, even standalone.
-  printf '#!/bin/sh\nexec "$@"\n' > "$project/.ship-test-bin/sudo"
-  chmod +x "$project/.ship-test-bin/sudo"
-  export PATH="$project/.ship-test-bin:$PATH"
+  printf '#!/bin/sh\nexec "$@"\n' > "$bin/sudo"
+  # APK-specific fixtures put their opt-in swap simulations earlier in PATH.
+  for tool in fallocate mkswap swapon swapoff; do
+    printf '#!/bin/sh\nprintf "unexpected swap command: %s\\n" >&2\nexit 99\n' "$tool" > "$bin/$tool"
+  done
+  chmod +x "$bin/sudo" "$bin/"{fallocate,mkswap,swapon,swapoff}
+  export PATH="$bin:$PATH" APK_SWAP_DIR="$bin/swap"
+  # Keep the marker default tied to the OUT_DIR selected by each test or child.
+  unset SEAT_STATE
   for file in "$SHIP_SOURCE_DIR"/*.sh; do
     cp "$file" "$project/Tools/ship/"
   done
