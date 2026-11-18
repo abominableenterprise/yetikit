@@ -24,7 +24,7 @@ qr_test_cache_config_reads() {
       value=''; IFS= read -r -d '' value || exit 1
       printf '    %q) printf "%%s\\n" %q ;;\n' "$expression" "$value" >> "$tmp/config-reads.sh"
     done 3< "$tmp/config-expressions" < "$tmp/config-values"
-    printf '    *) echo "uncached config expression: $1" >&2; return 1 ;;\n  esac\n}\n' >> "$tmp/config-reads.sh"
+    printf '    .noise.*) command jq -r "$1" <<< "$QR_CONFIG_JSON" ;;\n    *) echo "uncached config expression: $1" >&2; return 1 ;;\n  esac\n}\n' >> "$tmp/config-reads.sh"
   ) || return 1
   . "$tmp/config-reads.sh"
   jq() {

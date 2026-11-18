@@ -17,15 +17,31 @@ qr_check_disk() {
 # shellcheck source=Tools/ship/quest-release/git-retry.sh
 . "$(dirname "${BASH_SOURCE[0]}")/git-retry.sh"
 
-# APFS copy-on-write clone of directory $1 to $2: /bin/cp explicitly, as GNU coreutils' cp (no -c) may shadow it on PATH.
-# A real directory, never a symlink: two editors must not share one Library.
+# shellcheck source=Tools/ship/quest-release/worktree.sh
+. "$(dirname "${BASH_SOURCE[0]}")/worktree.sh"
+
+# APFS copy-on-write clone: /bin/cp explicitly, as GNU cp (no -c) may shadow it on PATH.
 qr_clone_dir() { /bin/cp -c -R "$1" "$2"; }
+
+qr_stage_library() (
+  local wt="$1" stage
+  # Stage alongside the worktree on the same volume. Even a SIGKILL leaving
+  # staging behind cannot put a partial copy at the editor's Library path.
+  stage="$(mktemp -d "$wt.library-stage.XXXXXXXX")" || return 1
+  trap 'rm -rf -- "$stage"' EXIT
+  qr_clone_dir "$QR_WARM/Library" "$stage/Library" &&
+    rm -f -- "$stage/Library/.quest-release-clone-complete" &&
+    touch "$stage/Library/.quest-release-clone-complete" &&
+    mv -- "$stage/Library" "$wt/Library" && qr_library_ready "$wt"
+)
 
 # Create worktree $1 detached at commit $2, with a Library cloned from the warm worktree.
 qr_make_worktree() {
   local wt="$1" sha="$2" status
+  [ ! -L "$wt" ] || qr_die "$wt is a symlink; refusing"
   if [ -e "$wt" ]; then
-    [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$sha" ] || qr_die "$wt exists at another commit; run cleanup or remove it"
+    qr_registered_worktree "$wt" || qr_die "$wt is not the registered release worktree; refusing"
+    qr_expected_worktree_head "$wt" "$sha" || qr_die "$wt is not at the requested detached HEAD; run cleanup or remove it"
     status="$(git -C "$wt" status --porcelain --untracked-files=all 2>/dev/null)" \
       || qr_die "cannot inspect $wt; preserving worktree"
     [ -z "$status" ] || qr_die "$wt exists with local changes; run cleanup or remove it"
@@ -34,10 +50,12 @@ qr_make_worktree() {
     qr_git worktree add --detach "$wt" "$sha" >> "$QR_RUN_DIR/prepare.log" 2>&1 || qr_die "git worktree add $wt failed (prepare.log)"
   fi
   [ ! -L "$wt/Library" ] || qr_die "$wt/Library is a symlink; refusing"
-  if [ ! -d "$wt/Library" ]; then
+  if [ -e "$wt/Library" ]; then
+    qr_library_ready "$wt" || qr_die "$wt/Library is not a verified clone; move it aside and rerun prepare"
+  else
     qr_log "cloning Library into $wt (APFS clone)"
-    qr_clone_dir "$QR_WARM/Library" "$wt/Library" >> "$QR_RUN_DIR/prepare.log" 2>&1 \
-      || qr_die "/bin/cp -c -R of $QR_WARM/Library failed (prepare.log)"
+    qr_stage_library "$wt" >> "$QR_RUN_DIR/prepare.log" 2>&1 \
+      || qr_die "Library clone of $QR_WARM/Library failed (prepare.log)"
   fi
 }
 
@@ -167,15 +185,9 @@ qr_prepare() {
   qr_log "worktrees ready: $(qr_wt test), $(qr_wt build)"
 }
 
-# symbolic-ref exits 1 for a detached HEAD; any other result is unsafe.
 qr_cleanup_expected_head() {
-  local wt="$1" symbolic_rc=0 head
-  git -C "$wt" symbolic-ref --quiet HEAD >/dev/null 2>&1 || symbolic_rc=$?
-  if [ "$symbolic_rc" = 1 ] && head="$(git -C "$wt" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" &&
-    [ "$head" = "$QR_SHA" ]; then
-    return 0
-  fi
-  qr_log "cannot verify expected detached HEAD in $wt; preserving worktree"
+  qr_expected_worktree_head "$1" "$QR_SHA" && return 0
+  qr_log "cannot verify expected detached HEAD in $1; preserving worktree"
   return 1
 }
 

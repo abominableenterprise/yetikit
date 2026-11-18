@@ -79,10 +79,10 @@ qr_gate() {
   [ "${1:-}" = --full ] && full=1
   qr_need_commit
   wt="$(qr_wt test)"
-  [ -d "$wt" ] || qr_die "no test worktree $wt: run prepare first"
   xml="$QR_RUN_DIR/gate.xml"; log="$QR_RUN_DIR/gate-unity.log"
   rm -f "$xml" "$QR_RUN_DIR/gate-retry.xml" "$QR_RUN_DIR/gate-retry-failures.txt"
   qr_set gate_result failed # until qr_gate_passed: what `wait` reads for a gate-only run
+  qr_check_prepared_worktree "$wt"
   set -- -batchmode -force-metal -projectPath "$wt" -runTests -testPlatform EditMode
   if [ "$full" = 1 ]; then
     cats="all (--full)"
@@ -308,7 +308,7 @@ qr_build() {
   done
   qr_need_commit
   wt="$(qr_wt build)"
-  [ -d "$wt" ] || qr_die "no build worktree $wt: run prepare first"
+  qr_check_prepared_worktree "$wt" "$QR_APK_REL"
   out="$wt/$QR_APK_REL"
   kept="$QR_APK_DIR/${QR_APK_KEEP_NAME//\{sha\}/$QR_SHORT}"
   case "${kept#"$QR_APK_DIR"/}" in ''|*/*|.|..) qr_die "quest.apkKeepName must be a filename" ;; esac

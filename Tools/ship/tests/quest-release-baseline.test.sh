@@ -85,6 +85,7 @@ QR_SHA=fffffffff; QR_SHORT=fffffffff; QR_APK_REL=out.apk; QR_APK_DIR="$tmp/apks"
 QR_KEYSTORE_CHECKED=1; QR_BUILD_TIMEOUT=10
 mkdir -p "$QR_RUN_DIR" "$tmp/build"
 qr_need_commit() { :; }
+qr_check_prepared_worktree() { :; } # Covered by the prepared-integrity fixture.
 qr_wt() { echo "$tmp/build"; }
 qr_android_user_home() { echo "$tmp/android"; }
 unity() { printf '%s' "${YETIKIT_PREV_SHA:-}" > "$tmp/editor-prev"; printf built > "$tmp/build/out.apk"; }

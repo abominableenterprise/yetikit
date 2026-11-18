@@ -274,11 +274,19 @@ check "one unlisted failure that fails again: gate fails after one rerun only" \
   '[ "$rc" != 0 ] && [ "$(runs)" = 2 ] && grep -q "(retried 1 unlisted failure: $real — failed again)" "$tmp/out" && grep -q "^gate fails:  $real: flaky" "$tmp/out"'
 
 # --- the list is read from the commit under test; QUEST_KNOWN_FLAKES overrides ------------------------------------------------
-worktrees=("$root"/rel-*-test)
-wt="${worktrees[0]}"
-# Commit a worktree-only list change: the main checkout must not supply these entries.
-printf '%s\n' "$real" "$real2" >> "$wt/Tools/ship/known-flakes.txt"
-git -C "$wt" add Tools/ship/known-flakes.txt && git -C "$wt" commit -qm 'Add synthetic release flakes'
+prepare_policy_commit() {
+  local ref
+  ref="$(git -C "$repo" rev-parse HEAD)" || exit 1
+  git -C "$repo" checkout -q main || exit 1
+  run prepare "$ref"
+  [ "$rc" = 0 ] || exit 1
+  wt="$root/rel-${ref:0:9}-test"
+}
+# Prepare an alternate commit; leave main on its original list when gate runs.
+git -C "$repo" checkout -q --detach HEAD || exit 1
+printf '%s\n' "$real" "$real2" >> "$list"
+git -C "$repo" add Tools/ship/known-flakes.txt && git -C "$repo" commit -qm 'Add synthetic release flakes' || exit 1
+prepare_policy_commit
 check "the committed test list differs from the main checkout" \
   'git -C "$wt" show HEAD:Tools/ship/known-flakes.txt | grep -qF "$real" && ! grep -qF "$real" "$list"'
 FAKE_FAILS="$real;$real2" run gate
@@ -286,7 +294,9 @@ check "the gate retries two known flakes committed only in the test worktree" \
   '[ "$rc" = 0 ] && [ "$(runs)" = 2 ] && grep -qF "retried 2 known flakes: $real, $real2 — passed" "$tmp/out"'
 
 # A missing worktree list retains compatibility with the main checkout list.
-git -C "$wt" rm -q Tools/ship/known-flakes.txt && git -C "$wt" commit -qm 'Omit synthetic release flakes'
+git -C "$repo" checkout -q --detach HEAD || exit 1
+git -C "$repo" rm -q Tools/ship/known-flakes.txt && git -C "$repo" commit -qm 'Omit synthetic release flakes' || exit 1
+prepare_policy_commit
 FAKE_FAILS="$spray;$consistency" run gate
 check "a worktree without a list falls back to the main checkout" \
   '[ "$rc" = 0 ] && [ "$(runs)" = 2 ] && grep -qF "retried 2 known flakes: $spray, $consistency — passed" "$tmp/out"'
@@ -301,7 +311,10 @@ rc=0
 check "no existing list in either checkout returns empty" '[ "$rc" = 0 ]'
 
 # An existing empty worktree list is authoritative, not a reason to fall back.
-: > "$wt/Tools/ship/known-flakes.txt"
+git -C "$repo" checkout -q --detach HEAD || exit 1
+: > "$list"
+git -C "$repo" add Tools/ship/known-flakes.txt && git -C "$repo" commit -qm 'Empty synthetic release flakes' || exit 1
+prepare_policy_commit
 FAKE_FAILS="$spray;$consistency" run gate
 check "an empty worktree list does not use main-checkout entries" '[ "$rc" != 0 ] && [ "$(runs)" = 1 ]'
 
@@ -310,7 +323,6 @@ FAKE_FAILS="$spray;$consistency" run gate
 check "an absolute config path is used as-is despite an empty worktree list" \
   '[ "$rc" = 0 ] && [ "$(runs)" = 2 ] && grep -q "retried 2 known flakes" "$tmp/out"'
 cp "$repo/yetikit.json" "$YETIKIT_CONFIG"
-cp "$list" "$wt/Tools/ship/known-flakes.txt"
 
 : > "$tmp/empty-flakes.txt"
 rc=0; ( QUEST_KNOWN_FLAKES="$tmp/empty-flakes.txt"; FAKE_FAILS="$spray;$consistency"; rm -f "$tmp/unity.log"; qr_main gate ) > "$tmp/out" 2> "$tmp/err" || rc=$?
