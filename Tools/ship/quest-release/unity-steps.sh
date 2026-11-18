@@ -88,7 +88,12 @@ qr_gate() {
   xml="$QR_RUN_DIR/gate.xml"; log="$QR_RUN_DIR/gate-unity.log"
   rm -f "$xml" "$QR_RUN_DIR/gate-retry.xml" "$QR_RUN_DIR/gate-retry-failures.txt"
   qr_set gate_result failed # until qr_gate_passed: what `wait` reads for a gate-only run
-  qr_check_prepared_worktree "$wt"
+  # The integrity check exits via qr_die; contain that exit so the summary replaces any prior pass.
+  if ! ( qr_check_prepared_worktree "$wt" ); then
+    qr_set gate "FAILED: prepared worktree integrity check (see release.log)"
+    qr_set gate_failures "prepared worktree refused; Unity was not started"
+    return 1
+  fi
   set -- -batchmode -force-metal -projectPath "$wt" -runTests -testPlatform EditMode
   if [ "$full" = 1 ]; then
     cats="all (--full)"
