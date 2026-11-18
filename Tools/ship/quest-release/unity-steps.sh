@@ -122,6 +122,10 @@ qr_gate() {
     set -- -batchmode -force-metal -projectPath "$wt" -runTests -testPlatform EditMode
     [ "$full" = 1 ] || set -- "$@" -testCategory "$cats"
     qr_gate_flake_retry "$wt" "$@" || return 1
+  elif [ "$2" -eq 0 ]; then
+    qr_set gate_failures "no test passed"
+    qr_log "gate: no test passed ($cats)"
+    return 1
   fi
   qr_gate_passed
 }

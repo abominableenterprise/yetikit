@@ -9,11 +9,17 @@ cp "$(command -v bash)" "$tmp/bin/Unity" # a real program named Unity (also the 
 printf '#!/bin/sh\necho old >> "%s/apksigner-bin.log"\n' "$tmp" > "$tmp/sdk/build-tools/30.0.3/apksigner"
 printf '#!/bin/sh\necho "$*" >> "%s/apksigner-bin.log"\n[ -z "$FAKE_APKSIGNER_STDOUT" ] || echo "$FAKE_APKSIGNER_STDOUT"\n[ -n "$FAKE_APKSIGNER_FAIL" ] && exit 1\necho 0.9\n' "$tmp" > "$tmp/sdk/build-tools/34.0.0/apksigner"
 chmod +x "$tmp/sdk/build-tools/"*/apksigner
+doctor_snapshot() {
+  find "$root" | LC_ALL=C sort | while IFS= read -r path; do
+    printf '%s\n' "$path"
+    if [ -f "$path" ]; then qr_sha256 "$path"; fi
+  done
+}
 doctor_run() {
   reset_logs; rm -f "$tmp/git.log" "$tmp/apksigner-bin.log"
-  find "$root" | sort > "$tmp/tree-before"
+  doctor_snapshot > "$tmp/tree-before"
   rc=0; ( UNITY_BIN="$tmp/bin/Unity"; export UNITY_BIN; qr_main doctor ) > "$tmp/out" 2> "$tmp/err" || rc=$?
-  find "$root" | sort > "$tmp/tree-after"
+  doctor_snapshot > "$tmp/tree-after"
 }
 line() { tr -s " " < "$tmp/out" | grep -q "^$1 $2"; } # the columns are padded
 doctor_run
@@ -23,6 +29,11 @@ check "doctor names the JDK source, the newest build-tools apksigner, the keysto
   'line ok "java .*JAVA_HOME=$tmp/jdk (JAVA_HOME)" && line ok "apksigner $tmp/sdk/build-tools/34.0.0/apksigner (0.9)" && [ "$(cat "$tmp/apksigner-bin.log")" = --version ] && line ok "keystore $HOME/.android/debug.keystore matches" && line ok "unity $tmp/bin/Unity" && line ok "disk 100 GB free" && line ok "idle idle (Home focused)"'
 check "doctor is read-only: no Unity, no adb install / shell pm / am / logcat, no fetch, no worktree, run folder or lock" \
   '[ ! -f "$tmp/unity.log" ] && ! grep -qE " install | shell pm | shell am |logcat|exec-out" "$tmp/adb.log" && [ ! -f "$tmp/git.log" ] && cmp -s "$tmp/tree-before" "$tmp/tree-after" && ! grep -q "Quest release summary" "$tmp/out"'
+existing_run="$(qr_load_state; printf '%s\n' "$QR_RUN_DIR")"
+[ -d "$existing_run" ] && [ -s "$existing_run/release.log" ] || exit 1
+QR_RUN_DIR="$existing_run" doctor_run
+check "doctor ignores an inherited run folder and leaves the existing release log unchanged" \
+  '[ "$rc" = 0 ] && line ok java && cmp -s "$tmp/tree-before" "$tmp/tree-after"'
 rc=0; ( unset JAVA_HOME; UNITY_HUB_EDITORS="$tmp/no-hub"; doctor_run; exit "$rc" ) || rc=$?
 check "doctor FAILs with no Java anywhere (and says why apksigner cannot run)" '[ "$rc" != 0 ] && line FAIL "java no runnable JDK" && line FAIL "apksigner .*needs Java" && grep -q "doctor: 2 FAIL" "$tmp/out"'
 fake_jdk "$tmp/doc-hub/6000.6.6f1/PlaybackEngines/AndroidPlayer/OpenJDK"

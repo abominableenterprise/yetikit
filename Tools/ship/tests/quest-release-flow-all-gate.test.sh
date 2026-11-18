@@ -18,4 +18,15 @@ reset_logs; FAKE_XML="$xml_parameterized" FAKE_RETRY_XML="$xml_partial" run all
 check "all refuses to install when a parameterised fixture retry returns just one Passed case" \
   '[ "$rc" != 0 ] && [ ! -f "$tmp/installed" ] && [ -f "$apk" ] && grep -q -- "-testFilter Ns.F " "$tmp/unity.log" && grep -q "install:     skipped: gate failed" "$tmp/out" && out_has "fixture retry omitted original test case"'
 
+xml_mixed='<test-run total="2" passed="1" failed="0" skipped="1"><test-case fullname="Ns.A.One" result="Passed"/><test-case fullname="Ns.A.Two" result="Skipped"/></test-run>'
+qr_flow_prepare
+FAKE_XML="$xml_mixed" run gate --full
+check "a skip does not block the gate when a selected test passed" \
+  '[ "$rc" = 0 ] && out_has "2 tests, 1 passed, 0 failed, 1 skipped"'
+
+xml_skipped='<test-run total="2" passed="0" failed="0" skipped="2"><test-case fullname="Ns.A.One" result="Skipped"/><test-case fullname="Ns.A.Two" result="Skipped" label="Ignored"/></test-run>'
+reset_logs; FAKE_XML="$xml_skipped" run all
+check "all-skipped gate fails without retrying or installing; the APK and totals are retained" \
+  '[ "$rc" = 1 ] && [ ! -f "$tmp/installed" ] && [ -f "$apk" ] && ! grep -q -- "-testFilter" "$tmp/unity.log" && grep -q "install:     skipped: gate failed" "$tmp/out" && out_has "2 tests, 0 passed, 0 failed, 2 skipped" && out_has "gate: no test passed"'
+
 qr_flow_finish

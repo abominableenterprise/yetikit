@@ -591,11 +591,14 @@ percent-encoded (including `%`), so `192.168.0.5:5555` becomes
 `OK`, `CRASH` or `INFRA`, plus the overall outcome. Original serials appear only
 in the report, not as raw paths. Single-device logs stay at the run root.
 
-`gate` runs Metal EditMode `Gfx;MacOnly` tests (`--full` runs all). All failures
-listed in `knownFlakes`, or exactly one failure whether listed or not, rerun
-once with the same categories and exact selected filter. Retry coverage and
-result counts must prove the selected tests actually passed. Missing results,
-crashes and empty runs fail closed. The summary labels a passing retry.
+`gate` runs Metal EditMode `Gfx;MacOnly` tests (`--full` runs all). A run with
+no reported failures still needs at least one passing test. An all-skipped or
+all-ignored run fails without a retry; skips alongside passing tests do not
+block the gate. If all failures are listed in `knownFlakes`, or there is exactly
+one failure whether listed or not, the failed tests rerun once with the same
+categories and exact selected filter. Retry coverage and result counts must
+prove the selected tests actually passed. Missing results, crashes and empty
+runs fail closed. The summary labels a passing retry.
 The flakes list is read from the test worktree first, falling back to the main
 checkout if absent. Absolute config paths and absolute `QUEST_KNOWN_FLAKES`
 overrides are used as-is.
