@@ -16,6 +16,9 @@ trap cleanup EXIT
 fails=0
 . "$(dirname "$0")/lib/fixture.sh"
 ship_fixture "$tmp"
+# Setup enters the idle lifecycle even without credentials.
+export HOME="$tmp/home" ULF="$tmp/licence"
+mkdir -p "$HOME"
 ship_fixture_process_view "$tmp/process-view"
 export PATH="$tmp/process-view:$PATH"
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }

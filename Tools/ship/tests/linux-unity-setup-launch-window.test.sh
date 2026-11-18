@@ -14,6 +14,9 @@ fails=0
 . "$(dirname "$0")/lib/fixture.sh"
 real_readlink="$(command -v readlink)"
 ship_fixture "$tmp"
+# Setup enters the idle lifecycle even without credentials.
+export HOME="$tmp/home" ULF="$tmp/licence"
+mkdir -p "$HOME"
 ship_fixture_process_view "$tmp/process-view"
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 

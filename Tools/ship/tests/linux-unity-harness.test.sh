@@ -32,6 +32,44 @@ fixture_clears_swap_state() (
 )
 check 'standalone fake fixture clears inherited swap cleanup ownership' 'fixture_clears_swap_state'
 
+fixture_isolates_setup() (
+  caller="$tmp/setup-caller"
+  mkdir -p "$caller"
+  export HOME="$caller/home" ULF="$caller/licence" OUT_DIR="$tmp/setup-out"
+  printf 'synthetic licence\n' > "$ULF"
+  # Exercise the same standalone entry point as a developer. Its editor and
+  # installer commands are already stubbed; the alleged caller licence is ours.
+  bash "$ship/tests/linux-unity-setup.test.sh" > "$tmp/setup.log" 2>&1 &&
+    [ ! -e "$caller/licence.idle" ] && [ ! -e "$caller/home" ]
+)
+check 'setup fixture overrides caller HOME and ULF before the idle lifecycle' 'fixture_isolates_setup'
+
+fixture_protects_caller_state() (
+  caller="$tmp/caller"
+  mkdir -p "$caller/swap" "$caller/bin"
+  export SEAT_STATE="$caller/seat" APK_SWAP_DIR="$caller/swap"
+  printf 'keep seat\n' > "$SEAT_STATE"
+  # A non-PID suffix is guaranteed stale. Guard real swap operations even on the unfixed fixture.
+  printf 'keep swap\n' > "$APK_SWAP_DIR/linux-unity-apk.swap.stale"
+  for tool in fallocate mkswap swapon swapoff; do
+    printf '#!/bin/sh\ntouch "%s/swap-escaped"\nexit 99\n' "$caller" > "$caller/bin/$tool"
+  done
+  chmod +x "$caller/bin/"*
+  export PATH="$caller/bin:$PATH"
+  tmp="$tmp/standalone-state"; proj="$tmp/project"
+  . "$ship/tests/lib/fake-unity.sh"
+  bash -c '
+    . "$1"
+    printf "fixture seat\n" > "$SEAT_STATE"
+    apk_swap_reclaim
+  ' _ "$script" &&
+    [ "$(< "$caller/seat")" = 'keep seat' ] &&
+    [ "$(< "$caller/swap/linux-unity-apk.swap.stale")" = 'keep swap' ] &&
+    [ ! -e "$caller/swap-escaped" ] &&
+    [ "$(< "$OUT_DIR/unity-seat.held")" = 'fixture seat' ]
+)
+check 'standalone fake fixture writes its own seat marker and never reclaims caller swap' 'fixture_protects_caller_state'
+
 # A controlled process view must exclude the host without hiding tracked failures.
 cat > "$tmp/host-bin/readlink" <<'EOF'
 #!/bin/sh
