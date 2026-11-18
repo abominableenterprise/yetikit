@@ -139,10 +139,16 @@ qr_gate_passed() {
 }
 
 # Identify the APK by its bytes, not the current prepared commit (a rollback or explicit install can use another
-# run's APK, even after renaming it). Old build summaries already store its hash and source commit.
+# run's APK, even after renaming it). Prefer retained per-hash evidence and accept older build-only summaries.
 qr_apk_commit() {
   local hash d
   hash="$(qr_sha256 "$1")" || return 1
+  [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+  for d in "$QR_LOGS"/*; do
+    [ -s "$d/build-evidence/$hash" ] || continue
+    head -n1 "$d/build-evidence/$hash"
+    return
+  done
   for d in "$QR_LOGS"/*/summary; do
     if [ -f "$d/build_apk_sha256" ]; then
       [ "$(head -n1 "$d/build_apk_sha256")" = "$hash" ] || continue
@@ -153,6 +159,14 @@ qr_apk_commit() {
     # commit built those bytes. Ambiguous legacy records must not shadow a later immutable build record;
     # without one, return unknown and reset the notes baseline rather than inventing provenance.
   done
+}
+
+# Each prepared run has one source commit. Never replace evidence for a previous hash on rebuild.
+qr_save_build_evidence() {
+  local hash="$1" commit="$2" dir="$QR_RUN_DIR/build-evidence"
+  [[ "$hash" =~ ^[0-9a-f]{64}$ ]] && [ -n "$commit" ] || return 1
+  [ ! -s "$dir/$hash" ] || return 0
+  mkdir -p "$dir" && printf '%s\n' "$commit" > "$dir/$hash.tmp" && mv -f "$dir/$hash.tmp" "$dir/$hash"
 }
 
 # Called under the run lock, just after adb confirms install. A blank record
@@ -292,7 +306,7 @@ qr_build_attempt() (
 )
 
 qr_build() {
-  local wt out kept rc=0 log prev attempt=1
+  local wt out kept rc=0 log prev hash old_hash attempt=1
   local QR_BUILD_STALL_SECONDS="${QR_BUILD_STALL_SECONDS-300}"
   case "$QR_BUILD_STALL_SECONDS" in
     ''|*[!0-9]*|0*) qr_die "QR_BUILD_STALL_SECONDS must be a positive integer (seconds)" ;;
@@ -344,10 +358,17 @@ qr_build() {
   fi
   mkdir -p "$QR_APK_DIR"
   cp -p "$out" "$kept" || qr_die "cannot copy the APK to $kept"
+  hash="$(qr_sha256 "$kept")"
+  # Preserve the previous build-only summary on the first rebuild after upgrading.
+  old_hash="$(qr_get build_apk_sha256 '')"
+  if [ -n "$old_hash" ]; then
+    qr_save_build_evidence "$old_hash" "$(qr_get build_commit '')" || qr_die "cannot preserve prior build evidence"
+  fi
+  qr_save_build_evidence "$hash" "$QR_SHA" || qr_die "cannot save build evidence for $kept"
   qr_set apk "$kept"
-  qr_set apk_sha256 "$(qr_sha256 "$kept")"
+  qr_set apk_sha256 "$hash"
   qr_set build_commit "$QR_SHA"
-  qr_set build_apk_sha256 "$(qr_sha256 "$kept")"
+  qr_set build_apk_sha256 "$hash"
   qr_step_ok build
   qr_log "build: $kept"
   printf '%s\n' "$kept"

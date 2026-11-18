@@ -14,6 +14,15 @@ check "build keeps the APK as consumer-dev-<sha>.apk in mac-pass/Builds/Android"
   'grep -q "apk built in $root/rel-$short-build" "$apk" && grep -q "apk:         $apk" "$tmp/out"'
 check "build with no --notes and no installed build in the logs leaves both notes variables unset" \
   'grep -q "^notes= prev=$" "$tmp/notes-env.log" && grep -q "notes:       merge titles since the last 8 merges" "$tmp/out"'
+cp "$apk" "$tmp/saved.apk" || exit 1
+# Simulate upgrading with only the old build summary, then rebuilding in place.
+( qr_load_state; rm -rf "$QR_RUN_DIR/build-evidence" )
+# Change only the synthetic editor's output, not the prepared worktree revision.
+eval "$(declare -f unity | sed '1s/^unity /fixture_unity /')"
+unity() {
+  fixture_unity "$@" || return
+  echo rebuilt >> "$root/rel-$short-build/Builds/Android/consumer-dev.apk"
+}
 notes="$tmp/whats-new.txt"; printf -- '- Pick who is playing\nBuild number on the start panel\n' > "$notes"
 logs="$root/release-logs"
 mkdir -p "$logs/abc123456-20200101-000000/summary" "$logs/def987654-20200102-000000/summary"
@@ -26,6 +35,8 @@ echo "def987654 (origin/main)" > "$logs/def987654-20200102-000000/summary/commit
 reset_logs; run build --notes "$notes"
 check "build --notes exports YETIKIT_WHATS_NEW (absolute) and YETIKIT_PREV_SHA from the last successful install" \
   '[ "$rc" = 0 ] && grep -q "^notes=$notes prev=abc123456$" "$tmp/notes-env.log" && grep -q "notes:       $notes" "$tmp/out"'
+check "a same-run rebuild preserves source provenance for both the saved APK and the new bytes" \
+  '! cmp -s "$tmp/saved.apk" "$apk" && [ "$(qr_apk_commit "$tmp/saved.apk")" = "$sha" ] && [ "$(qr_apk_commit "$apk")" = "$sha" ]'
 reset_logs; run build --notes "$tmp/nope.txt"
 check "build --notes with a missing file fails before Unity runs" '[ "$rc" != 0 ] && out_has "does not exist" && [ ! -f "$tmp/unity.log" ]'
 rm -rf "$logs/abc123456-20200101-000000" "$logs/def987654-20200102-000000"
