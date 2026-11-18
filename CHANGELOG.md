@@ -20,6 +20,44 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ### Adapter changes
 - None.
 
+## [0.1.11] - 2026-11-18
+
+### Added
+- Bracket live Quest performance captures with `perf start` and `perf stop`,
+  without relaunching the app or clearing logcat ([#87](https://github.com/abominableenterprise/yetikit/pull/87)).
+- Report detectable cgroup OOM evidence after an editor SIGKILL and include XML
+  test counts in stage logs ([#93](https://github.com/abominableenterprise/yetikit/pull/93)).
+- Opt into changed-fixture selection for the pure PR pass with `tests.prPure`;
+  the full pure pass remains the default ([#94](https://github.com/abominableenterprise/yetikit/pull/94)).
+- Opt into `cleanup --discard-noise` to remove release worktrees containing
+  only recognized, unstaged editor noise ([#96](https://github.com/abominableenterprise/yetikit/pull/96)).
+- Count configured `quest.launchLogTags` without changing the launch verdict,
+  and use globs as well as exact paths for APK asset checks ([#108](https://github.com/abominableenterprise/yetikit/pull/108)).
+
+### Fixed
+- Quest release timeouts reap descendant processes ([#83](https://github.com/abominableenterprise/yetikit/pull/83)).
+- Android setup refuses to replace an in-use Unity installation or proceed
+  when it cannot verify the installation is idle ([#84](https://github.com/abominableenterprise/yetikit/pull/84)).
+- Quest performance capture uses bounded timing and preserves recovery state
+  for failed proximity restoration ([#85](https://github.com/abominableenterprise/yetikit/pull/85)).
+- Ship reports paths that work after vendoring, accepts digits, underscores and
+  hyphens in scene area names, and reads historical install baselines without
+  relying on current configuration ([#105](https://github.com/abominableenterprise/yetikit/pull/105)).
+
+### Behaviour changes
+- Adopt the repository's dev-velocity policy and normalize Git attributes ([#78](https://github.com/abominableenterprise/yetikit/pull/78)).
+- Retry recognized transient Git failures with bounded attempts and give the
+  Quest doctor one serial-scoped reconnect within its device-check deadline ([#98](https://github.com/abominableenterprise/yetikit/pull/98)).
+
+### Adapter changes
+- Correct unknown `noise` keys and invalid regexes before upgrading; Ship now
+  rejects them on load. See the updated [adoption notes](ADOPTION.md#ship) for
+  supported configuration examples ([#104](https://github.com/abominableenterprise/yetikit/pull/104)).
+- Optionally set `noise.artRoot` and `quest.backupPrefix`. To report on-device
+  permission grants after install or rollback, list the required permissions in
+  `quest.launcherChecks.permissions`; the former implicit microphone probe is
+  no longer run ([#106](https://github.com/abominableenterprise/yetikit/pull/106)).
+
 ## [0.1.10] - 2026-11-10
 
 ### Added
