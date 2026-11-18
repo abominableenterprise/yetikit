@@ -22,29 +22,43 @@ export QUEST_REPO="$tmp" QUEST_WT_ROOT="$tmp/wt" QUEST_BACKUP_ROOT="$tmp"
 export QUEST_LOG_ROOT="$tmp/wt/release-logs" QUEST_APK_DIR="$tmp/apks"
 export QR_LAUNCH_WAIT=1 QR_ADB_WAIT=1 QUEST_WAIT_GRACE=0
 # Unique synthetic identifiers keep real headset locks independent of other tests.
-token="${tmp##*/}"; token="${token//./-}"
-a="synthetic-A_$token"; b="synthetic-B_$token"
+token="${tmp##*/}"; token="$(printf '%s' "${token//./-}" | LC_ALL=C tr 'A-Z' 'a-z')"
+a="synthetic-a_$token"; b="synthetic-b_$token"
+case_peer="synthetic-A_$token"
 wifi="synthetic.wifi-$token:5555"
 escaped="synthetic%2Ewifi-$token%3A5555"
 wifi_safe="synthetic%2Ewifi-$token%3A5555"
-escaped_safe="synthetic%252Ewifi-$token%253A5555"
+escaped_safe="synthetic%252%45wifi-$token%253%415555"
 mkdir -p "$tmp/wt"
 printf 'new\n' > "$tmp/new.apk"; printf 'old\n' > "$tmp/old.apk"
 
 # Replace only host build/verification/data work. Leave main/all, selection,
 # dispatch, run/headset locks, idle parsing, install, launch, rollback and wait real.
-qr_java_setup() { :; }
-qr_keystore_preflight() { :; }
+qr_java_setup() { [ "${host_fault:-}" != java ] || qr_die 'synthetic Java failure'; }
+qr_keystore_preflight() { [ "${host_fault:-}" != keystore ] || qr_die 'synthetic keystore failure'; }
 qr_prepare() {
   echo prepare >> "$tmp/steps"
+  rm -f "$(qr_state_file)"
+  [ "${host_fault:-}" != prepare ] || qr_die 'synthetic prepare failure'
+  if [ "${host_fault:-}" = worktree ]; then
+    qr_new_run abc123456 origin/main pending
+    qr_lock_note_run
+    qr_die 'synthetic worktree failure after assigning the run folder'
+  fi
   qr_new_run abc123456 origin/main
   qr_set commit abc123456
+  if [ "${host_fault:-}" = device-dir ]; then
+    mkdir -p "$QR_RUN_DIR/devices"
+    : > "$QR_RUN_DIR/devices/$(qr_serial_path "$b")"
+  fi
 }
 qr_parallel_unity() {
   echo build >> "$tmp/steps"
   QR_GATE_RC=0; QR_BUILD_RC=0
+  case "${host_fault:-}" in gate) QR_GATE_RC=1 ;; build) QR_BUILD_RC=1 ;; esac
   qr_set gate 'passed'; qr_set gate_result passed
-  qr_set apk "$tmp/new.apk"
+  if [ "${host_fault:-}" = verify ]; then qr_set apk "$tmp/missing.apk"
+  else qr_set apk "$tmp/new.apk"; fi
 }
 qr_verify_base="$(declare -f qr_verify)"
 eval "${qr_verify_base/qr_verify ()/qr_fixture_real_verify ()}"
@@ -55,7 +69,9 @@ qr_verify() {
 }
 qr_backup() { printf '%s\n' "$tmp/backup-$QUEST_SERIAL"; }
 qr_cleanup() { echo cleanup >> "$tmp/steps"; }
-qr_apk_commit() { printf 'abc123456\n'; }
+qr_apk_commit() {
+  case "$1" in "$tmp/new.apk") echo aaaaaaaaa ;; "$tmp/old.apk") echo fffffffff ;; esac
+}
 qr_timestamp() { printf '20990101-000001\n'; }
 sleep() {
   # Skip the launch observation delay, not lock registration/draining sleeps.
@@ -69,7 +85,7 @@ qr_config() { qr_fixture_config || return; QR_DATA_FILES=''; }
 # Unknown/list-valued -s arguments fail closed instead of contacting real adb.
 fixture_id() {
   case "$1" in
-    "$a") echo a ;; "$b") echo b ;; "$wifi") echo wifi ;; "$escaped") echo escaped ;;
+    "$a") echo a ;; "$b") echo b ;; "$wifi") echo wifi ;; "$escaped") echo escaped ;; "$case_peer") echo peer ;;
     *) return 99 ;;
   esac
 }
@@ -99,7 +115,7 @@ adb() {
         elif [ "$fault" = crash ]; then
           echo '10-31 12:00:40.000 4242 4242 E AndroidRuntime: FATAL EXCEPTION: main'
         else
-          case "$id" in a) fps=71 ;; b) fps=72 ;; wifi) fps=73 ;; escaped) fps=74 ;; esac
+          case "$id" in a) fps=71 ;; b) fps=72 ;; wifi) fps=73 ;; escaped) fps=74 ;; peer) fps=75 ;; esac
           printf '10-31 12:00:40.000 4242 4242 I Unity: [SyntheticPerf] fps=%s\n' "$fps"
         fi
       fi ;;
@@ -139,7 +155,8 @@ reset_case() {
   rm -rf "$QUEST_LOG_ROOT" "$tmp/state"
   mkdir -p "$tmp/state"
   local id
-  for id in a b wifi escaped; do
+  host_fault=''
+  for id in a b wifi escaped peer; do
     mkdir -p "$tmp/state/$id"
     echo healthy > "$tmp/state/$id/fault"
   done
@@ -363,6 +380,68 @@ for operation in install rollback; do
   wait_run
   check "wait exposes list $operation verification failure before any device rows" \
     '[ "$wrc" = 1 ] && grep -q "^overall: *INFRA" "$tmp/wait.out" && ! grep -Eq "^install: *install ok|^launch: *fps .*alive yes" "$tmp/wait.out"'
+done
+
+reset_case
+run "$a,$case_peer" all
+# Fold names as a case-insensitive filesystem would, even on Linux.
+peer_path="$(qr_serial_path "$case_peer")"
+check 'case-only serials have distinct paths after ASCII case folding and keep separate logs' \
+  '[ "$rc" = 0 ] && [ "$(printf "%s\n" "$peer_path" | LC_ALL=C tr "A-Z" "a-z")" != "$a" ] && grep -Fq "fps=71" "$run_dir/devices/$a/launch-logcat.txt" && grep -Fq "fps=75" "$run_dir/devices/$peer_path/launch-logcat.txt"'
+
+reset_case
+host_fault=device-dir
+echo crash > "$tmp/state/a/fault"
+run "$a,$b,$wifi" all --rollback "$tmp/old.apk"
+check 'device-dir failure records infrastructure and continues without hiding an earlier crash' \
+  '[ "$rc" = 1 ] && result_is launch "$a" CRASH && result_is install "$b" INFRA && [ ! -s "$tmp/state/b/adb.log" ] && installed_once wifi && grep -Fq "launch[$wifi]: OK" "$summary" && grep -q "^overall: *CRASH (exit 1)" "$summary"'
+wait_run
+check 'wait reports crash precedence after a device-dir failure' \
+  '[ "$wrc" = 1 ] && wait_result_is launch "$a" CRASH && wait_result_is install "$b" INFRA && grep -q "^overall: *CRASH (exit 1)" "$tmp/wait.out"'
+
+reset_case
+echo install > "$tmp/state/a/fault"
+run "$a,$b" install "$tmp/new.apk"
+run "$b,$a" launch
+check 'standalone launch retains the previous install results but has its own overall verdict' \
+  '[ "$rc" = 0 ] && result_is install "$a" INFRA && result_is install "$b" OK && result_is launch "$a" OK && result_is launch "$b" OK && grep -q "^overall: *OK (exit 0)" "$summary"'
+wait_run
+check 'wait shows retained failed install without failing the successful launch' \
+  '[ "$wrc" = 0 ] && wait_result_is install "$a" INFRA && wait_result_is launch "$a" OK'
+
+reset_case
+echo crash > "$tmp/state/a/fault"
+run "$a,$b" all --rollback "$tmp/old.apk"
+check 'equal-second rollback then primary installs select the last actual install, not the larger SHA' \
+  '[ "$rc" = 1 ] && rolled_back a && installed_once b && cmp -s "$run_dir/devices/$a/summary/installed_at" "$run_dir/devices/$b/summary/installed_at" && [ "$(QR_LOGS="$QUEST_LOG_ROOT" qr_last_installed_sha)" = aaaaaaaaa ]'
+
+reset_case
+run "$a,$b" install "$tmp/new.apk"
+run "$a,$b" rollback "$tmp/old.apk"
+: > "$tmp/adb.log"
+run "$a,$b" rollback
+check 'missing rollback argument replaces the old rollback verdict without clearing install history' \
+  '[ "$rc" = 3 ] && [ ! -s "$tmp/adb.log" ] && ! result_is rollback "$a" OK && ! result_is rollback "$b" OK && result_is install "$a" OK && result_is install "$b" OK && grep -q "^overall: *INFRA" "$summary"'
+run "$a,$b" launch
+check 'later launch cannot revive the stale rollback rows' \
+  '[ "$rc" = 0 ] && ! result_is rollback "$a" OK && ! result_is rollback "$b" OK && result_is install "$a" OK'
+
+for fault_case in args java prepare worktree keystore gate build verify; do
+  reset_case
+  run "$a,$b" install "$tmp/new.apk"
+  : > "$tmp/adb.log"
+  host_fault="$fault_case"
+  if [ "$fault_case" = args ]; then run "$a,$b" all --rollback
+  else run "$a,$b" all; fi
+  check "list all $fault_case failure is fresh INFRA before any adb work" \
+    '[ "$rc" = 3 ] && [ ! -s "$tmp/adb.log" ] && ! grep -Fq "install[$a]: OK" "$tmp/out" && grep -q "^overall: *INFRA" "$tmp/out"'
+  if [ "$fault_case" = worktree ]; then
+    check 'incomplete worktrees keep their own failure report without becoming current' \
+      '[ ! -f "$QUEST_LOG_ROOT/current.env" ] && grep -q "^run=.*/abc123456-" "$QUEST_LOG_ROOT/last-result"'
+  fi
+  wait_run
+  check "wait reports list all $fault_case failure with no stale install success" \
+    '[ "$wrc" = 1 ] && ! wait_result_is install "$a" OK && grep -q "^overall: *INFRA" "$tmp/wait.out"'
 done
 
 [ "$fails" = 0 ] || { echo "$fails failed"; exit 1; }

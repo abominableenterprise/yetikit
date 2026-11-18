@@ -456,6 +456,12 @@ runner requires exactly one attached adb
 device; zero or multiple devices fail clearly instead of choosing one. Never
 commit device identity, signing fingerprints or private provenance to config.
 
+List release artifacts go under `devices/<encoded-serial>/`. Lowercase ASCII
+letters, digits, hyphens and underscores stay literal; other bytes (including
+uppercase letters) use `%HH` escapes so case-only serials have separate paths.
+In a reused run, the summary keeps the latest list rows for each step. Its
+`overall` verdict and exit code describe only the current command.
+
 ### Optional release signing
 
 Add `signing` inside the existing `quest` object to map environment-variable

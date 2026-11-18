@@ -21,7 +21,9 @@ qr_set() { printf '%s\n' "$2" > "$QR_RUN_DIR/$1"; }
 qr_get() { :; }
 qr_timestamp() { printf '20260101-000000\n'; }
 qr_sha256() { sha256sum "$1" | awk '{print $1}'; }
-qr_apk_commit() { :; } # This fixture tests device safety, not release-build provenance.
+# This fixture tests device safety, not release-build provenance.
+qr_apk_commit() { :; }
+qr_record_latest_install() { :; }
 qr_check_device() { :; }
 qr_java_setup() { :; }
 qr_device_locked() { "$@"; } # Lock protocol is covered independently.

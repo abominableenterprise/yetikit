@@ -147,7 +147,7 @@ qr_install_apk() {
 }
 
 qr_install_apk_locked() {
-  local apk="$1" force="$2" label="$3" flags="${4:-}" after dir out rc=0 f before_file
+  local apk="$1" force="$2" label="$3" flags="${4:-}" after dir out rc=0 f before_file installed_sha
   # This attempt is the step's latest result even when the APK check stops it (any earlier success is stale).
   qr_set install "$label stopped before adb install (see release.log)"
   qr_set permissions "-"
@@ -177,7 +177,12 @@ qr_install_apk_locked() {
     qr_die "$label: adb install -r${flags:+ $flags} failed: $(printf '%s\n' "$out" | tail -n1)"
   fi
   # adb has replaced the APK even if a later data check fails. Record its own commit, not this run's commit.
-  qr_set installed_commit "$(qr_apk_commit "$apk")"
+  installed_sha="$(qr_apk_commit "$apk")"
+  # The run lock serializes installs, including across run folders. Publish a
+  # single atomic record so same-second installs and unknown SHAs are ordered
+  # by successful adb completion, not by timestamp or SHA sort order.
+  qr_record_latest_install "$installed_sha" || qr_die "$label: cannot record latest install"
+  qr_set installed_commit "$installed_sha"
   qr_set installed_at "$(qr_timestamp)"
   qr_set install "$label: adb install ok ($apk), data checks not finished"
   local before

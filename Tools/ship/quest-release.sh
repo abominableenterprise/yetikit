@@ -109,8 +109,14 @@ qr_all() {
     shift
   done
   [ -z "$rollback" ] || [ -f "$rollback" ] || qr_die "--rollback APK $rollback does not exist"
+  # Unlike single-device all, list all sends Java failures through list reporting.
+  if [ "${#QR_SERIALS[@]}" -gt 1 ]; then qr_java_setup || return 1; fi
   ( qr_prepare "$ref" ) || return 1
   qr_load_state
+  if [ "${#QR_SERIALS[@]}" -gt 1 ]; then
+    qr_lock_note_run
+    qr_multi_begin all
+  fi
   ( qr_keystore_preflight ) || {
     if [ -n "${QR_SIGNING_PATH_ENV:-}" ]; then qr_set install "skipped: signing keystore failed";
     else qr_set install "skipped: wrong debug keystore"; fi
@@ -171,7 +177,7 @@ qr_usage() {
 
 # Dispatch one command. Each step runs in a subshell, so qr_die ends that step only; the summary always prints.
 qr_main() {
-  local cmd="${1:-}" rc=0
+  local cmd="${1:-}" rc=0 list_release=0
   [ $# -gt 0 ] && shift
   case "$cmd" in ''|-h|--help|help) qr_usage; return 0 ;; esac
   qr_config || return 1
@@ -208,15 +214,24 @@ qr_main() {
       fi
       qr_serials || { qr_lock_result "$cmd" 1; return 1; } ;;
   esac
-  # A single-device invocation following a list run must not print stale list outcomes.
   case "$cmd" in
-    install|launch|rollback)
-      if [ "${#QR_SERIALS[@]}" = 1 ]; then
+    all|install|launch|rollback)
+      if [ "${#QR_SERIALS[@]}" -gt 1 ]; then
+        list_release=1
+        if [ "$cmd" = all ]; then
+          # Never certify an older run as this list all, even if its worker
+          # cannot start. Prepare will publish the new run when ready.
+          rm -f "$(qr_state_file)" || { qr_lock_result "$cmd" 3; return 3; }
+        else
+          qr_multi_begin "$cmd"
+        fi
+      elif [ "$cmd" != all ]; then
+        # A single-device invocation must not print stale list outcomes.
         qr_set device_results ''; qr_set multi_command ''; qr_set overall ''
       fi ;;
   esac
-  # verify's apksigner and the keystore preflight need Java: find it before any prepare, gate or build work.
-  case "$cmd" in all|build|verify) qr_java_setup || { qr_lock_result "$cmd" 1; return 1; } ;; esac
+  # Find Java before build/verify or single-device all. List all checks in its worker.
+  case "$cmd:$list_release" in all:0|build:*|verify:*) qr_java_setup || { qr_lock_result "$cmd" 1; return 1; } ;; esac
   case "$cmd" in
     all) qr_run_step qr_all "$@" || rc=$? ;;
     prepare) qr_run_step qr_prepare "$@" || rc=$? ;;
@@ -234,7 +249,19 @@ qr_main() {
     ''|-h|--help|help) qr_usage; return 0 ;;
     *) qr_usage; qr_log "unknown command '$cmd'"; return 2 ;;
   esac
-  [ -f "$(qr_state_file)" ] && qr_load_state
+  if [ -f "$(qr_state_file)" ]; then
+    qr_load_state
+  elif [ "$list_release" = 1 ]; then
+    # A waiter may already be pinned to a pending prepare's folder. Report
+    # there if assigned, but do not publish incomplete worktrees as current.
+    IFS= read -r QR_RUN_DIR < "$(qr_lock_dir)/run_dir" || QR_RUN_DIR=''
+    if [ "$QR_RUN_DIR" = pending ] || [ ! -d "$QR_RUN_DIR" ]; then qr_new_run '' ''; fi
+  fi
+  if [ "$list_release" = 1 ]; then
+    qr_lock_note_run
+    [ "$(qr_get multi_command '')" = "$cmd" ] || qr_multi_begin "$cmd"
+    rc=0; qr_multi_finish || rc=$?
+  fi
   qr_summary
   qr_lock_result "$cmd" "$rc"
   qr_lock_release

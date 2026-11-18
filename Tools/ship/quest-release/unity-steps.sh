@@ -151,10 +151,22 @@ qr_apk_commit() {
   done
 }
 
+# Called under the run lock, just after adb confirms install. A blank record
+# represents a real install of an APK with unknown build provenance.
+qr_record_latest_install() {
+  local record="$QR_LOGS/latest-install"
+  printf '%s\n' "$1" > "$record.tmp" && mv -f "$record.tmp" "$record"
+}
+
 # The most recent actual adb install, including rollbacks and manual steps in the current run. An unidentifiable
 # APK intentionally returns empty rather than borrowing the prepared commit or an older installed baseline.
 qr_last_installed_sha() {
   local d ts sha apk
+  if [ -f "$QR_LOGS/latest-install" ]; then
+    head -n1 "$QR_LOGS/latest-install"
+    return
+  fi
+  # Compatibility for runs created before the ordered record existed.
   for d in "$QR_LOGS"/*/ "$QR_LOGS"/*/devices/*/; do
     d="${d%/}"
     if [ -s "$d/summary/installed_at" ]; then

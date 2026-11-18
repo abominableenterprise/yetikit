@@ -43,6 +43,7 @@ qr_adb() {
 }
 qr_mic_state() { echo false; }
 qr_apk_commit() { echo fixture; }
+qr_record_latest_install() { :; } # Build provenance is covered by the baseline fixture.
 printf apk > "$tmp/fixture.apk"
 for mode in intact corrupt; do
   mkdir -p "$tmp/$mode/backups" "$tmp/$mode/run"
@@ -52,7 +53,8 @@ for mode in intact corrupt; do
   # Production does not enable errexit: failure must be handled explicitly.
   (set +e; qr_install_apk_locked "$tmp/fixture.apk" 0 install) > "$tmp/$mode.out" 2>&1 || rc=$?
   if [ "$mode" = intact ]; then
-    [ "$rc" = 0 ] && [ -f "$tmp/install-called" ]
+    [ "$rc" = 0 ]
+    [ -f "$tmp/install-called" ]
     backup="$(find "$QR_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d)"
     (cd "$backup"; sha256sum -c SHA256SUMS)
     [ "$(wc -l < "$backup/SHA256SUMS")" = 2 ]
@@ -61,7 +63,8 @@ for mode in intact corrupt; do
     rm "$tmp/install-called"
     echo 'PASS: complete backup verifies; absent data file is omitted; install proceeds'
   else
-    [ "$rc" != 0 ] && [ ! -e "$tmp/install-called" ]
+    [ "$rc" != 0 ]
+    [ ! -e "$tmp/install-called" ]
     [ ! -e "$QR_RUN_DIR/summary/backup" ]
     grep -q 'completed backup' "$tmp/$mode.out"
     echo 'PASS: corruption after individual verification blocks installation and verified summary'
