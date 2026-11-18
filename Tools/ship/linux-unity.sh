@@ -29,7 +29,8 @@
 #                       [Category("Gfx")] tests on Xvfb + Mesa llvmpipe. EDITMODE_GFX=0 skips the second pass.
 #                       A caller's -testFilter runs in both passes: either may select zero tests with valid XML,
 #                       but together they must execute tests. EDITMODE_GFX=0 still requires a nonempty pure pass.
-#                       A caller's -testCategory runs one pass on Xvfb.
+#                       A caller's -testCategory runs one nonempty pass on Xvfb. -assemblyNames narrows
+#                       both default passes but leaves Gfx optional; the pure pass still must execute tests.
 #                       A -testFilter naming a [Category("RenderTool")] class runs one pass on
 #                       Xvfb with -testCategory RenderTool. Every Gfx run (this second pass, a -testCategory naming
 #                       Gfx, test pr's Gfx pass) is killed after UNITY_GFX_TIMEOUT s (3600), the others after
@@ -548,7 +549,7 @@ revert_bake_noise() {
 # known-flakes.txt, those rerun once (<stem>-retry.xml/.log, both XMLs kept); a green rerun makes the pass green.
 # $1: stem, rest: Unity args.
 run_pass() {
-  local stem="$1" rc=0 failed f filter="" retry_rc=0 args=() UNITY_RUN_LABEL="$1"; shift
+  local stem="$1" rc=0 f filter="" complete=0 failures="" failed=() retry_rc=0 args=() UNITY_RUN_LABEL="$1"; shift
   TEST_EVIDENCE_ONLY=0
   # A crashed or killed editor writes no XML: never read a stale one from an earlier run as this pass's flakes.
   rm -f "$OUT_DIR/$stem.xml" "$OUT_DIR/$stem-retry.xml"
@@ -558,22 +559,24 @@ run_pass() {
     return "$rc"
   fi
   [ "$rc" != 0 ] || return 0
-  failed="$(failed_tests "$OUT_DIR/$stem.xml")"
-  [ -n "$failed" ] || return $rc   # a crash or no results: never a flake
-  while IFS= read -r f; do
-    is_known_flake "$f" || { log "$stem: $f failed and is not a known flake"; return $rc; }
+  while IFS= read -r -d '' f; do
+    if [ -z "$f" ]; then complete=1; break; fi
+    is_known_flake "$f" || { log "$stem: $f failed and is not a known flake"; return "$rc"; }
+    failed+=("$f")
+    failures="${failures:+$failures }$f"
     # A parameterised case reruns as its method (-testFilter takes names, not argument lists).
     f="${f%%(*}"; [[ ";$filter;" == *";$f;"* ]] || filter="${filter:+$filter;}$f"
-  done <<< "$failed"
+  done < <(flake_evidence "$OUT_DIR/$stem.xml")
+  [ "$complete" = 1 ] && [ -n "$filter" ] || return "$rc" # require complete, nonempty evidence
   log "$stem: only known flakes failed; rerunning once: $filter"
   while IFS= read -r -d '' f; do args+=("$f"); done < <(without_test_filter "$@")
   UNITY_RUN_LABEL="$stem-retry"
   unity ${args[@]+"${args[@]}"} -testFilter "$filter" -testResults "$OUT_DIR/$stem-retry.xml" \
     -logFile "$OUT_DIR/$stem-retry.log" || retry_rc=$?
   test_results_summary "$stem-retry" "$OUT_DIR/$stem-retry.xml" 0 || return "$rc"
-  if [ "$retry_rc" = 0 ] && [ -z "$(failed_tests "$OUT_DIR/$stem-retry.xml")" ] \
-    && retry_passed_all "$OUT_DIR/$stem-retry.xml" "$failed"; then
-    log "flaky-passed: $(tr '\n' ' ' <<< "$failed" | sed 's/ $//')"
+  if [ "$retry_rc" = 0 ] && printf '%s\0' "${failed[@]}" | flake_evidence "$OUT_DIR/$stem-retry.xml" retry; then
+    failures="${failures//$'\n'/\\n}"
+    log "flaky-passed: ${failures//$'\r'/\\r}"
     return 0
   fi
   log "$stem: the known flakes failed again (see $OUT_DIR/$stem-retry.xml)"
@@ -604,7 +607,7 @@ test_passes() {
   fi
   rm -f "$OUT_DIR/editmode.xml" "$OUT_DIR/editmode-gfx.xml"
   local tool
-  if [[ " $* " != *" -testCategory "* ]] && tool="$(render_tool_filter "$@")"; then
+  if ! has_test_option -testCategory "$@" && tool="$(render_tool_filter "$@")"; then
     # [Explicit] render tools match by name only, so the pure (-nographics) pass would pick them up and crash.
     # Adding -testCategory RenderTool would silently drop the other tests of a ;-list, so refuse that mix.
     [[ "$(test_filter_value "$@")" != *";"* ]] \
@@ -612,7 +615,7 @@ test_passes() {
     log "test: -testFilter names the RenderTool class $tool; one pass on Xvfb with -testCategory RenderTool"
     set -- "$@" -testCategory RenderTool
   fi
-  if [[ " $* " == *" -testCategory "* ]]; then
+  if has_test_option -testCategory "$@"; then
     # Caller picks the categories: one pass with a GL device so render tests also work; Gfx gets its timeout.
     if [[ ";$(test_category_value "$@");" == *";$GFX_CATEGORIES;"* ]]; then
       run_gfx_pass editmode -runTests -testPlatform EditMode "$@" || rc=$?
@@ -622,12 +625,13 @@ test_passes() {
     return $rc
   fi
   # Filtered dual-pass runs may be empty per category, but must execute tests in total.
-  if [ "${EDITMODE_GFX:-1}" = 1 ] && [[ " $* " == *" -testFilter "* ]]; then
+  if [ "${EDITMODE_GFX:-1}" = 1 ] && has_test_option -testFilter "$@"; then
     TEST_FILTER="$(test_filter_value "$@")"; TEST_ALLOW_EMPTY=filtered
   fi
   run_pass editmode -nographics -runTests -testPlatform EditMode -testCategory "$PURE_CATEGORIES" "$@" || rc=$?
   pure_executed=$TEST_EXECUTED
   if [ "${EDITMODE_GFX:-1}" = 1 ]; then
+    # Assembly and other forwarded constraints don't request a Gfx pass: it remains optional.
     [ "$TEST_ALLOW_EMPTY" = filtered ] || TEST_ALLOW_EMPTY=1
     run_gfx_pass editmode-gfx -runTests -testPlatform EditMode -testCategory "$GFX_CATEGORIES" "$@" || {
       gfx_rc=$?
@@ -645,8 +649,9 @@ test_passes() {
 test_pr() {
   local base=origin/main mb fixtures areas rc=0 gfx_rc=0 TEST_ALLOW_EMPTY=0 TEST_EVIDENCE_ONLY=0
   if [ $# -gt 0 ] && [[ "$1" != -* ]]; then base="$1"; shift; fi
-  [[ " $* " != *" -testFilter "* && " $* " != *" -testCategory "* ]] \
-    || die "test pr picks the tests itself; use test editmode for -testFilter/-testCategory"
+  if has_test_option -testFilter "$@" || has_test_option -testCategory "$@"; then
+    die "test pr picks the tests itself; use test editmode for -testFilter/-testCategory"
+  fi
   mb="$(git -C "$PROJECT" merge-base "$base" HEAD 2>/dev/null)" \
     || die "test pr: no merge-base between $base and HEAD (fetch $base or pass another base)"
   fixtures="$(cd "$PROJECT" && pr_gfx_fixtures "$mb")"

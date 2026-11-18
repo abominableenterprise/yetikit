@@ -88,15 +88,22 @@ file while a run is active.
 
 ### Test evidence
 
-Test commands reject forwarded `-quit`, `-testResults` and `-logFile` before
-starting an editor: the runner owns test execution, result paths and log paths.
+Test commands reject forwarded `-quit`, `-testResults` (including its legacy
+alias `-editorTestsResultFile`) and `-logFile` before starting an editor. The
+runner owns these options and also rejects case variants, doubled dashes, and
+`=value` forms without relying on whether a Unity version accepts them.
+
 Each pass, including a known-flake retry, must write parseable result XML with
 a `test-run` root and numeric `total`, `passed`, `failed` and `skipped` counts.
-Missing/empty/invalid XML, zero total, or no passed/failed tests fails the pass.
-The implicit Gfx pass of plain `test editmode` (no caller `-testCategory` or
-`-testFilter`) and the Gfx pass of `test pr` may select zero tests: projects may
-have no selected Gfx tests. These log `no tests selected (Gfx categories);
-treated as empty`.
+Missing/empty/invalid XML, zero total, or no passed/failed tests fails the pass
+unless an empty pass is specifically allowed below.
+
+Without a caller's category or name filter, `test editmode` requires tests in
+its pure pass but allows the implicit Gfx pass to select zero tests. Other
+constraints such as `-assemblyNames` narrow both passes without requesting
+Gfx, so they don't change that rule. The Gfx pass of `test pr` may also select
+zero tests. These passes log `no tests selected (Gfx categories); treated as
+empty` when their valid results report zero tests.
 
 For `test editmode -testFilter <filter>` without `-testCategory`, when both
 passes run, either pass may select zero tests with valid XML. Each empty pass
@@ -111,6 +118,8 @@ Evidence validation uses Python 3's standard library.
 
 For an explicit category, EditMode runs a single graphics-enabled pass; Gfx
 gets its own timeout. A RenderTool class filter runs alone with `RenderTool`.
+The legacy `-editorTestsCategories` and `-editorTestsFilter` spellings are
+handled like `-testCategory` and `-testFilter`.
 Known flakes are one fully qualified test or fixture per line, with `#` comments.
 Only a pass consisting entirely of known failures reruns once. Both result XMLs
 are retained and a successful retry prints `flaky-passed`, not an unqualified

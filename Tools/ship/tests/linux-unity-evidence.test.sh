@@ -16,11 +16,13 @@ for mode in empty garbage zero skipped; do
     '[ "$rc" != 0 ] && grep -q "editmode:.*test evidence" "$tmp/err"'
 done
 for platform in editmode playmode pr; do
-  for arg in -quit -testResults -logFile; do
-    extra=("$arg"); [ "$arg" = -quit ] || extra+=(x)
+  for arg in -quit -QuIt -QUIT -testResults -TESTRESULTS -logFile -LogFile -LOGFILE \
+             -editorTestsResultFile --QUIT -TestResults=x -LogFile=x; do
+    extra=("$arg")
+    case "$arg" in -[qQ][uU][iI][tT]|--QUIT|*=*) ;; *) extra+=(x) ;; esac
     run "$platform" "${extra[@]}"
     check "$platform: $arg rejected before any editor starts" \
-      '[ "$rc" != 0 ] && [ ! -s "$tmp/runs" ] && grep -q -- "error:.*$arg.*not allowed" "$tmp/err"'
+      '[ "$rc" != 0 ] && [ ! -s "$tmp/runs" ] && grep -q -- "error:.*${arg%%=*}.*not allowed" "$tmp/err"'
   done
 done
 

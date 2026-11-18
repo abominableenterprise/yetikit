@@ -1,33 +1,81 @@
 # shellcheck shell=bash
 # Fail-closed evidence helpers for linux-unity.sh test; no editor invocations.
 
-# The runner owns these options. -quit can exit before tests; the others hide evidence.
-validate_test_args() {
-  local arg
+# Guard runner-owned options regardless of spelling; do not depend on which forms a Unity version accepts.
+# Also canonicalize the Test Framework's legacy filter/category aliases for pass selection and retries.
+normalize_test_args() {
+  local LC_ALL=C arg option
+  TEST_ARGS=()
   for arg in "$@"; do
-    case "$arg" in
-      -quit|-testResults|-logFile) die "test: $arg is not allowed in forwarded Unity args (the runner owns test execution, results and logs)" ;;
+    option="${arg%%=*}"
+    case "${option,,}" in
+      -quit|--quit|-testresults|--testresults|-editortestsresultfile|--editortestsresultfile|-logfile|--logfile)
+        die "test: ${arg%%=*} is not allowed in forwarded Unity args (the runner owns test execution, results and logs)" ;;
     esac
+    case "$arg" in
+      -editorTestsFilter) arg=-testFilter ;;
+      -editorTestsCategories) arg=-testCategory ;;
+    esac
+    TEST_ARGS+=("$arg")
   done
 }
 
-# Every original failure must have explicit passing evidence, including parameterized cases.
-# $1: validated retry XML, $2: newline-separated original failed fullnames.
-retry_passed_all() {
-  python3 - "$1" "$2" <<'PY'
+has_test_option() {
+  local option="$1" arg; shift
+  for arg in "$@"; do [ "$arg" != "$option" ] || return 0; done
+  return 1
+}
+
+# Emit failed fullnames separated by NUL (illegal in XML), then an empty record
+# to signal successful extraction. In retry mode, read NUL-delimited original
+# fullnames from stdin and require exact passes.
+# This is Linux test evidence only; the release gate uses its own results/report format.
+flake_evidence() {
+  python3 -c '
 import sys
 import xml.etree.ElementTree as ET
 
+
+def failed_names(root):
+    names = []
+
+    def visit(node):
+        has_failed_case = False
+        for child in node:
+            has_failed_case |= visit(child)
+        if node.get("result") == "Failed":
+            site = node.get("site")
+            if node.tag == "test-case" or (
+                node.tag == "test-suite" and (site != "Child" if site else not has_failed_case)
+            ):
+                name = node.get("fullname")
+                if not name:
+                    raise ValueError("failed test or suite has no fullname")
+                names.append(name)
+                has_failed_case |= node.tag == "test-case"
+        return has_failed_case
+
+    visit(root)
+    return names
+
+
 try:
     root = ET.parse(sys.argv[1]).getroot()
-except (OSError, ET.ParseError, ValueError):
+    failed = failed_names(root)
+    if len(sys.argv) == 2:
+        for name in failed:
+            sys.stdout.buffer.write(name.encode("utf-8") + b"\0")
+        sys.stdout.buffer.write(b"\0")
+    else:
+        original = set(sys.stdin.buffer.read().decode("utf-8").split("\0")[:-1])
+        passed = {
+            node.get("fullname") for node in root.iter()
+            if node.tag in ("test-case", "test-suite") and node.get("result") == "Passed"
+        }
+        sys.exit(0 if original and not failed and original <= passed else 1)
+except (OSError, ET.ParseError, ValueError, RecursionError):
     sys.exit(1)
-passed = {
-    node.get("fullname") for node in root.iter()
-    if node.tag in ("test-case", "test-suite") and node.get("result") == "Passed"
-}
-sys.exit(0 if set(sys.argv[2].splitlines()) <= passed else 1)
-PY
+' "$@"
 }
 
 # $1: pass label, $2: XML, $3: allow zero-total optional Gfx (1) or filtered dual-pass selection.
