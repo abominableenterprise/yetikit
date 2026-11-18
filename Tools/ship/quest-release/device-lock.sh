@@ -3,7 +3,7 @@
 # Hash the runtime serial, keeping device identifiers out of filenames. Use a fixed
 # host-local root (not QR_ROOT or TMPDIR, which may differ between consumers).
 qr_device_locked() (
-  local key root="/tmp/yetikit-quest-device-locks-$UID" device_lock group="" repo_lock
+  local key root="/tmp/yetikit-quest-device-locks-$UID" device_lock group="" repo_lock group_status=0
   [ -n "${QUEST_SERIAL:-}" ] || qr_die "device lock: QUEST_SERIAL is not selected"
   key="$(printf '%s' "$QUEST_SERIAL" | qr_sha256)" || exit 1
   [[ "$key" =~ ^[0-9a-f]{64}$ ]] || qr_die "device lock: cannot hash the device identifier"
@@ -18,7 +18,10 @@ qr_device_locked() (
   QR_LOCK_HELD=""
   if [ "${QR_DEVICE_RESUME_OWNER:-0}" = 1 ] && [ -n "$group" ] &&
     [ "$(cat "$device_lock/pid" 2>/dev/null)" = "$$" ] &&
-    [ "$(cat "$device_lock/group" 2>/dev/null)" = "$group" ] && ! qr_group_alive "$group"; then
+    [ "$(cat "$device_lock/group" 2>/dev/null)" = "$group" ]; then
+    qr_group_alive "$group" || group_status=$?
+  fi
+  if [ "$group_status" = 1 ]; then
     # Perf cancellation runs after draining. The cancelled worker may have
     # handed its still-owned lock back to this same live run owner.
     QR_LOCK_HELD=1

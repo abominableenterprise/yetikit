@@ -94,10 +94,11 @@ qr_gate_retry_coverage() {
 # what was retried and the result go on the summary's gate line.
 qr_gate_flake_retry() {
   local wt="$1" names f filter="" n=0 shown xml="$QR_RUN_DIR/gate.xml" rxml="$QR_RUN_DIR/gate-retry.xml"
-  local rlog="$QR_RUN_DIR/gate-retry-unity.log" rrc=0 report totals result unlisted="" nu=0
+  local rlog="$QR_RUN_DIR/gate-retry-unity.log" rrc=0 report totals result unlisted="" nu=0 canonical
   shift
   KNOWN_FLAKES="$(qr_known_flakes_file "$wt")"
-  names="$(failed_tests "$xml")"
+  canonical="$(qr_nunit_xml "$xml")" || return 1
+  names="$(qr_nunit_failed_names "$canonical")" || return 1
   [ -n "$names" ] || return 1
   while IFS= read -r f; do
     [ -n "$f" ] || continue

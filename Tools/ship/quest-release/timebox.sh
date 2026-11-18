@@ -6,9 +6,22 @@
 # shellcheck source=Tools/ship/quest-release/workers.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/workers.sh"
 
-# Zombies cannot hold resources; orphaned grandchildren are reaped by the OS.
+# Zombies cannot hold resources. Return 0 for live, 1 for gone, 2 when
+# the probe failed (even a partial listing cannot establish absence).
 qr_group_alive() {
-  ps -axo pgid=,stat= | awk -v group="$1" '$1 == group && $2 !~ /^Z/ { alive=1 } END { exit !alive }'
+  local listing alive
+  listing="$(ps -axo pgid=,stat=)" || return 2
+  alive="$(awk -v group="$1" '$1 == group && $2 !~ /^Z/ { print 1; exit }' <<< "$listing")" || return 2
+  [ "$alive" = 1 ]
+}
+
+# Drains only inspect groups they launched and can signal as the same user.
+# Fall back to the kernel's group check if ps is unavailable. Do not use this
+# fallback for lock readers: an unowned live group may not be signalable.
+qr_own_group_alive() {
+  local status=0
+  qr_group_alive "$1" || status=$?
+  [ "$status" = 0 ] || { [ "$status" = 2 ] && kill -0 -- "-$1" 2>/dev/null; }
 }
 
 # Always launched asynchronously by the supervisor; use that shell directly
@@ -24,11 +37,11 @@ qr_timebox_watchdog() {
 # Wait for the whole group, not merely the wrapper that originally led it.
 qr_timebox_drain() {
   local ticks cancel_ticks=5 orphan_ticks=20
-  qr_group_alive "$group" || return 0
+  qr_own_group_alive "$group" || return 0
   kill -TERM -- "-$group" 2>/dev/null || true
   kill -CONT -- "-$group" 2>/dev/null || true
   ticks="$(awk -v grace="$grace" 'BEGIN {printf "%d", grace * 10 + 0.99}')"
-  while qr_group_alive "$group"; do
+  while qr_own_group_alive "$group"; do
     # Outer release cancellation can escalate in about a second. Do not
     # leave it to kill this supervisor before the isolated group is drained.
     # If the wrapper is gone, give surviving children at most two seconds.
@@ -93,7 +106,6 @@ qr_timebox_finish() {
     wait "$timer" 2>/dev/null || true
     timer=''
   fi
-  if [ -n "$slot" ]; then qr_worker_drain_group "$group"; fi
   wait "$group" 2>/dev/null || true
   if [ -n "$slot" ]; then
     qr_workers_drain "$slot/group.$group" && rm -rf "$slot" || rc=1

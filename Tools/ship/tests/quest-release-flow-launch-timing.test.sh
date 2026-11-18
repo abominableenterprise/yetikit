@@ -25,6 +25,7 @@ launch_timing() (
         [ "${FAKE_EARLY_FAIL:-0}" = 0 ] || { echo 'adb unavailable'; return 1; }
         printf '%s\n' "$FAKE_LOGCAT"
         echo '11-01 12:00:30.000 I VrShell: appLaunchFailureBroadcastReceived packageName=com.example.consumer'
+        [ -z "${FAKE_EARLY_CRASH:-}" ] || printf '%s\n' "$FAKE_EARLY_CRASH"
       else
         printf '%s\n' "$FAKE_LOGCAT"
       fi
@@ -38,6 +39,17 @@ rm -f "$tmp/launch-sleeps" "$tmp/launch-snapshots"
 rc=0; QR_LAUNCH_WAIT=60 launch_timing > "$tmp/out" 2> "$tmp/err" || rc=$?
 check "default wait checks at 30 s, then at 60 s, preserving early-only warnings" \
   '[ "$rc" = 0 ] && [ "$(paste -sd, "$tmp/launch-sleeps")" = 30,30 ] && [ "$(wc -l < "$tmp/launch-snapshots")" = 2 ] && out_has "30s check" && out_has "shell launch warnings 1"'
+rm -f "$tmp/launch-sleeps" "$tmp/launch-snapshots"
+# The initial and final pidof probes see a healthy process. An intervening
+# crash may only be attributable via the package record in the early dump.
+early_fatal='10-31 12:00:12.000  9998  9998 E AndroidRuntime: FATAL EXCEPTION: main'
+early_process="10-31 12:00:12.001  9998  9998 E AndroidRuntime: Process: $QR_PKG, PID: 9998"
+rc=0; QR_LAUNCH_WAIT=60 FAKE_EARLY_CRASH="$early_fatal
+$early_process" launch_timing > "$tmp/out" 2> "$tmp/err" || rc=$?
+check 'an attributed crash rotated out of the final snapshot still fails launch' \
+  '[ "$rc" = "$QR_LAUNCH_CRASH" ] && out_has "launch:      CRASH" && out_has "process alive: yes"'
+rc=0; QR_LAUNCH_WAIT=60 FAKE_EARLY_CRASH="$early_fatal" launch_timing > "$tmp/out" 2> "$tmp/err" || rc=$?
+check 'an unrelated early crash does not fail launch' '[ "$rc" = 0 ]'
 rm -f "$tmp/launch-sleeps" "$tmp/launch-snapshots"
 rc=0; QR_LAUNCH_WAIT=60 FAKE_EARLY_FAIL=1 launch_timing > "$tmp/out" 2> "$tmp/err" || rc=$?
 check "early snapshot failure is infrastructure, not a crash" \

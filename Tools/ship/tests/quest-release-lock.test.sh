@@ -135,6 +135,15 @@ for cmd in verify launch; do
   check "$cmd remains locked after parent-only SIGKILL while orphan worker group is alive" \
     '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ ! -e "$tmp/dispatched" ] && [ -d "$tmp/logs/run.lock" ]'
 done
+# With the owner gone, a failed ps must not authorize overlap, even if it
+# printed a partial listing that omitted the live worker.
+(
+  ps() { printf '1 Ss\n'; return 1; }
+  . "$tmp/run.sh" verify
+) > "$tmp/overlap.out" 2>&1
+rc=$?
+check 'a failed process listing leaves the orphan worker lock intact' \
+  '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ ! -e "$tmp/dispatched" ] && [ -d "$tmp/logs/run.lock" ]'
 echo finish >&9
 # Group cleanup can finish asynchronously after the worker exits. Bound polling and ignore zombies.
 . "$script"

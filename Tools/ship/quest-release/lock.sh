@@ -11,11 +11,11 @@
 qr_lock_dir() { printf '%s/run.lock\n' "$QR_LOGS"; }
 
 # The lock's PID and run folder into QR_LOCK_PID / QR_LOCK_RUN. Returns 0 while its owner or worker group lives,
-# 1 when there is no lock, 2 when it is stale. A lock with no PID counts as alive for its first minute
+# 1 when there is no lock, 2 when it is stale. An unknown group status is treated as live.
+# A lock with no PID counts as alive for its first minute
 # (another run is writing it), stale after that.
 qr_lock_read() {
-  local d group; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
-  local workers=""
+  local d group status=0 workers=""; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
   QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
   # Read all fields from one directory generation. A release or stale reclaim
   # can otherwise replace the lock between reading its PID and invocation key.
@@ -43,7 +43,8 @@ qr_lock_read() {
   [ "$workers" != busy ] || return 0
   case "$group" in
     ''|0|*[!0-9]*) ;;
-    *) qr_group_alive "$group" && return 0 ;;
+    *) qr_group_alive "$group" || status=$?
+       [ "$status" = 1 ] || return 0 ;;
   esac
   case "$QR_LOCK_PID" in
     ''|*[!0-9]*)
@@ -64,7 +65,7 @@ qr_lock_workers_busy() {
   for step in ./step.*; do
     [ -d "$step" ] || continue
     case "$1" in ''|0|*[!0-9]*) ;; *)
-      qr_worker_group_status "$1" || status=$?
+      qr_group_alive "$1" || status=$?
       [ "$status" = 1 ] || return 0 ;;
     esac
     qr_workers_busy "$step" && return 0
@@ -215,7 +216,7 @@ qr_drain_group() {
   local group="$1" deadline=$((SECONDS + 2))
   kill -TERM -- "-$group" 2>/dev/null || true
   kill -CONT -- "-$group" 2>/dev/null || true
-  while qr_group_alive "$group"; do
+  while qr_own_group_alive "$group"; do
     if [ "$SECONDS" -ge "$deadline" ]; then kill -KILL -- "-$group" 2>/dev/null || true; fi
     sleep 0.1
   done
@@ -224,9 +225,6 @@ qr_drain_group() {
 
 qr_lock_drain_step() {
   qr_drain_group "$QR_ACTIVE_STEP"
-  # On main, qr_drain_group does not distinguish an unsuccessful ps probe.
-  # Do not walk a mutable worker registry if that first drain returned early.
-  qr_worker_drain_group "$QR_ACTIVE_STEP"
   qr_workers_drain "$QR_ACTIVE_STEP_DIR" || return 1
   rm -rf "$QR_ACTIVE_STEP_DIR" || return 1
   QR_ACTIVE_STEP=""; QR_ACTIVE_STEP_DIR=""

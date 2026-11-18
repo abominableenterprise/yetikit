@@ -26,29 +26,12 @@ qr_worker_await() {
   return 1
 }
 
-# Keep unknown handling local to registered workers until the shared probe
-# provides this distinction. A failed/partial listing cannot prove absence.
-qr_worker_group_status() {
-  local listing alive
-  listing="$(ps -axo pgid=,stat=)" || return 2
-  alive="$(awk -v group="$1" '$1 == group && $2 !~ /^Z/ { print 1; exit }' <<< "$listing")" || return 2
-  [ "$alive" = 1 ]
-}
-
-qr_worker_group_alive() {
-  local status=0
-  qr_worker_group_status "$1" || status=$?
-  # Only for draining our own groups, where a failed signal-0 check cannot
-  # be a permission error. Lock readers must use the strict probe instead.
-  [ "$status" = 0 ] || { [ "$status" = 2 ] && kill -0 -- "-$1" 2>/dev/null; }
-}
-
 qr_worker_drain_group() {
   local pgid="$1" deadline=$((SECONDS + 2))
-  qr_worker_group_alive "$pgid" || return 0
+  qr_own_group_alive "$pgid" || return 0
   kill -TERM -- "-$pgid" 2>/dev/null || true
   kill -CONT -- "-$pgid" 2>/dev/null || true
-  while qr_worker_group_alive "$pgid"; do
+  while qr_own_group_alive "$pgid"; do
     if [ "$SECONDS" -ge "$deadline" ]; then kill -KILL -- "-$pgid" 2>/dev/null || true; fi
     command sleep 0.1
   done
@@ -62,7 +45,7 @@ qr_workers_busy() {
     [ -d "$entry" ] || continue
     pgid="${entry##*.}"
     [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || return 0
-    status=0; qr_worker_group_status "$pgid" || status=$?
+    status=0; qr_group_alive "$pgid" || status=$?
     [ "$status" = 1 ] || return 0
     qr_workers_busy "$entry" && return 0
   done
