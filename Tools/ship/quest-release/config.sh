@@ -1,5 +1,7 @@
 # shellcheck shell=bash
 # Schema validation shared with Linux; scalar reads keep this entry point Bash 3.2 compatible.
+# shellcheck source=Tools/ship/lib/config-regex.sh
+. "$QR_DIR/lib/config-regex.sh"
 qr_config_get() { printf '%s\n' "$QR_CONFIG_JSON" | jq -r "$1"; }
 
 qr_positive_seconds() {
@@ -18,6 +20,7 @@ qr_config() {
   error="$(jq -sr --argjson questAbsoluteKnownFlakes true -f "$QR_DIR/lib/config.jq" "$QR_CONFIG_FILE")" || return 1
   [ -z "$error" ] || { qr_log "error: $error"; return 1; }
   QR_CONFIG_JSON="$(jq -f "$QR_DIR/lib/config-paths.jq" "$QR_CONFIG_FILE")" || return 1
+  ship_config_check_noise_regexes "$QR_CONFIG_JSON" || return 1
   [ "$(qr_config_get 'has("quest")')" = true ] || { qr_log 'error: missing quest config block'; return 1; }
   QR_UNITY_VERSION="$(qr_config_get '.unityVersion')"
   QR_PKG="$(qr_config_get '.quest.package')"

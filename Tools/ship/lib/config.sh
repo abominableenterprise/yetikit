@@ -1,5 +1,7 @@
 # shellcheck shell=bash
 # Load one project-owned configuration before any editor, credential or seat work.
+# shellcheck source=Tools/ship/lib/config-regex.sh
+. "$(dirname "${BASH_SOURCE[0]}")/config-regex.sh"
 ship_config_get() {
   if [[ -v 'SHIP_CONFIG_VALUES[$1]' ]]; then
     [ -z "${SHIP_CONFIG_VALUES[$1]}" ] || printf '%s\n' "${SHIP_CONFIG_VALUES[$1]}"
@@ -16,6 +18,7 @@ ship_config_load() {
   }
   [ -z "$error" ] || { printf '[ship] error: %s: %s\n' "$SHIP_CONFIG_FILE" "$error" >&2; return 1; }
   SHIP_CONFIG_JSON="$(jq -f "$(dirname "${BASH_SOURCE[0]}")/config-paths.jq" "$SHIP_CONFIG_FILE")" || return 1
+  ship_config_check_noise_regexes "$SHIP_CONFIG_JSON" || return 1
   # Batch fixed reads: dozens of jq subprocesses delay cancellation/lock tests
   # and every short command on resource-constrained workers.
   declare -gA SHIP_CONFIG_VALUES=()

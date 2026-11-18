@@ -38,6 +38,20 @@ GOBIN="$HOME/bin" go install github.com/google/go-containerregistry/cmd/crane@v0
 
 Setup also accepts a preinstalled crane on PATH or a configured archive; see
 [Ship requirements](Tools/ship/README.md#vendor-into-a-game).
+
+- For Quest releases, set `QUEST_CERT_SHA256` to the expected APK signing
+  certificate fingerprint in the environment, not in `yetikit.json`. Set
+  `QUEST_SERIAL` in the environment to select a headset, or leave it unset with
+  exactly one headset attached.
+- Static font cleanup is opt-in: list the exact project-relative font asset
+  paths in `noise.fontAssetPaths`. Only list assets whose editor serialization
+  changes can be discarded.
+- Set the `SCENE_AREAS` environment variable to override the areas table from
+  `scene.areasFile`.
+- Use `tests.builderFixtures` to map exact builder paths to lists of fully
+  qualified fixture names. A change to a mapped builder adds those fixtures to
+  the Gfx selection for `test pr`.
+
 ## core
 Reference the opt-in runtime/editor assemblies and wrap consumer builds in a
 build-stamp scope. Follow the [core setup and build adapter example](Packages/com.abominable.yetikit.core/README.md).

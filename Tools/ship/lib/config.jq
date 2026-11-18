@@ -7,6 +7,9 @@ def relpath:
 def strings: if type == "array" then all(.[]; nonempty) else false end;
 def methods: if strings then length > 0 else false end;
 def invalid($key): "missing or invalid key: \($key)";
+def noise_keys: ["atlasPath", "codeRegex", "fixedTimestepCount", "fontAssetPaths",
+  "generatorsRegex", "propsDir", "protectedRegex", "repackRegex", "sourceRegex",
+  "specularMaterialPath", "timeManagerPath"];
 def envname: if nonempty then test("^[A-Za-z_][A-Za-z0-9_]*$") else false end;
 def packageid: if nonempty then test("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$") else false end;
 # Backup destinations must also be distinct on default case-insensitive macOS volumes.
@@ -78,6 +81,8 @@ elif has("scene") and (.scene | has("areaSteps")) and (.scene.areaSteps | method
 elif has("scene") and (.scene | has("areasFile")) and (.scene.areasFile | relpath | not) then invalid("scene.areasFile")
 elif has("scene") and (.scene | has("areasDir")) and (.scene.areasDir | relpath | not) then invalid("scene.areasDir")
 elif has("noise") and (.noise | type) != "object" then invalid("noise")
+elif ((.noise // {} | keys_unsorted) - noise_keys | length) > 0 then
+  "unknown key: noise.\(((.noise | keys_unsorted) - noise_keys)[0])"
 elif has("noise") and (.noise | has("fontAssetPaths")) and
   (.noise.fontAssetPaths | if type == "array" then all(.[]; relpath) else false end | not) then invalid("noise.fontAssetPaths")
 elif has("noise") and ([.noise | to_entries[] | select(.key != "fontAssetPaths") | select(.value | nonempty | not) | .key] | length) > 0 then
