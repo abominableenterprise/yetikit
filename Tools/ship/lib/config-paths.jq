@@ -10,3 +10,4 @@ reduce (["build", "apkPath"], ["build", "releaseApkPath"], ["build", "profile"],
        elif $p == ["knownFlakes"] and (getpath($p) | startswith("/")) then .
        else setpath($p; getpath($p) | canonical) end)
 | if .scene.keepPaths? then .scene.keepPaths |= map(canonical) else . end
+| if .noise.fontAssetPaths? then .noise.fontAssetPaths |= map(canonical) else . end

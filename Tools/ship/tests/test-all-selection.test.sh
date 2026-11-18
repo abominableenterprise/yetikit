@@ -72,10 +72,17 @@ check $'linux-unity-apk\n' --changed HEAD apk
 check $'quick\n' --changed HEAD --fast
 echo 'ok   changed tested script selects its slow fixtures; filters and --fast intersect'
 
-printf '%s\0' Tools/ship/lib/android.sh > "$CHANGED_PATHS"
-check $'linux-unity-apk\nquick\n' --changed
-check $'quick\n' --changed HEAD --fast
-echo 'ok   APK tag names the extracted Android helper by basename'
+for path in lib/android.sh linux-unity-setup.sh test-passes.sh; do
+  printf 'Tools/ship/%s\0' "$path" > "$CHANGED_PATHS"
+  case "$path" in
+    lib/android.sh) expected=$'linux-unity-apk\nlinux-unity-timeout\n' ;;
+    linux-unity-setup.sh) expected=$'linux-unity-apk\n' ;;
+    test-passes.sh) expected=$'linux-unity-test-pr\nlinux-unity-timeout\n' ;;
+  esac
+  check "$expected"$'quick\n' --changed
+  check $'quick\n' --changed HEAD --fast
+  echo "ok   helper-only change to $path selects its slow fixtures"
+done
 
 # Quick tests retain broad tooling/workflow coverage, even without references.
 for path in Tools/ship/not-linux-unity.sh Tools/ship/lib/not-android.sh \
@@ -94,7 +101,7 @@ done
 printf '%s\0' Tools/ship/tests/linux-unity-apk.test.sh > "$UNTRACKED_PATHS"
 check $'linux-unity-apk\n' --changed
 printf '%s\0' Tools/ship/lib/android.sh > "$UNTRACKED_PATHS"
-check $'linux-unity-apk\nquick\n' --changed
+check $'linux-unity-apk\nlinux-unity-timeout\nquick\n' --changed
 : > "$UNTRACKED_PATHS"
 check '' --changed
 check ''

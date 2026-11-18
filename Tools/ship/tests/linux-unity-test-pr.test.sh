@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-all: slow linux-unity.sh
+# test-all: slow linux-unity.sh test-passes.sh
 # Synthetic PR-selection regressions: unchanged and changed test classes.
 set -euo pipefail
 . "$(dirname "$0")/lib/linux-unity-test-pr-fixture.sh"

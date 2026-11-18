@@ -74,7 +74,6 @@ git checkout -q -- Assets/Art/atlas.png Assets/Art/Props/source.png
 area_keep() {
   cleanup_unity() { :; }
   unity() { printf 'regenerated\n' > "$PROJECT/Assets/Art/Areas/X.prefab"; }
-  revert_bake_noise() { :; }
   cmd_scene --area X && grep -qx regenerated Assets/Art/Areas/X.prefab
 }
 # Scope function overrides to a subshell.
