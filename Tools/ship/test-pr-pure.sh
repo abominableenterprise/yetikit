@@ -23,7 +23,7 @@ pr_pure_fixtures() {
 }
 
 pr_pure_select() {
-  local max="$1" regex="$2" tool_dir repo p area files blocked rows fixture reason count selected
+  local max="$1" regex="$2" tool_dir repo p area files blocked rows classes fixture reason count selected
   local edit_root scripts_root editor_root smoke paths=()
   smoke="$(ship_config_get '.tests.prPure.smokeFixtures[]?')" || return
   repo="$(pwd -P)" || return
@@ -49,22 +49,29 @@ pr_pure_select() {
     files="$(find "$edit_root" -name '*.cs')" || exit 1
     cs_classes '(Gfx|MacOnly|RenderTool)' class <<< "$files"
   fi)" || return
-  rows="$(
-    while IFS= read -r fixture; do
-      [ -z "$fixture" ] || printf '%s\tconfigured smoke fixture\n' "$fixture"
-    done <<< "$smoke"
-    for p in ${paths[@]+"${paths[@]}"}; do
+  rows=""
+  for p in ${paths[@]+"${paths[@]}"}; do
+    case "$p" in
+      "$edit_root/"*.cs) files="$p"; reason="changed test $p" ;;
+      "$scripts_root/"*/*.cs)
+        area="${p#"$scripts_root/"}"; area="${area%%/*}"
+        files="$(area_test_files "$area")" || return
+        reason="tests for $area from $p" ;;
+      *) continue ;;
+    esac
+    classes="$(cs_classes 0 <<< "$files")" || return
+    # Smoke and other matches must not mask a changed test source we couldn't resolve.
+    if [ -z "$classes" ]; then
       case "$p" in
-        "$edit_root/"*.cs) files="$p"; reason="changed test $p" ;;
-        "$scripts_root/"*/*.cs)
-          area="${p#"$scripts_root/"}"; area="${area%%/*}"
-          files="$(area_test_files "$area")" || exit 1
-          reason="tests for $area from $p" ;;
-        *) continue ;;
+        "$edit_root/"*.cs) pr_pure_full "no classes found in changed test $p"; return ;;
       esac
-      cs_classes 0 <<< "$files" | while IFS= read -r fixture; do printf '%s\t%s\n' "$fixture" "$reason"; done || exit 1
-    done
-  )" || return
+      continue
+    fi
+    while IFS= read -r fixture; do rows+="$fixture"$'\t'"$reason"$'\n'; done <<< "$classes"
+  done
+  while IFS= read -r fixture; do
+    [ -z "$fixture" ] || rows+="$fixture"$'\tconfigured smoke fixture\n'
+  done <<< "$smoke"
   rows="$(awk -F '\t' 'FILENAME == ARGV[1] { blocked[$1]=1; next } NF && !($1 in blocked)' \
     <(printf '%s\n' "$blocked") - <<< "$rows" | LC_ALL=C sort -u)" || return
   if [ -z "$rows" ]; then pr_pure_full 'no pure fixtures selected'; return; fi

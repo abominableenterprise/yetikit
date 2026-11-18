@@ -33,6 +33,26 @@ check 'MAX accepts decimal with leading zeroes and includes the entire selection
 TEST_PR_PURE_MAX=bad pr HEAD
 check 'invalid MAX falls back safely' 'full && grep -Fq "invalid TEST_PR_PURE_MAX" "$stages"'
 
+commit initial-selection
+printf 'using NUnit.Framework;\nnamespace ShipFixtures\n{\n [Explicit, Category ( "RenderTool" )]\n public class CaptureTests { [Test] public void Capture() {} }\n}\n' > "$t/Props/CaptureTests.cs"
+pr HEAD
+check 'spaced RenderTool category keeps an explicit fixture out of the headless filter' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests "* ]] && ! grep -Fq "pure selected ShipFixtures.CaptureTests" "$stages"'
+rm "$t/Props/CaptureTests.cs"
+
+printf 'using NUnit.Framework;\nnamespace ShipFixtures { public class InlineTests {\n [Test] public void Rule() {}\n} }\n' > "$t/Props/InlineTests.cs"
+pr HEAD
+check 'a same-line namespace and class is selected alongside smoke' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.InlineTests "* ]]'
+rm "$t/Props/InlineTests.cs"
+
+printf '// This changed source declares no class.\n' > "$t/Props/Unresolved.cs"
+echo '// another runtime change' >> "$proj/Assets/Scripts/Props/Spray/Spray.cs"
+pr HEAD
+check 'an unresolved changed test source forces full pure even with smoke and an earlier area match' \
+  'full && grep -Fq "no classes found in changed test Assets/Tests/EditMode/Props/Unresolved.cs" "$stages" && ! grep -Fq "pure selected" "$stages"'
+rm "$t/Props/Unresolved.cs"
+
 # Run from a vendored layout. Moving the tool directory must not hard-code its old prefix.
 mv "$proj/Tools/ship" "$proj/Tools/yetikit"
 script="$proj/Tools/yetikit/linux-unity.sh"
