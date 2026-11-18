@@ -44,8 +44,8 @@ cross_installation_scenarios() {
 for scenario in "$@"; do
   foreign=''
   case "$scenario" in
-    editor) exe="$tmp/B/Editor/Unity" ;;
-    helper) exe="$tmp/B/Editor/Data/Tools/Helper" ;;
+    editor|deleted-editor) exe="$tmp/B/Editor/Unity" ;;
+    helper|deleted-helper) exe="$tmp/B/Editor/Data/Tools/Helper" ;;
     name-only) exe="$tmp/unity-helper-not-editor" ;;
     unrelated-tree) exe="$tmp/other/Editor/helper" ;;
     alone) exe='' ;;
@@ -54,9 +54,15 @@ for scenario in "$@"; do
     env -u LINUX_UNITY_RUN "$exe" 300 & foreign=$!; pids+=("$foreign")
     export SHIP_FIXTURE_PIDS="${pids[*]}"
     ship_wait_until exe_ready "$foreign" "$exe"
+    case "$scenario" in
+      deleted-*)
+        rm -f "$exe" "$tmp/B/Editor/Unity"
+        check "$scenario: running executable is unlinked" exe_ready "$foreign" "$exe (deleted)"
+        ;;
+    esac
   fi
   # Preflight still inspects only A; the broader scan is exclusively for wiping.
-  check "$scenario: installation scan excludes foreign processes" bash -c '. "$1"; [ -z "$(unity_pids strict)" ]' _ "$script"
+  check "$scenario: installation scan excludes foreign processes" bash -c '. "$1"; pids="$(unity_pids strict)" && [ -z "$pids" ]' _ "$script"
   for action in cleanup stop; do
     if [ "$action" = stop ]; then
       rm -f "$tmp/owned.pid"
@@ -87,11 +93,15 @@ for scenario in "$@"; do
     check "$scenario $action: succeeds" test "$rc" = 0
     if [ -n "$foreign" ]; then check "$scenario $action: foreign process survives" alive "$foreign"; fi
     case "$scenario" in
-      editor|helper)
+      editor|helper|deleted-editor)
         check "$scenario $action: shm and lockfile survive" fixtures_present
         check "$scenario $action: warning names foreign PID" grep -qE "warning: Unity processes remain \(PIDs:.*\b$foreign\b" "$log_file"
         check "$scenario $action: warning names executable path" grep -qF "$exe" "$log_file"
         check "$scenario $action: one warning line" test "$(grep -c '^\[linux-unity\] warning:' "$log_file")" = 1
+        ;;
+      deleted-helper)
+        check "$scenario $action: shm and lockfile survive" fixtures_present
+        check "$scenario $action: warning reports incomplete inspection" grep -qF 'warning: Unity process inspection incomplete' "$log_file"
         ;;
       *) check "$scenario $action: shm and lockfile removed" fixtures_absent ;;
     esac

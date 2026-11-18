@@ -4,5 +4,5 @@ set -euo pipefail
 # shellcheck source=Tools/ship/tests/lib/linux-unity-cross-installation-fixture.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/linux-unity-cross-installation-fixture.sh"
 
-cross_installation_scenarios editor name-only
+cross_installation_scenarios editor name-only deleted-editor
 [ "$failures" = 0 ]
