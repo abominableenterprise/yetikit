@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+vendor=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$vendor/common.sh"
+source "$vendor/tag-tree.sh"
+source "$vendor/install.sh"
 usage='kit-bump.sh <tag> [--project <dir>] [--modules core,hands,...] [--source <local checkout>]'
 [[ $# -gt 0 ]] || fail "$usage"
 tag=$1; shift
@@ -16,19 +19,19 @@ while (($#)); do
   esac
   shift 2
 done
-open_project "$project"
-work=$(mktemp -d)
-trap 'rm -rf -- "$work"' EXIT
+resolve_project "$project"
+lock_project
+read_manifest
+prepare_install
 if [[ -z $source_dir ]]; then
-  git clone --quiet --depth 1 --branch "$tag" -- "$KIT_REMOTE" "$work/repo"
   source_dir=$work/repo
+  git init --quiet --object-format=sha1 "$source_dir"
+  tag_git fetch --quiet --no-tags --depth 1 -- "$KIT_REMOTE" "refs/tags/$tag:refs/tags/$tag"
 fi
-commit=$(git -C "$source_dir" rev-parse --verify "refs/tags/$tag^{commit}") ||
+commit=$(tag_git rev-parse --verify "refs/tags/$tag^{commit}") ||
   fail "tag not found in source: $tag"
-mkdir "$work/tree"
-git -C "$source_dir" archive "$commit" Tools/ship Packages | tar -x -C "$work/tree"
-ship=$work/tree/Tools/ship
-check_tree "$ship"
+mkdir -- "$ship"
+extract_ship
 [[ ! -e $ship/VERSION ]] || fail 'upstream Ship reserves VERSION for the consumer receipt'
 # Resolve every existing pin, plus requested modules, using only the tagged tree.
 mapfile -t queue < <(kit_entries)
@@ -44,13 +47,15 @@ for ((i=0; i<${#queue[@]}; i++)); do
   valid_package "$package" || fail "invalid kit package: $package"
   [[ ! ${seen[$package]+yes} ]] || continue
   seen[$package]=1
-  metadata=$work/tree/Packages/$package/package.json
-  [[ -f $metadata && ! -L $metadata ]] || fail "package not found at $tag: $package"
-  deps=$(jq -ce --arg name "$package" --arg p "$KIT_PREFIX" '
-    if .name != $name or ((.dependencies // {}) | type != "object") then
+  read_package "$package" > "$work/package.json" || fail "package not found at $tag: $package"
+  deps=$(jq -cse --arg name "$package" --arg p "$KIT_PREFIX" '
+    if length != 1 or (.[0] | type != "object" or .name != $name) then
       error("invalid package metadata")
-    else (.dependencies // {} | keys | map(select(startswith($p)))) end' "$metadata") ||
-    fail "invalid package.json: $package"
+    else .[0] | (if has("dependencies") then .dependencies else {} end) |
+      if type == "object" and all(.[]; type == "string") then
+        keys | map(select(startswith($p)))
+      else error("invalid dependencies") end
+    end' "$work/package.json") || fail "invalid package.json: $package"
   graph=$(jq -c --arg name "$package" --argjson deps "$deps" '. + {($name): $deps}' <<< "$graph")
   while IFS= read -r dependency; do queue+=("$dependency"); done < <(jq -r '.[]' <<< "$deps")
 done
@@ -59,30 +64,31 @@ graph=$(jq -cS . <<< "$graph")
 jq --arg tag "$tag" --arg remote "$KIT_REMOTE" --argjson graph "$graph" '
   reduce ($graph | keys[]) as $name (. ;
     .dependencies[$name] = ($remote + "?path=/Packages/" + $name + "#" + $tag))
-' "$manifest" > "$work/manifest.json"
+' "$manifest" > "$staged_manifest"
+chmod --reference="$manifest" -- "$staged_manifest"
 old_tag=none
-if [[ -f $project/Tools/yetikit/VERSION ]]; then
-  old_tag=$(awk -F= '$1 == "tag" {print substr($0,5); exit}' "$project/Tools/yetikit/VERSION")
+if [[ -e $old ]]; then
+  check_tree "$old"
+  if [[ -f $old/VERSION ]]; then
+    old_tag=$(awk -F= '$1 == "tag" {print substr($0,5); exit}' "$old/VERSION")
+  fi
 fi
 digest=$(tree_hash "$ship")
 printf 'tag=%s\ncommit=%s\nsha256=%s\ndependencies=%s\n' "$tag" "$commit" "$digest" "$graph" > "$ship/VERSION"
 # Compare regular files including removals and executable-bit changes.
+(cd "$ship" && find . -type f -print0) > "$work/paths" || fail 'cannot list staged Ship'
+if [[ -d $old ]]; then
+  (cd "$old" && find . -type f -print0) >> "$work/paths" || fail 'cannot list existing Ship'
+fi
+LC_ALL=C sort -zu "$work/paths" > "$work/sorted-paths"
 changed=0
-old=$project/Tools/yetikit
-if [[ -e $old ]]; then check_tree "$old"; fi
 while IFS= read -r -d '' path; do
   if [[ ! -f $old/$path || ! -f $ship/$path ]] ||
     ! cmp -s -- "$old/$path" "$ship/$path" ||
     [[ -x $old/$path && ! -x $ship/$path || ! -x $old/$path && -x $ship/$path ]]; then
     changed=$((changed + 1))
   fi
-done < <({ (cd "$ship" && find . -type f -print0)
-  if [[ -d $old ]]; then (cd "$old" && find . -type f -print0); fi
-} | LC_ALL=C sort -zu)
-mkdir -p -- "$project/Tools"
-rm -rf -- "$old"
-mv -- "$ship" "$old"
-# Preserve the manifest's filesystem permissions while replacing its JSON.
-cat "$work/manifest.json" > "$manifest"
-printf 'YetiKit: %s → %s; modules: %s; files changed: %s\n' "$old_tag" "$tag" \
-  "$(jq -r 'keys | join(", ")' <<< "$graph")" "$changed"
+done < "$work/sorted-paths"
+module_names=$(jq -r 'keys | join(", ")' <<< "$graph")
+install_bundle
+printf 'YetiKit: %s → %s; modules: %s; files changed: %s\n' "$old_tag" "$tag" "$module_names" "$changed"

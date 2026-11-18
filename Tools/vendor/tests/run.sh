@@ -2,7 +2,7 @@
 # Offline integration tests: all repositories, identities and consumer data are synthetic.
 set -euo pipefail
 vendor=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-for tool in git jq sha256sum tar; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
+for tool in git jq sha256sum tar flock; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/yetikit vendor tests.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 source_repo="$tmp/source repo"
@@ -210,5 +210,6 @@ if bump v1 >"$tmp/symlink.log" 2>&1; then check; fi
 cmp "$tmp/version" "$tmp/outside/VERSION" || fail 'wrote through destination symlink'
 cmp "$tmp/outside-tool" "$tmp/outside/tool.sh" || fail 'modified external target'
 [[ -f "$tmp/outside/added file.txt" ]] || fail 'deleted external target file'
+bash "$vendor/tests/followups.sh"
 bash "$vendor/tests/ship-fixtures.sh"
 echo 'PASS: offline vendoring regressions'

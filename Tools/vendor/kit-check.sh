@@ -6,7 +6,8 @@ if (($#)); then
   [[ $# == 2 && $1 == --project && -n $2 ]] || fail 'kit-check.sh [--project <dir>]'
   project=$2
 fi
-open_project "$project"
+resolve_project "$project"
+read_manifest
 bundle=$project/Tools/yetikit
 check_tree "$bundle"
 version=$bundle/VERSION
@@ -16,12 +17,13 @@ mapfile -t receipt < "$version"
    ${receipt[2]} == sha256=* && ${receipt[3]} == dependencies=* ]] || fail 'invalid VERSION; run kit-bump'
 tag=${receipt[0]#tag=}; commit=${receipt[1]#commit=}
 digest=${receipt[2]#sha256=}; graph=${receipt[3]#dependencies=}
-valid_tag "$tag" && [[ $commit =~ ^[0-9a-f]{40}$ && $digest =~ ^[0-9a-f]{64}$ ]] ||
+valid_tag "$tag" && [[ $commit =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ && $digest =~ ^[0-9a-f]{64}$ ]] ||
   fail 'invalid VERSION fields; run kit-bump'
-jq -e --arg p "$KIT_PREFIX" 'type == "object" and all(to_entries[];
-  (.key | startswith($p)) and (.value | type == "array" and all(.[]; type == "string")))' \
+jq -se --arg p "$KIT_PREFIX" 'length == 1 and (.[0] | type == "object" and all(to_entries[];
+  (.key | startswith($p)) and (.value | type == "array" and all(.[]; type == "string"))))' \
   <<< "$graph" >/dev/null || fail 'invalid VERSION dependencies; run kit-bump'
-[[ $(tree_hash "$bundle") == "$digest" ]] || fail 'vendored Ship was edited: fix upstream, then kit-bump'
+actual=$(tree_hash "$bundle") || fail 'cannot verify Ship digest; inspect the bundle, then run kit-bump'
+[[ $actual == "$digest" ]] || fail 'vendored Ship was edited: fix upstream, then kit-bump'
 while IFS= read -r package; do
   valid_package "$package" || fail "invalid kit package: $package"
   pin=$(jq -r --arg name "$package" '.dependencies[$name]' "$manifest")

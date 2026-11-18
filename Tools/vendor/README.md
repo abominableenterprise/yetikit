@@ -1,7 +1,7 @@
 # Consumer vendoring and version pins
 
 Run these tools from a YetiKit checkout against a consumer project. They need
-Linux, Bash 4+, Git, jq, tar and GNU coreutils; no Unity or Python is needed.
+Linux, Bash 4+, Git, jq, util-linux (`flock`) and GNU coreutils; no Unity or Python is needed.
 The commands themselves stay in the kit checkout, outside the vendored Ship tree.
 
 ## Adopting / upgrading
@@ -19,8 +19,8 @@ package in that closure gets an explicit Git URL at the same tag in the consumer
 manifest. Non-kit dependencies and JSON key order are retained (jq reformats
 whitespace). Dependencies must already be an object in the consumer manifest.
 
-By default bump clones the public kit with `--depth 1 --branch <tag>` into a
-cleaned-up temporary directory. For offline use:
+By default bump shallow-fetches the exact public kit tag ref, even if a branch
+has the same name. For offline use:
 
 ```sh
 /path/to/yetikit/Tools/vendor/kit-bump.sh v0.1.6 --project /path/to/consumer --modules core,quality --source /path/to/local/kit
@@ -28,10 +28,14 @@ cleaned-up temporary directory. For offline use:
 
 `--source` must be a Git checkout containing that tag; it is read-only. The tag's
 committed tree is used, **not** the current branch, index or dirty working tree.
-The whole Ship directory is copied byte for byte, with executable bits preserved;
-obsolete consumer files disappear. The only consumer write targets are
-`Tools/yetikit/` and `Packages/manifest.json`. Linked destination paths and
-symlinks/special files in Ship are rejected. Commit both changed targets together.
+Ship is read from raw Git blobs, ignoring archive attributes and checkout filters,
+with executable bits preserved. Obsolete consumer files disappear. Bump rejects
+linked destination paths and symlinks/special files in Ship. It locks the project
+before reading its manifest and rejects an overlapping bump. Replacements are
+staged beside each destination; if installation fails before the manifest rename,
+bump restores the previous Ship tree. This is rollback on error, not an atomic
+snapshot for concurrent readers or recovery from a system crash. Commit the two
+outputs (`Tools/yetikit/` and `Packages/manifest.json`) together.
 The summary reports old → new tag, full module names and the number of added,
 removed or changed vendored files (including VERSION).
 
@@ -41,7 +45,7 @@ The generated `Tools/yetikit/VERSION` has four ordered lines:
 
 ```text
 tag=v0.1.6
-commit=<40-character Git commit SHA>
+commit=<40-character SHA-1 or 64-character SHA-256 Git commit ID>
 sha256=<64-character SHA-256 tree digest>
 dependencies=<compact JSON object of full kit package names to direct kit dependency arrays>
 ```
