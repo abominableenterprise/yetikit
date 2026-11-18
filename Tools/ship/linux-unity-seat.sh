@@ -63,7 +63,7 @@ seat_acquire() {
   local unlock=0
   [ -n "${ACTIVATION_FD:-}" ] || unlock=1
   activation_lock
-  idle_settle_own_retirement
+  idle_settle_own_retirement || die "seat: could not finish retiring the previous seat"
   local held=0
   seat_held && held=1
   [ "$unlock" = 0 ] || activation_unlock
@@ -120,17 +120,27 @@ seat_acquire() {
   log "seat: acquired a Unity seat"
 }
 
-# Give the seat back (after a successful licence return). A failed release only warns: the hub frees it at task end.
+# Give the seat back (after a successful licence return). A failed hub request
+# only warns: the hub frees the seat at task end.
 seat_release() {
   # An explicit return in another checkout cannot use the original task's token.
   # Ask its live watcher to release that seat, even if a new ULF appears before
   # its next poll. Only fingerprints/paths are persisted, never credentials.
-  if [ "${IDLE_RELEASING:-0}" != 1 ] && [ ! -f "$ULF" ]; then idle_retire_owner; fi
+  if [ "${IDLE_RELEASING:-0}" != 1 ] && [ ! -f "$ULF" ]; then idle_retire_owner || return 1; fi
   seat_creds && seat_env || return 0
-  if [ "${SEAT_OWNED:-0}" != 1 ] && [ "${SEAT_PENDING:-0}" != 1 ]; then seat_held || return 0; fi
+  if seat_held; then
+    # Never release while a later activation could still trust this marker.
+    # Callers hold the activation lock, so a retry can still release this seat
+    # if the unlink fails, and no activator can observe a half-finished release.
+    if ! rm -f -- "$SEAT_STATE"; then
+      log "error: seat: could not clear ownership in $SEAT_STATE; run $SHIP_COMMAND return to retry"
+      return 1
+    fi
+  elif [ "${SEAT_OWNED:-0}" != 1 ] && [ "${SEAT_PENDING:-0}" != 1 ]; then
+    return 0
+  fi
   seat_post release
   SEAT_OWNED=0; SEAT_PENDING=0
-  if seat_held; then rm -f "$SEAT_STATE"; fi
   case "$SEAT_CODE" in
     2??) log "seat: released the Unity seat" ;;
     *) log "warning: seat release failed (HTTP $SEAT_CODE); the hub frees it when the task ends" ;;
@@ -195,9 +205,11 @@ activation_unlock() {
 }
 seat_cleanup() {
   if [ "${SEAT_OWNED:-0}" = 1 ] || [ "${SEAT_PENDING:-0}" = 1 ]; then activation_lock; fi
-  seat_exit
+  local rc=0
+  seat_exit || rc=$?
   activation_unlock
   activation_ungate
+  return "$rc"
 }
 
 # Always unlock, including outside a hub task. Seat operations themselves check the env.
@@ -262,7 +274,9 @@ idle_release_retired() {
       local acquisition state
       { read -r acquisition; read -r state; } < "$IDLE_DIR/retire.$context"
       if [ "$state" = "$SEAT_STATE" ] && seat_creds && seat_env && seat_held \
-        && [ "$(cat "$SEAT_STATE")" = "$acquisition" ]; then IDLE_RELEASING=1 seat_release; fi
+        && [ "$(cat "$SEAT_STATE")" = "$acquisition" ]; then
+        if ! IDLE_RELEASING=1 seat_release; then activation_unlock; return 2; fi
+      fi
       rm -f "$IDLE_DIR/retire.$context"
       activation_unlock
       return 0
@@ -281,7 +295,7 @@ idle_settle_own_retirement() {
     { read -r acquisition; read -r state; } < "$request"
     [ -f "$state" ] && [ "$(cut -d' ' -f1 "$state")" = "${THEROBOTS_TASK_ID:-}" ] || continue
     if [ "$(cat "$state")" = "$acquisition" ]; then
-      SEAT_STATE="$state" IDLE_RELEASING=1 seat_release
+      SEAT_STATE="$state" IDLE_RELEASING=1 seat_release || return 1
     fi
     rm -f "$request"
   done
@@ -389,7 +403,11 @@ idle_watch() {
       flock -x 9
       # Fatal poll exits also retire the ad before releasing the activity lock.
       trap 'case "$?" in 2|3) ;; *) idle_unadvertise ;; esac' EXIT
-      if idle_release_retired; then idle_unadvertise; exit 0; fi
+      if idle_release_retired; then
+        idle_unadvertise; exit 0
+      else
+        [ "$?" != 2 ] || exit 2  # keep the retirement request and retry
+      fi
       # Reject obsolete capabilities before any release, including no-ULF cleanup.
       if [ -n "${IDLE_WATCH_CONTEXT:-}" ] \
         && [ "$(cat "$IDLE_CONTEXT" 2>/dev/null || true)" != "$IDLE_WATCH_CONTEXT" ]; then idle_unadvertise; exit 0; fi
@@ -397,7 +415,8 @@ idle_watch() {
         activation_lock
         # Recheck after locking: another checkout may have just activated.
         if [ ! -f "$ULF" ]; then
-          if seat_creds && seat_env && seat_held; then IDLE_RELEASING=1 seat_release; fi
+          clear_return_guard "$(readlink -m "$ULF").returning" || exit 2
+          if seat_creds && seat_env && seat_held; then IDLE_RELEASING=1 seat_release || exit 2; fi
           idle_unadvertise
           exit 0
         fi
