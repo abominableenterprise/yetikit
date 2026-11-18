@@ -11,16 +11,21 @@ cs_classes() {
   while IFS= read -r f; do
     [ -f "$f" ] || continue
     awk -v gfx="$([ "$cat" = 0 ] && echo 0 || echo 1)" -v cat="$cat" -v scope="${2:-}" '
-      BEGIN { tag = "\\[[^]]*Category\\(\"" cat "\"\\)" }
+      BEGIN { tag = "\\[[^]]*Category[[:space:]]*\\([[:space:]]*\"" cat "\"[[:space:]]*\\)" }
       function fq(c) { return ns == "" ? c : ns "." c }
       function braces(s,   o, c) { o = gsub(/\{/, "{", s); c = gsub(/\}/, "}", s); depth += o - c }
       /^[[:space:]]*\/\// { next }
       {
         line = $0
         if (match(line, /^[[:space:]]*namespace[[:space:]]+[A-Za-z0-9_.]+/)) {
-          ns = substr(line, RSTART, RLENGTH); sub(/^[[:space:]]*namespace[[:space:]]+/, "", ns)
-          nsdepth = line ~ /;[[:space:]]*$/ ? 0 : depth + 1
-          braces(line); next
+          ns = substr(line, RSTART, RLENGTH)
+          line = substr(line, RSTART + RLENGTH)
+          sub(/^[[:space:]]*namespace[[:space:]]+/, "", ns)
+          nsdepth = depth + 1
+          # Consume the namespace delimiter, not declarations on the rest of the line.
+          if (sub(/^[[:space:]]*;/, "", line)) nsdepth = depth
+          else if (sub(/^[[:space:]]*\{/, "", line)) depth++
+          if (line ~ /^[[:space:]]*\/\//) next
         }
         attr = line ~ /^[[:space:]]*\[/
         if (gfx && line ~ tag) pending = 1
@@ -34,7 +39,7 @@ cs_classes() {
           pending = 0
         }
         braces(line)
-      }' "$f"
+      }' "$f" || return 1
   done | sort -u
 }
 

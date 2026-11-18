@@ -23,7 +23,7 @@ pr_pure_fixtures() {
 }
 
 pr_pure_select() {
-  local max="$1" regex="$2" tool_dir repo p area files blocked rows fixture reason count selected
+  local max="$1" regex="$2" tool_dir repo p area files blocked rows classes fixture reason count selected
   local edit_root scripts_root editor_root smoke paths=()
   smoke="$(ship_config_get '.tests.prPure.smokeFixtures[]?')" || return
   repo="$(pwd -P)" || return
@@ -50,9 +50,6 @@ pr_pure_select() {
     cs_classes '(Gfx|MacOnly|RenderTool)' class <<< "$files"
   fi)" || return
   rows="$(
-    while IFS= read -r fixture; do
-      [ -z "$fixture" ] || printf '%s\tconfigured smoke fixture\n' "$fixture"
-    done <<< "$smoke"
     for p in ${paths[@]+"${paths[@]}"}; do
       case "$p" in
         "$edit_root/"*.cs) files="$p"; reason="changed test $p" ;;
@@ -62,8 +59,20 @@ pr_pure_select() {
           reason="tests for $area from $p" ;;
         *) continue ;;
       esac
-      cs_classes 0 <<< "$files" | while IFS= read -r fixture; do printf '%s\t%s\n' "$fixture" "$reason"; done || exit 1
+      classes="$(cs_classes 0 <<< "$files")" || exit 1
+      # Check changed test sources before applying the blocklist or adding smoke coverage.
+      # Rows are buffered, so returning here discards any filter collected so far.
+      if [ -z "$classes" ]; then
+        case "$p" in
+          "$edit_root/"*.cs) pr_pure_full "no classes found in changed test $p"; return ;;
+        esac
+        continue
+      fi
+      while IFS= read -r fixture; do printf '%s\t%s\n' "$fixture" "$reason"; done <<< "$classes"
     done
+    while IFS= read -r fixture; do
+      [ -z "$fixture" ] || printf '%s\tconfigured smoke fixture\n' "$fixture"
+    done <<< "$smoke"
   )" || return
   rows="$(awk -F '\t' 'FILENAME == ARGV[1] { blocked[$1]=1; next } NF && !($1 in blocked)' \
     <(printf '%s\n' "$blocked") - <<< "$rows" | LC_ALL=C sort -u)" || return
