@@ -53,9 +53,13 @@ qr_perf_report() {
     "App p95 (per-second samples): \(.p95AppMs) ms <= \(.gates.app.limit) ms: \(.gates.app.verdict)",
     "average fps (report only): \(.averageFps | fixed(1))", "worst App: \(.worstAppMs | fixed(2)) ms",
     "longest consecutive stale seconds: \(.longestStaleStreak)",
-    (if .cpuMs == "unavailable" and .gpuMs == "unavailable" and (.combinedMs | type) == "number" then
-      "CPU&GPU frame time mean (combined): \(.combinedMs | fixed(2)) ms"
-    else "CPU/GPU frame time mean: \(.cpuMs | fixed(2)) / \(.gpuMs | fixed(2)) ms" end),
+    ((.combinedMs | type == "number") as $hasCombined |
+      (if .cpuMs != "unavailable" or .gpuMs != "unavailable" or ($hasCombined | not) then
+        "CPU/GPU frame time mean: \(.cpuMs | fixed(2)) / \(.gpuMs | fixed(2)) ms"
+      else empty end),
+      (if $hasCombined and (.cpuMs == "unavailable" or .gpuMs == "unavailable") then
+        "CPU&GPU frame time mean (combined): \(.combinedMs | fixed(2)) ms"
+      else empty end)),
     (if (.cpuUtilization | type) == "number" or (.gpuUtilization | type) == "number" then
       "CPU/GPU utilisation mean (report only): \(.cpuUtilization | fixed(2)) / \(.gpuUtilization | fixed(2))"
     else empty end),
