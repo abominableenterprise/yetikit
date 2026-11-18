@@ -204,8 +204,11 @@ qr_main() {
           rc="$QR_LAUNCH_INFRA"
           qr_set "$cmd" "INFRA: device selection failed (see release.log)"
           qr_summary
+          qr_lock_result "$cmd" "$rc" 0
+        else
+          qr_lock_result "$cmd" "$rc"
         fi
-        qr_lock_result "$cmd" "$rc"; return "$rc"
+        return "$rc"
       fi
       qr_serials || { qr_lock_result "$cmd" 1; return 1; } ;;
   esac
@@ -258,7 +261,10 @@ qr_main() {
     rc=0; qr_multi_finish || rc=$?
   fi
   qr_summary
-  qr_lock_result "$cmd" "$rc" "$list_release"
+  if ! qr_lock_result "$cmd" "$rc" "$list_release"; then
+    qr_log "error: cannot persist the $cmd result in $QR_LOGS"
+    [ "$rc" != 0 ] || rc=1
+  fi
   qr_lock_release
   return "$rc"
 }

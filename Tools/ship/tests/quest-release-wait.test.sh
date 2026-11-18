@@ -16,7 +16,7 @@ qr_fixture_bash() {
   exec perl -e '$SIG{HUP} = "DEFAULT"; $SIG{INT} = "DEFAULT"; $SIG{QUIT} = "DEFAULT"; exec @ARGV; die "exec: $!"' bash "$@"
 }
 SIGNAL_COMPLETION_TIMEOUT_SECONDS=30
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"; kill "${live:-}" 2>/dev/null' EXIT
+tmp="$(mktemp -d)"; trap 'kill "${first:-}" "${live:-}" 2>/dev/null; rm -rf "$tmp"' EXIT
 . "$(dirname "$0")/lib/quest-release-config.sh"
 qr_test_config "$tmp/config"
 fails=0
@@ -79,6 +79,23 @@ check "a gate-only run whose gate passed: exit 0" '[ "$rc" = 0 ] && grep -q "Que
 new_run "" failed; finish; result 4242 1 gate
 run_wait
 check "a gate-only run whose gate failed: exit 1" '[ "$rc" = 1 ]'
+
+# A new invocation is between mkdir and publishing its PID. The grace period
+# can expire here, but the previous invocation is not the one being watched.
+new_run "install ok (/old.apk)"; finish; result 4242 0
+printf '4242\n' > "$logs/current-invocation"
+mkdir "$logs/run.lock"
+n=0; on_sleep() {
+  n=$((n + 1))
+  case "$n" in
+    2) ( lock "$live" ) ;;
+    3) ( echo 'skipped: new build failed' > "$run/summary/install"; finish; result "$live" 1; rm -rf "$logs/run.lock" ) ;;
+  esac
+}
+QUEST_WAIT_GRACE=5 run_wait 2
+check "a live pre-PID lock blocks fallback to the previous successful invocation" \
+  '[ "$rc" = 1 ] && [ "$(wc -l < "$tmp/sleeps")" = 3 ] && grep -q "pid $live) exited 1" "$tmp/err" && ! grep -q old.apk "$tmp/out"'
+on_sleep() { :; }
 
 # --- a command's verdict ignores stale outcomes from other commands ---------------------------------------------------------
 for cmd in gate build verify prepare cleanup launch; do
@@ -192,6 +209,55 @@ check 'wait uses the completed list verdict and report despite a successor in th
     grep -q "install\[synthetic-a\]: OK: watched install" "$tmp/out" && grep -q "^overall: *OK (exit 0)" "$tmp/out" &&
     grep -q "^overall: *INFRA" "$run/summary.txt"'
 on_sleep() { :; }
+
+# The same-folder successor can also finish entirely between polls. Use real
+# lock/result writers in separate shells and fake only the commands' outcomes.
+new_run 'not run at root'
+writer="$tmp/write-result.sh"
+printf '. %q\nqr_config || exit 1\nqr_load_state\nqr_lock_acquire || exit 1\ntrap qr_lock_release EXIT\n' "$script" > "$writer"
+cat >> "$writer" <<'EOF'
+if [ "$1" = first ]; then
+  printf '%s\n' "$$" > "$QR_LOGS/first-pid"
+  IFS= read -r -t 30 ready <&8 || exit 1
+  qr_set install 'install ok (/watched.apk)'
+  qr_summary >/dev/null
+  qr_lock_result install 0 0
+else
+  qr_set install 'install ok (/successor.apk), data.json CHANGED'
+  qr_summary >/dev/null
+  qr_lock_result install 0 0
+fi
+EOF
+mkfifo "$tmp/finish-first"; exec 8<> "$tmp/finish-first"
+bash "$writer" first > "$tmp/writer-out" 2>&1 & first=$!
+# Wait for the synthetic writer's readiness, not for an arbitrary delay.
+for ((attempt=0; attempt<100; attempt++)); do
+  [ ! -s "$logs/first-pid" ] || break
+  kill -0 "$first" 2>/dev/null || break
+  command sleep 0.05
+done
+if [ ! -s "$logs/first-pid" ]; then kill "$first" 2>/dev/null; wait "$first" 2>/dev/null; cat "$tmp/writer-out"; exit 1; fi
+on_sleep() {
+  printf 'finish\n' >&8
+  # qr_main wait runs in a subshell, so use the lock release as the barrier
+  # (only the parent of the writer can wait for its PID).
+  for ((attempt=0; attempt<100; attempt++)); do
+    [ -d "$logs/run.lock" ] || break
+    command sleep 0.05
+  done
+  bash "$writer" second > "$tmp/writer-second-out" 2>&1
+}
+run_wait 2
+wait "$first" || exit 1
+finished_pid="$first"; first=''; exec 8>&-
+check 'wait returns its own single-device verdict and report even after a successor completes in the same folder' \
+  '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/sleeps")" = 1 ] && grep -q "pid $finished_pid) exited 0" "$tmp/err" &&
+    grep -q /watched.apk "$tmp/out" && ! grep -q /successor.apk "$tmp/out" && grep -q /successor.apk "$run/summary.txt"'
+on_sleep() { :; }
+# No lock was observed: the latest invocation pointer should select the successor.
+run_wait 2
+check 'an unpinned wait reports the latest invocation and rejects its changed data' \
+  '[ "$rc" = 1 ] && grep -q /successor.apk "$tmp/out" && ! grep -q /watched.apk "$tmp/out" && unchanged'
 
 # --- prepare can publish its folder and hand the lock to gate entirely between polls.
 # Hooks publish in a subshell: assigning the fixture's run must not overwrite qr_wait's dynamically scoped local run.

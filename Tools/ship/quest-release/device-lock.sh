@@ -3,7 +3,7 @@
 # Hash the runtime serial, keeping device identifiers out of filenames. Use a fixed
 # host-local root (not QR_ROOT or TMPDIR, which may differ between consumers).
 qr_device_locked() (
-  local key root="/tmp/yetikit-quest-device-locks-$UID" device_lock group="" repo_lock publish=1
+  local key root="/tmp/yetikit-quest-device-locks-$UID" device_lock group="" repo_lock
   [ -n "${QUEST_SERIAL:-}" ] || qr_die "device lock: QUEST_SERIAL is not selected"
   key="$(printf '%s' "$QUEST_SERIAL" | qr_sha256)" || exit 1
   [[ "$key" =~ ^[0-9a-f]{64}$ ]] || qr_die "device lock: cannot hash the device identifier"
@@ -16,8 +16,6 @@ qr_device_locked() (
   # Reuse the run lock's race-safe stale reclamation, but never its held flag.
   qr_lock_dir() { printf '%s\n' "$device_lock"; }
   QR_LOCK_HELD=""
-  # Doctor has no release invocation or run directory to publish.
-  [ "$1" != qr_doctor_reconnect ] || publish=0
   if [ "${QR_DEVICE_RESUME_OWNER:-0}" = 1 ] && [ -n "$group" ] &&
     [ "$(cat "$device_lock/pid" 2>/dev/null)" = "$$" ] &&
     [ "$(cat "$device_lock/group" 2>/dev/null)" = "$group" ] && ! qr_group_alive "$group"; then
@@ -25,7 +23,8 @@ qr_device_locked() (
     # handed its still-owned lock back to this same live run owner.
     QR_LOCK_HELD=1
   else
-    qr_lock_acquire "$publish" || exit 1
+    # The outer release lock owns invocation publication; doctor has no release invocation.
+    qr_lock_acquire 0 || exit 1
   fi
   # Cancellation TERM reaches this shell and adb together. Leave the generation
   # for stale reclamation until the outer owner has drained every worker; an
