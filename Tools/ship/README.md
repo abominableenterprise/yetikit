@@ -272,7 +272,7 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `tests.editModeRoot` | Optional relative EditMode root for changed tests and scripts-area lookup; default `<tests.root>/EditMode`. Keep it within `tests.root` so Gfx tags can be discovered. |
 | `tests.scriptsRoot` | Optional relative runtime code root; default `Assets/Scripts`. Changes under `<scriptsRoot>/<Area>/` search that area's EditMode fixtures. |
 | `tests.editorRoot` | Optional relative editor code root; default `Assets/Editor`. Builder changes search all fixtures under `tests.root` for references. |
-| `tests.builderFixtures` | Optional object mapping exact builder paths to arrays of fully qualified fixture names. |
+| `tests.builderFixtures` | Optional object mapping project-relative builder paths to arrays of fully qualified fixture names. Equivalent path spellings are combined. |
 | `tests.prPure` | Optional object enabling pure fixture selection for `test pr`; omit to retain full pure. |
 | `tests.prPure.smokeFixtures` | Array of fixture class names (namespace-qualified when applicable), default empty. Include only fixtures intended for the headless pure pass. |
 | `tests.prPure.max` | Integer cap from 0 through 9999999, default 12. Zero forces the full pass. |
