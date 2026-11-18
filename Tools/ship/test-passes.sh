@@ -27,7 +27,12 @@ cs_classes() {
           else if (sub(/^[[:space:]]*\{/, "", line)) depth++
           if (line ~ /^[[:space:]]*\/\//) next
         }
+        # Coalesce an attribute section before tagging it. Keep the closing
+        # line so a declaration following the closing bracket is still seen.
+        if (attributes != "") line = attributes " " line
         attr = line ~ /^[[:space:]]*\[/
+        if (attr && line !~ /\]/) { attributes = line; next }
+        attributes = ""
         if (gfx && line ~ tag) pending = 1
         if (match(line, /(^|[^A-Za-z0-9_])class[[:space:]]+[A-Za-z0-9_]+/)) {
           c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)

@@ -29,5 +29,24 @@ check "a changed test file selects every Gfx class declared there, not the whole
   '[ "$(filter)" = "ExampleGame.Props.Tests.ExtraTests;ExampleGame.Props.Tests.ThrowTests" ]'
 git -C "$proj" checkout -q -- Assets/Tests/EditMode/Props/ThrowTests.cs
 
+cat > "$t/Props/StyledTests.cs" <<'CS'
+namespace ExampleGame.Props.Tests;
+[Category ("Gfx")]
+public class SpacedTests { }
+[Category (
+    "Gfx"
+)] public class MultilineTests { }
+public class MethodTests
+{
+    [Test,
+     Category(
+         "Gfx")]
+    public void Renders() { }
+}
+public class UntaggedTests { }
+CS
+pr HEAD
+check 'spaced, multiline class and multiline method Gfx tags select their own fixtures' \
+  '[ "$rc" = 0 ] && [ "$(filter)" = "ExampleGame.Props.Tests.MethodTests;ExampleGame.Props.Tests.MultilineTests;ExampleGame.Props.Tests.SpacedTests" ]'
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
