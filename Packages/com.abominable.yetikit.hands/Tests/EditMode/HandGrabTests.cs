@@ -119,23 +119,32 @@ namespace YetiKit.Hands.Tests
             Assert.That(g.Trigger, Is.Zero, "the index pinch is no longer the trigger");
         }
 
-        [Test]
-        public void AGrabWithTheThumbAlreadyDownFiresOnlyAfterTheThumbLiftsOnce()
+        [TestCase(0.9f)]
+        [TestCase(0.7f)]
+        public void AGrabWithTheThumbAlreadyDownFiresOnlyAfterTheThumbLiftsOnce(float pickupPress)
         {
             var g = new HandGrabGesture();
             g.Tick(true, 0.7f, 0.9f, 0f, 0f);    // pinched it up (the other fingers curled too)
             Assert.That(g.Armed, Is.False);
-            g.Tick(true, 0.7f, 0.2f, 0.9f, 0.05f); // the thumb slides from the index tip onto its side: pressed
+            g.Tick(true, 0.7f, 0.2f, pickupPress, 0.05f); // the thumb slides from the index tip onto its side
             Assert.That(g.Selecting, Is.True);
+            g.Tick(true, 0.7f, 0.2f, 0.95f, 0.075f);
             Assert.That(g.Trigger, Is.Zero, "the pickup press does not activate the trigger");
             g.Tick(true, 0.7f, 0.2f, 0.1f, 0.1f);  // the thumb lifts, the fist keeps it
             Assert.That(g.Armed, Is.True);
             g.Tick(true, 0.7f, 0.2f, 0.9f, 0.2f);
             Assert.That(g.Trigger, Is.EqualTo(0.9f), "a new press activates the trigger");
+        }
 
+        [TestCase(0.95f)]
+        [TestCase(0.7f)]
+        [TestCase(HandGrabGesture.PressStay)]
+        public void ANewFistWithTheThumbDownDoesNotArm(float pickupPress)
+        {
             var w = new HandGrabGesture();
-            w.Tick(true, 0.9f, 0f, 0.95f, 0f);   // a fist with the thumb wrapped over it
-            Assert.That(w.Trigger, Is.Zero, "a fist made with the thumb down is no pull");
+            w.Tick(true, 0.9f, 0f, pickupPress, 0f);
+            w.Tick(true, 0.9f, 0f, 0.95f, 0.05f);
+            Assert.That(w.Trigger, Is.Zero, "a fist made with the thumb down does not trigger");
             w.Tick(true, 0.9f, 0f, 0.3f, 0.1f);
             w.Tick(true, 0.9f, 0f, 0.95f, 0.2f);
             Assert.That(w.Trigger, Is.EqualTo(0.95f));
@@ -170,13 +179,14 @@ namespace YetiKit.Hands.Tests
             Assert.That(g.Armed && g.Pressing, Is.True, "kept through the grace");
         }
 
-        [Test]
-        public void AThumbThatClosesOnContactIsPartOfThePickup()
+        [TestCase(0.9f)]
+        [TestCase(0.7f)]
+        public void AThumbThatClosesOnContactIsPartOfThePickup(float pickupPress)
         {
             var g = new HandGrabGesture();
             g.Tick(true, 0.9f, 0f, 0f, 0f);    // a thumbs-up fist made before reaching the object
             Assert.That(g.Armed, Is.True);
-            g.Tick(true, 0.9f, 0f, 0.9f, 0.1f); // the thumb closes on contact, inside the start window
+            g.Tick(true, 0.9f, 0f, pickupPress, 0.1f); // the thumb closes on contact, inside the start window
             Assert.That(g.CanStart(0.1f), Is.True);
             g.Took();                            // the grab takes the object now
             Assert.That(g.Armed, Is.False, "re-armed from the thumb at select time");

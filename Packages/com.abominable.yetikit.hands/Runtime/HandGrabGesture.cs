@@ -21,6 +21,7 @@ namespace YetiKit.Hands
         public const float StartWindow = 0.25f; // s after the gesture starts in which it may start a selection
 
         float lostAt = -1f;
+        bool thumbUp;
 
         public bool Fist { get; private set; }
         public bool Pinching { get; private set; }
@@ -39,7 +40,7 @@ namespace YetiKit.Hands
 
         public void Reset()
         {
-            Fist = Pinching = Pressing = Selecting = Armed = false;
+            Fist = Pinching = Pressing = Selecting = Armed = thumbUp = false;
             Trigger = 0f;
             lostAt = -1f;
             StartedAt = float.NegativeInfinity;
@@ -54,11 +55,9 @@ namespace YetiKit.Hands
         public void Took()
         {
             if (!Selecting) return;
-            Armed = ThumbUp;
+            Armed = thumbUp;
             Trigger = 0f; // armed: the thumb is up now; not armed: no trigger until it lifts
         }
-
-        bool ThumbUp => !Pinching && !Pressing;
 
         /// <summary>One frame: <paramref name="grip"/> 0..1 (fist curl), <paramref name="pinch"/> 0..1 (strength),
         /// <paramref name="press"/> 0..1 (<see cref="ThumbPress"/>).</summary>
@@ -79,14 +78,16 @@ namespace YetiKit.Hands
             Fist = grip >= (Fist ? GripStay : GripEnter);
             Pinching = pinch >= (Pinching ? PinchStay : PinchEnter);
             Pressing = press >= (Pressing ? PressStay : PressEnter);
+            // A partial press may not latch, but it is not a lift.
+            thumbUp = !Pinching && press < PressStay;
             var was = Selecting;
             Selecting = Fist || Pinching;
             if (Selecting && !was)
             {
                 StartedAt = now;
-                Armed = ThumbUp;
+                Armed = thumbUp;
             }
-            else if (Selecting && ThumbUp) Armed = true;
+            else if (Selecting && thumbUp) Armed = true;
             else if (!Selecting) Armed = false;
             Trigger = Selecting && Armed && Pressing ? press : 0f;
         }
