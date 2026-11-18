@@ -11,6 +11,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ### Added
 - Add tracked-hand curl and shape measurements, grab, poke, turn and teleport
   gesture detectors, and XR input adapters in the hands package.
+- Add an art-free `PlayerHand`, optional `IHandVisual`, and palm-following
+  `HandGrabInteractor`.
 
 ### Fixed
 - None.
@@ -19,7 +21,19 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Adapter changes
-- None.
+- `PlayerHand.glove` (serialized) is removed. Assign an optional `IHandVisual`
+  through the inspector's `visual` field or `PlayerHand.Visual`. The gameplay
+  root now follows the tracked wrist directly; implement any model offsets in
+  the visual. `WristAlignment` remains consumer-side and was not ported.
+- `IHandInput.Bird` and `PlayerHand.Bird` are removed; interpret `Shape` in the
+  consumer. `PlayerHand.Report` now takes only grip and trigger (no `birdShown`).
+  `PlayerHand.PoseEpoch` is removed; use `PresenceChanged` to detect mode changes
+  when reseeding motion. `PlayerHand.FingerCurls` uses the kit's `FingerCurls` type.
+- `HandGrabInteractor.Palm(GloveRig)` is replaced by `PlayerHand.PalmPose`.
+  `HandGrabInteractor.PreservePausedSelection` is not ported; pausing is a
+  consumer policy. The near grab only uses `HandFarInteraction.UiHover` and
+  `Hover`; `Summoning`, `SummonLocked`, `Resolve`, `AllowsSummon`,
+  `AllowsTeleport`, and `HandFarMode` are not ported.
 
 ## [0.1.12] - 2026-11-18
 
