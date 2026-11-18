@@ -35,6 +35,7 @@ qr_perf_manual_begin() {
     qr_perf_identity qr_perf_manual_adb || { perf_error='target app has no unique foreground PID; launch it before perf start'; return 3; }
   perf_thermal_start="$(qr_perf_thermal qr_perf_manual_adb)"
   qr_perf_note_device && qr_perf_manual_note &&
+    rm -f "$QR_RUN_DIR/${marker##*/}.cancelled" &&
     qr_perf_manual_save '{owner:$owner, dir:$dir}' || return 3
   perf_prox=1
   qr_perf_manual_adb shell am broadcast -a com.oculus.vrpowermanager.prox_close \
@@ -50,7 +51,7 @@ qr_perf_manual_begin() {
 }
 
 qr_perf_manual_end() {
-  local record elapsed
+  local record elapsed start_dir
   if [ ! -e "$marker" ]; then perf_error='no matching perf start for this device'; return 3; fi
   record="$(jq -ec --arg owner "$manual_owner" 'select(.owner == $owner)' "$marker")" || {
     perf_error='manual capture is not owned by this checkout and log root (or its record is unreadable)'; return 3;
@@ -60,7 +61,10 @@ qr_perf_manual_end() {
   # Once stop owns the reservation, consume the window before querying the
   # device. An interrupted stop or failed restore must never extend that window.
   qr_perf_manual_save '{owner:$owner, dir:$dir}' || return 3
-  if ! jq -e --arg package "$QR_PKG" '
+  # Cancellation can record invalidation in the original run if the shared
+  # reservation cannot be rewritten. Never measure that window on retry.
+  if ! start_dir="$(jq -er '.dir | strings | select(length > 0)' <<< "$record")" ||
+     [ -e "$start_dir/${marker##*/}.cancelled" ] || ! jq -e --arg package "$QR_PKG" '
     .package == $package and (.start | strings | test("^(0|[1-9][0-9]{0,11})\\.[0-9]{9}$")) and
     (.pid | strings | test("^[0-9]+$")) and (.host | strings | test("^[0-9]+$"))
   ' <<< "$record" >/dev/null; then
@@ -147,6 +151,13 @@ qr_perf_manual_recover_locked() {
   QR_RUN_DIR="$(jq -er --arg owner "$owner" 'select(.owner == $owner) | .dir | strings' "$marker")" || return 3
   # Invalidate the window before attempting restoration, even if adb is down.
   local manual_owner="$owner"
-  qr_perf_manual_save '{owner:$owner, dir:$dir}' || return 3
+  if ! qr_perf_manual_save '{owner:$owner, dir:$dir}'; then
+    printf 'WARN: could not invalidate manual capture state for %s in the device reservation\n' "$QUEST_SERIAL"
+    # Keep the reservation for retry if adb or removal fails. Record that the
+    # window is unusable outside the shared lock root before attempting adb.
+    if ! : > "$QR_RUN_DIR/${marker##*/}.cancelled"; then
+      printf 'WARN: could not record cancellation for %s; do not use results from a retry stop\n' "$QUEST_SERIAL"
+    fi
+  fi
   qr_perf_restore
 }
