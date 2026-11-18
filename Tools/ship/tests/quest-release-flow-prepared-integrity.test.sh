@@ -11,6 +11,25 @@ sha="$(git -C "$repo" rev-parse HEAD)"; short="${sha:0:9}"
 qr_flow_prepare
 qr_flow_keystore
 
+# Reuse one prepared run so a refused rerun has an earlier pass to replace.
+run gate
+run_dir="$(qr_wait_run_dir)"
+check 'clean gate records passing results in the prepared run' \
+  '[ "$rc" = 0 ] && [ -s "$tmp/unity.log" ] && [ -s "$run_dir/gate.xml" ] && [ "$(cat "$run_dir/summary/gate_result")" = passed ] && grep -q "^gate: .*3 passed" "$tmp/out" && grep -qx "gate fails:  none" "$tmp/out"'
+QUEST_WAIT_GRACE=0 run wait 0
+check 'wait accepts the clean gate' '[ "$rc" = 0 ]'
+
+reset_logs
+printf 'authored\n' >> "$root/rel-$short-test/Assets/Scripts/C.cs"
+run gate
+check 'dirty gate rerun still fails without starting the editor or retaining passing XML' \
+  '[ "$rc" = 1 ] && out_has "has local changes" && [ ! -e "$tmp/unity.log" ] && [ ! -e "$run_dir/gate.xml" ] && [ "$(cat "$run_dir/summary/gate_result")" = failed ]'
+check 'dirty gate rerun replaces both visible summary fields with the integrity refusal' \
+  'grep -qx "gate:        FAILED: prepared worktree integrity check (see release.log)" "$tmp/out" && grep -qx "gate fails:  prepared worktree refused; Unity was not started" "$tmp/out" && cmp -s "$tmp/out" "$run_dir/summary.txt"'
+QUEST_WAIT_GRACE=0 run wait 0
+check 'wait rejects the dirty gate' '[ "$rc" = 1 ] && out_has "the run (gate, .* exited 1"'
+git -C "$root/rel-$short-test" restore -- Assets/Scripts/C.cs || exit 1
+
 refuse() {
   reset_logs
   run "$step"
