@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Run the Unity editor headless on a Linux VM (no Docker): see README.md.
 #
-# Usage: Tools/ship/linux-unity.sh <command>
 #   setup [--no-creds] [--android]  editor + libraries; --no-creds caches without credentials. --android installs
 #                       the GameCI android image instead (editor + Android SDK/NDK/OpenJDK) and replaces a base
 #                       editor without the Android module
@@ -40,11 +39,11 @@
 #                       files changed since `git merge-base base HEAD` (base: origin/main) or in the EditMode test
 #                       folder referencing a changed <tests.scriptsRoot>/<Area>/<Class>.cs (max TEST_PR_GFX_MAX, 12).
 #                       No matching fixture skips Gfx. Stage timings: build/test-stages.log.
-#                       Every test command: when all failures of a pass are in Tools/ship/known-flakes.txt, they rerun
+#                       Every test command: when all failures of a pass are in the configured known-flakes file, they rerun
 #                       once (<pass>-retry.xml) and a green rerun passes. The noise revert and --keep work as in open.
 #                       When every pass passed but the noise revert failed (another git command kept .git/index.lock
 #                       through scene-noise.sh's retries), test exits 3 (NOISE_REVERT_RC), as does scene once rebuilt:
-#                       rerun only the printed Tools/ship/scene-noise.sh command
+#                       rerun only the printed scene-noise command
 #   stop                kill the editor and Xvfb this script started (pidfile $OUT_DIR/linux-unity.pid)
 #   all                 setup, activate, open, test editmode (keeps the licence, including on failure)
 #
@@ -464,7 +463,7 @@ cmd_scene() {
         k="$(noise_keep_path "$PROJECT" "$2")" || die "scene: --keep $2 is not inside $PROJECT"
         keep+=("$k"); shift 2 ;;
       --area) [ $# -ge 2 ] || die "scene: --area needs an area name"
-        [[ "$2" =~ ^[A-Za-z]+$ ]] || die "scene: --area $2 is not an area name"
+        [[ "$2" =~ ^[A-Za-z0-9_-]+$ ]] || die "scene: --area $2 is not an area name"
         [ -n "$(ship_config_get '.scene.areaStep // empty')" ] || die "scene: missing key scene.areaStep for --area"
         areas+=(-area "$2"); keep+=("$(ship_config_get '.scene.areasDir')/$2.prefab"); shift 2 ;;
       *) die "usage: scene [--keep <path>]... [--area <Area>]..." ;; esac
@@ -770,5 +769,6 @@ case "${1:-}" in
   lab) shift; cmd_lab "$@" ;;
   test) shift; cmd_test "$@" ;;
   all) cmd_all ;;
-  *) sed -n '2,/^set -euo/p' "$0" | grep '^#'; exit 2 ;;
+  *) printf '# Usage: %s <command>\n' "$SHIP_COMMAND"
+     sed -n '2,/^set -euo/p' "$0" | grep '^#'; exit 2 ;;
 esac

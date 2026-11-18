@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Release a configured Unity project to an attached Quest from macOS.
 #
-# Usage: Tools/ship/quest-release.sh <command> [args]
 #   doctor            Java, SDK, configured signing/debug keystore, Unity, disk and headset preflight
 #   all [<ref>] [--rollback <apk>] [--force] [--full] [--notes <file>]
 #                     prepare, gate/build in parallel, verify, install, launch, cleanup
@@ -34,6 +33,7 @@
 # Env overrides: see README.md, Quest release. Bash 3.2 compatible.
 
 QR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+QR_SCRIPT="$QR_DIR/${BASH_SOURCE[0]##*/}"
 QR_SHIP_DIR="$QR_DIR"
 # shellcheck source=Tools/ship/quest-release/common.sh
 . "$QR_DIR/quest-release/common.sh"
@@ -156,7 +156,16 @@ qr_all() {
   return "$rc"
 }
 
-qr_usage() { sed -n '2,/^# Env overrides/p' "$QR_DIR/quest-release.sh" | sed 's/^# \{0,1\}//' >&2; }
+qr_command_path() {
+  local repo="${QR_REPO:-}"
+  [ -n "$repo" ] || repo="$(qr_repo_dir 2>/dev/null)" || repo=""
+  printf '%s\n' "${QR_SCRIPT#"${repo%/}"/}"
+}
+
+qr_usage() {
+  printf 'Usage: %s <command> [args]\n\n' "$(qr_command_path)" >&2
+  sed -n '2,/^# Env overrides/p' "$QR_SCRIPT" | sed 's/^# \{0,1\}//' >&2
+}
 
 # Dispatch one command. Each step runs in a subshell, so qr_die ends that step only; the summary always prints.
 qr_main() {

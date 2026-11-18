@@ -100,4 +100,12 @@ check 'legacy rollback never misattributes its prepared commit' '[ -z "$(qr_last
 now=19990101-000000; record_build ccccccccc "$c"
 printf 'rollback ok (%s)\n' "$c" > "$QR_LOGS/legacy-20200102-000000/summary/install"
 check 'legacy rollback can recover the actual APK commit from its build record' '[ "$(qr_last_installed_sha)" = ccccccccc ]'
+
+# Historical summaries can name a configured file, or use the generic data marker.
+marked_apk="$tmp/C (copy).apk"; cp "$c" "$marked_apk"
+QR_DATA_FILES='session-data_2.json'
+for marker in "$QR_DATA_FILES" data playtest.json; do
+  printf 'rollback ok (%s), %s CHANGED\n' "$marked_apk" "$marker" > "$QR_LOGS/legacy-20200102-000000/summary/install"
+  check "legacy CHANGED marker for $marker preserves APK provenance" '[ "$(qr_last_installed_sha)" = ccccccccc ]'
+done
 echo 'all passed'

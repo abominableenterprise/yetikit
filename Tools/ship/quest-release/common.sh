@@ -78,7 +78,7 @@ qr_load_state() {
 # The release worktree of kind $1 (test|build) for the current commit.
 qr_wt() { printf '%s/rel-%s-%s\n' "$QR_ROOT" "$QR_SHORT" "$1"; }
 
-qr_need_commit() { [ -n "${QR_SHA:-}" ] || qr_die "no prepared release: run 'Tools/ship/quest-release.sh prepare [<ref>]' first"; }
+qr_need_commit() { [ -n "${QR_SHA:-}" ] || qr_die "no prepared release: run '$(qr_command_path) prepare [<ref>]' first"; }
 
 qr_summary() {
   local block
