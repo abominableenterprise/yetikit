@@ -8,6 +8,12 @@ while IFS='|' read -r expression key; do
 done <<'EOF'
 .noise = []|noise
 .noise.atlasPath = 42|noise.atlasPath
+.noise.artRoot = null|noise.artRoot
+.noise.artRoot = ""|noise.artRoot
+.noise.artRoot = "/outside"|noise.artRoot
+.noise.artRoot = "Assets/../outside"|noise.artRoot
+.noise.artRoot = "././"|noise.artRoot
+.noise.artRoot = "Assets/line\nbreak"|noise.artRoot
 .noise.protecedRegex = "^Assets/"|noise.protecedRegex
 .noise.fontAssetPaths = null|noise.fontAssetPaths
 .noise.fontAssetPaths = "Assets/Fonts/Static.asset"|noise.fontAssetPaths

@@ -93,7 +93,7 @@ qr_device_sha() {
 # against the device's own hash. Prints the backup folder.
 qr_backup() {
   local dir f want got
-  dir="$QR_BACKUP_ROOT/Quest-playtest-backup-$(qr_timestamp)${QR_BACKUP_DEVICE_SUFFIX:-}"
+  dir="$QR_BACKUP_ROOT/${QR_BACKUP_PREFIX:-Quest-playtest-backup-}$(qr_timestamp)${QR_BACKUP_DEVICE_SUFFIX:-}"
   [ -e "$dir" ] && dir="$dir-$$"
   # Backups may contain credentials; never expose them through default directory permissions.
   (umask 077; mkdir "$dir") || qr_die "cannot create private backup $dir"
@@ -119,10 +119,25 @@ qr_backup() {
   printf '%s\n' "$dir"
 }
 
-qr_mic_state() {
-  local g
-  g="$(qr_adb_shell dumpsys package "$QR_PKG" | sed -n 's/.*android\.permission\.RECORD_AUDIO: granted=\([a-z]*\).*/\1/p' | head -n1)"
-  printf '%s\n' "${g:-not requested}"
+qr_permission_states() {
+  local dump unavailable=''
+  [ -n "${QR_PERMISSIONS:-}" ] || { printf 'none configured\n'; return; }
+  dump="$(qr_adb shell dumpsys package "$QR_PKG" 2>/dev/null)" || { dump=''; unavailable=1; }
+  PERMISSIONS="$QR_PERMISSIONS" UNAVAILABLE="$unavailable" awk '
+    { sub(/\r$/, "") }
+    $2 ~ /^granted=(true|false),?$/ && $1 ~ /:$/ && !($1 in states) {
+      sub(/,$/, "", $2); states[$1] = $2
+    }
+    END {
+      n = split(ENVIRON["PERMISSIONS"], names, "\n")
+      for (i = 1; i <= n; i++) {
+        key = names[i] ":"
+        state = ENVIRON["UNAVAILABLE"] ? "unavailable" : (key in states ? states[key] : "not requested")
+        printf "%s%s %s", (i == 1 ? "" : "; "), names[i], state
+      }
+      printf "\n"
+    }
+  ' <<< "$dump"
 }
 
 # install -r $1 with idle check, verified backup and before/after hashes of every configured data file.
@@ -135,6 +150,7 @@ qr_install_apk_locked() {
   local apk="$1" force="$2" label="$3" flags="${4:-}" after dir out rc=0 f before_file
   # This attempt is the step's latest result even when the APK check stops it (any earlier success is stale).
   qr_set install "$label stopped before adb install (see release.log)"
+  qr_set permissions "-"
   [ -f "$apk" ] || qr_die "$label: no APK at '$apk'"
   # Explicit APKs and rollbacks must pass the same launcher/signer gate as `all`.
   if [ "$apk" != "${QR_VERIFIED_APK:-}" ] && [ "$apk" != "${QR_VERIFIED_ROLLBACK_APK:-}" ]; then
@@ -174,10 +190,12 @@ qr_install_apk_locked() {
       qr_die "$label: $f changed during install ($before -> $after); backup: $dir"
     fi
   done < "$before_file"
-  qr_set mic "RECORD_AUDIO granted=$(qr_mic_state)"
+  local permissions
+  permissions="$(qr_permission_states)"
+  qr_set permissions "$permissions"
   qr_set data_hash "configured data files unchanged"
   qr_set install "$label ok ($apk)"
-  qr_log "$label: ok; configured data unchanged; $(qr_get mic)"
+  qr_log "$label: ok; configured data unchanged; permissions: $permissions"
 }
 
 qr_install() {

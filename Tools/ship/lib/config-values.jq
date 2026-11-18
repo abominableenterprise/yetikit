@@ -8,6 +8,7 @@
   [".build.releaseMethod", ([.build.releaseMethod] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".knownFlakes // \"\"", ([.knownFlakes // ""] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".labMethod // empty", ([.labMethod // empty] | map(if type == "string" then . else tostring end) | join("\n"))],
+  [".noise.artRoot // \"Assets/Art\"", .noise.artRoot // "Assets/Art"],
   [".noise.atlasPath // \"\"", ([.noise.atlasPath // ""] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".noise.codeRegex // \"^Assets/(Scripts|Editor)/|\\\\.(cs|asmdef)$\"", ([.noise.codeRegex // "^Assets/(Scripts|Editor)/|\\.(cs|asmdef)$"] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".noise.fixedTimestepCount // \"\"", ([.noise.fixedTimestepCount // ""] | map(if type == "string" then . else tostring end) | join("\n"))],

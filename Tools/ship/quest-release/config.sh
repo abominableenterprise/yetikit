@@ -59,6 +59,8 @@ qr_config() {
   QR_SIGNING_KEY_PASS_ENV="$(qr_config_get '.quest.signing.keyPassEnv // empty')"
   QUEST_SERIAL="${QUEST_SERIAL:-}"
   QR_BACKUP_ROOT="${QUEST_BACKUP_ROOT:-$HOME}"
+  QR_BACKUP_PREFIX="$(qr_config_get '.quest.backupPrefix // "Quest-playtest-backup-"')"
+  QR_PERMISSIONS="$(qr_config_get '.quest.launcherChecks.permissions[]?')"
   QR_LAUNCH_WAIT="${QR_LAUNCH_WAIT:-${QUEST_LAUNCH_WAIT:-60}}"
   QR_ADB_WAIT="${QR_ADB_WAIT:-${QUEST_ADB_WAIT:-120}}"
   QR_DEVICE_CHECK_WAIT="${QR_DEVICE_CHECK_WAIT:-10}"

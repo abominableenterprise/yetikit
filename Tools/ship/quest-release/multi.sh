@@ -32,6 +32,10 @@ qr_multi_record() {
   qr_set "outcome-$step" "$outcome: $detail"
 }
 
+qr_multi_install_detail() {
+  printf '%s; idle: %s; permissions: %s' "$(qr_get install)" "$(qr_get idle)" "$(qr_get permissions)"
+}
+
 # This entire callback owns exactly one device lock, including crash rollback.
 qr_multi_device_locked() {
   local cmd="$1" apk="$2" force="$3" rollback="$4" rc=0 next=0
@@ -39,7 +43,7 @@ qr_multi_device_locked() {
     local label=install flags=""
     [ "$cmd" != rollback ] || { label=rollback; flags=-d; }
     ( qr_install_apk_locked "$apk" "$force" "$label" "$flags" ) || rc=3
-    qr_multi_record "$label" "$rc" "$(qr_get install); idle: $(qr_get idle)"
+    qr_multi_record "$label" "$rc" "$(qr_multi_install_detail)"
     if [ "$rc" != 0 ]; then
       [ "$cmd" != all ] || qr_multi_record launch 3 'skipped: install failed'
       return 3
@@ -55,7 +59,7 @@ qr_multi_device_locked() {
     if [ "$cmd" = all ] && [ "$rc" = 1 ] && [ -n "$rollback" ]; then
       qr_log "launch[$QUEST_SERIAL] shows a crash: rolling back"
       ( qr_install_apk_locked "$rollback" "$force" rollback -d ) || next=3
-      qr_multi_record rollback "$next" "$(qr_get install); idle: $(qr_get idle)"
+      qr_multi_record rollback "$next" "$(qr_multi_install_detail)"
     fi
   fi
   return "$rc"
@@ -88,7 +92,7 @@ qr_multi() {
   qr_set overall 'INFRA: device work did not complete'
   # Root device fields belong to the old single-device attempt, not this list.
   # Invalidate them before verification can stop us without any device rows.
-  for step in idle backup install data_hash mic launch; do
+  for step in idle backup install data_hash permissions launch; do
     qr_set "$step" "not run at root (list $cmd; see per-device results)"
   done
   if [ "$cmd" = install ] || [ "$cmd" = rollback ]; then
