@@ -5,7 +5,7 @@ under the [MIT license](LICENSE). Proven features will be extracted incrementall
 from a consumer game; gameplay, characters and scene policy stay in each game.
 Version 0.1.12 includes [core](Packages/com.abominable.yetikit.core/README.md),
 [quality](Packages/com.abominable.yetikit.quality/README.md), shared tooling and a
-minimal [Unity test Host](Host/README.md). Other modules remain planned.
+minimal [Unity test Host](Host/README.md). See the table for unreleased modules.
 
 **Day 0:** install the [YetiKit skills](skills/README.md); copy [templates/game](templates/game/).
 
@@ -15,7 +15,7 @@ minimal [Unity test Host](Host/README.md). Other modules remain planned.
 |---|---|---|
 | core | Build identity, release notes, performance counters, small utilities; no XR | available in 0.1.12 |
 | hands | Tracked hands/controllers, shapes, panels, teleport and snap turn | planned (not in 0.1.12) |
-| interaction | Grab, carry, hand-off, release and throw | planned (not in 0.1.12) |
+| [interaction](Packages/com.abominable.yetikit.interaction/README.md) | Carry, hand-off, release and throw rules | unreleased |
 | playtest | Dev-only capture, durable outbox, optional photo/voice and upload | planned (not in 0.1.12) |
 | lab | Dev-only experiments, live tuning and start panel | planned (not in 0.1.12) |
 | quality | Editor/test validators and synthetic fixtures | available in 0.1.12 |
@@ -48,8 +48,7 @@ A game's manifest must pin **every kit package in its dependency closure at the
 same tag**, not just the top-level package: sibling Git packages do not resolve
 from semver dependencies alone. Merge the entries above into an existing manifest;
 retain its other dependencies. Only core and quality are released packages in
-0.1.12. Package version `0.0.1` remains a skeleton marker for planned modules,
-not an implemented API or release promise.
+0.1.12. Package version `0.0.1` marks unreleased modules, not a release promise.
 
 Ship is not UPM: vendor the tagged `Tools/ship/` byte-for-byte into
 `Tools/yetikit/`, with tag and digest in `VERSION`. Game-specific configuration

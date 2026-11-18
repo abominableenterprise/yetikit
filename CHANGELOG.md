@@ -13,6 +13,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
   gesture detectors, and XR input adapters in the hands package.
 - Add an art-free `PlayerHand`, optional `IHandVisual`, and palm-following
   `HandGrabInteractor`.
+- Add the interaction package with throw and release math, configurable aim and
+  respawn rules, and grip hand-off and carry helpers.
 
 ### Fixed
 - None.
