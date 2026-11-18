@@ -403,7 +403,12 @@ qr_launch_locked() {
   fps="$(qr_launch_fps "$cat")"
   errs="$(grep -cE "$QR_RE_UNITY_ERR" "$cat")"
   fatal="$(grep -cE "$QR_RE_FATAL" "$cat")"
-  qr_launch_crashes "$cat" "$start_pid $pid" > "$QR_RUN_DIR/launch-game-crashes.txt"
+  # Rotation can remove the only record of an intermediate crash. Attribute
+  # each snapshot on its own, and keep overlapping records only once.
+  {
+    qr_launch_crashes "$early" "$start_pid $pid"
+    qr_launch_crashes "$cat" "$start_pid $pid"
+  } | awk '!seen[$0]++' > "$QR_RUN_DIR/launch-game-crashes.txt"
   crashes="$(wc -l < "$QR_RUN_DIR/launch-game-crashes.txt" | tr -d ' ')"
   {
     echo "fps (configured tag): ${fps:-none}"

@@ -35,15 +35,21 @@ qr_nunit_xml() {
   ' <<< "$xml"
 }
 
+# Run the shared failure reader on canonical XML, never the editor's raw attributes.
+qr_nunit_failed_names() {
+  local parsed rc=0
+  parsed="$(mktemp)" || return 1
+  { printf '%s\n' "$1" > "$parsed" && failed_tests "$parsed"; } || rc=$?
+  rm -f "$parsed"
+  return "$rc"
+}
+
 # NUnit result XML ($1): "total passed failed skipped", then shared failed_tests failures with their messages.
 # A failed suite without site or failed children is a failure too, even when the root says failed=0.
 qr_nunit_report() {
-  local xml names parsed
+  local xml names
   xml="$(qr_nunit_xml "$1")" || return 1
-  parsed="$(mktemp)" || return 1
-  printf '%s\n' "$xml" > "$parsed"
-  names="$(failed_tests "$parsed")"
-  rm -f "$parsed"
+  names="$(qr_nunit_failed_names "$xml")" || return 1
   perl -0777 -e '
     sub attr { my ($a, $k) = @_; return $a =~ /(?:^|\s)$k="([^"]*)"/ ? $1 : "" }
     sub unxml { my $s = shift; $s =~ s/&quot;/"/g; $s =~ s/&apos;/\x27/g; $s =~ s/&lt;/</g; $s =~ s/&gt;/>/g; $s =~ s/&amp;/&/g; $s }
