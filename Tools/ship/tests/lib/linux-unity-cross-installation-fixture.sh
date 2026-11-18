@@ -74,8 +74,7 @@ for scenario in "$@"; do
         echo "$child" > "$2"
         wait "$child"
       ' _ "$script" "$tmp/owned.pid" >"$tmp/runner.log" 2>&1 & runner=$!; pids+=("$runner")
-      ship_wait_until test -s "$tmp/owned.pid"
-      owned="$(cat "$tmp/owned.pid")"; pids+=("$owned")
+      owned="$(ship_wait_for_pid "$tmp/owned.pid")"; pids+=("$owned")
       export SHIP_FIXTURE_PIDS="${pids[*]}"
       ship_wait_until exe_ready "$owned" "$UNITY_BIN"
     fi

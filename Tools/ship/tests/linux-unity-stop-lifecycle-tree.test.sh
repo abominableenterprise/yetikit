@@ -10,7 +10,7 @@ rm -f "$tmp/runs"; rm -rf "$proj/Library"; mkdir -p "$proj/Packages" "$proj/Proj
 echo '{}' > "$proj/Packages/manifest.json"; echo '{}' > "$proj/Packages/packages-lock.json"
 echo 'm_EditorVersion: 6000.6.6f1' > "$proj/ProjectSettings/ProjectVersion.txt"
 TASK_CACHE=slow-cache bash "$script" open >/dev/null 2>&1 & runner=$!
-wait_for "$tmp/cache.pid"; cache="$(cat "$tmp/cache.pid")"
+cache="$(ship_wait_for_pid "$tmp/cache.pid")"
 check "the pidfile exists during the cache restore, before any editor" \
   '[ "$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")" = "$runner" ] && [ ! -e "$tmp/runs" ]'
 bash "$script" stop 2>"$tmp/err"; wait "$runner" 2>/dev/null || true
@@ -19,7 +19,7 @@ check "stop during the cache restore kills the script and the restore; no editor
 # --- #180 review: an overlapping command, a tree that keeps forking, a child that ignores TERM -------------------------
 rm -f "$tmp/unity.pid"   # left by earlier cases: wait for this run's editor
 FAKE_SLEEP=300 bash "$script" open >/dev/null 2>&1 & runner=$!
-wait_for "$tmp/unity.pid"
+ship_wait_for_pid "$tmp/unity.pid" >/dev/null
 rc=0; bash "$script" open --bad 2>"$tmp/err" || rc=$?
 check "a second command while a run is live fails and leaves the live run's pidfile" \
   '[ "$rc" != 0 ] && { grep -qF "another run (pid $runner," "$tmp/err" || grep -qF "another Unity run owns $SHM_DIR;" "$tmp/err"; } && alive "$runner" && [ "$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")" = "$runner" ]'
@@ -33,11 +33,13 @@ for i in \$(seq 500); do sleep 300 & echo \$! >> "$tmp/forked"; sleep 0.02; done
 EOF
 chmod +x "$tmp/bin/fork-cache"; rm -rf "$proj/Library" "$tmp/forked" "$tmp/stubborn.pid"
 TASK_CACHE=fork-cache bash "$script" open >/dev/null 2>&1 & runner=$!
-wait_for "$tmp/stubborn.pid"; wait_for "$tmp/forked"
+stubborn="$(ship_wait_for_pid "$tmp/stubborn.pid")"; ship_wait_until ship_read_pid "$tmp/forked" >/dev/null
 bash "$script" stop 2>"$tmp/err"; wait "$runner" 2>/dev/null || true
-survivors=""; for p in $(cat "$tmp/forked") "$(cat "$tmp/stubborn.pid")"; do alive "$p" && survivors="$survivors $p"; done
+survivors=""
+while read -r p; do alive "$p" && survivors="$survivors $p"; done < "$tmp/forked"
+if alive "$stubborn"; then survivors="$survivors $stubborn"; fi
 [ -z "$survivors" ] || kill -9 $survivors 2>/dev/null || true
 check "stop freezes the tree first: nothing the run forks while stop works survives" '! alive "$runner" && [ -z "$survivors" ]'
-check "a child that ignores TERM is still killed (KILL after the start-time check)" '! alive "$(cat "$tmp/stubborn.pid")"'
+check "a child that ignores TERM is still killed (KILL after the start-time check)" '! alive "$stubborn"'
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

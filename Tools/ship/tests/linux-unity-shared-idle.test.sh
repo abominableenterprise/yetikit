@@ -6,7 +6,9 @@ tmp="$(mktemp -d)"; children=()
 cleanup() {
   for p in "${children[@]}"; do kill "$p" 2>/dev/null || true; wait "$p" 2>/dev/null || true; done
   if [ -f "$tmp/launch-pids" ]; then
-    while read -r p; do kill "$p" 2>/dev/null || true; done < "$tmp/launch-pids"
+    while read -r p; do
+      [[ "$p" =~ ^[1-9][0-9]*$ ]] && kill "$p" 2>/dev/null || true
+    done < "$tmp/launch-pids"
   fi
   rm -rf "$tmp"
 }
@@ -30,7 +32,11 @@ UNITY_USERNAME=stub-user; UNITY_PASSWORD=stub-password
 THEROBOTS_HUB_URL=hub-origin; THEROBOTS_TASK_ID=owner-a; THEROBOTS_TASK_TOKEN=stub-token-a
 printf '%s %s\n' "$THEROBOTS_TASK_ID" "$$" > "$SEAT_STATE"
 idle_begin; idle_finish
-read -r launcher _ < "$IDLE_LAUNCH"; children+=("$launcher")
+# idle_finish has joined the writer before returning; this record is synchronous.
+launch_record="$(ship_read_line "$IDLE_LAUNCH")"
+read -r launcher _ <<< "$launch_record"
+[[ "$launcher" =~ ^[1-9][0-9]*$ ]]
+children+=("$launcher")
 context_a="$(cat "$IDLE_CONTEXT")"
 # A genuinely separate shell/OUT_DIR, using a canonical-path alias of the same ULF.
 cat > "$tmp/command" <<'EOF'
@@ -48,8 +54,9 @@ ULF="$tmp/licence-alias/real.ulf" OUT_DIR="$tmp/b/build" \
   THEROBOTS_TASK_ID=owner-b THEROBOTS_TASK_TOKEN=stub-token-b \
   bash "$tmp/command" "$script" begin "$tmp/b-paths" & b=$!; children+=("$b")
 # Separate shells validate/load config before publishing readiness.
-for _ in {1..2000}; do [ -s "$tmp/b-paths" ] && break; /bin/sleep 0.01; done
-read -r b_context b_active < "$tmp/b-paths"
+b_paths_ready() { b_paths="$(ship_read_line "$tmp/b-paths")"; }
+ship_wait_until b_paths_ready
+read -r b_context b_active <<< "$b_paths"
 check 'canonical ULF aliases and distinct checkouts share activity and context' \
   '[ "$b_active" = "$IDLE_ACTIVE" ] && [ "$b_context" = "$IDLE_CONTEXT" ]'
 # A finishes its wrapper; only B is active. First poll must not return the global licence.
@@ -59,7 +66,12 @@ rm -f "$IDLE_ACTIVE/$$:$(proc_start "$$")"
   tick=0
   sleep() {
     tick=$((tick + 1)); [ "$tick" -le 3 ] || exit 90
-    if [ "$tick" = 2 ]; then kill "$b"; wait "$b" 2>/dev/null || true; fi
+    if [ "$tick" = 2 ]; then
+      kill "$b"
+      # This subshell cannot wait on the parent's child. The idle scan still
+      # sees B's identity until the parent reaps it, not just until TERM is sent.
+      ship_wait_until test ! -e "/proc/$b/stat"
+    fi
   }
   cmd_return() { echo "$tick" > "$tmp/returned-at"; rm -f "$ULF"; }
   idle_watch

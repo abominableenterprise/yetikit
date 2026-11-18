@@ -15,16 +15,16 @@ rm -f "$tmp/return.pid" "$tmp/return-child.pid"
 lu activate
 UNITY_IDLE_RETURN_MINUTES=0 UNITY_RETURN_TIMEOUT=1 FAKE_RETURN_HANG="$hang" \
   timeout -k 1 30 bash "$script" __idle-return > "$tmp/hung-watch-log" 2>&1 & hung_watcher=$!
-for _ in {1..1000}; do [ -s "$tmp/return-child.pid" ] && break; /bin/sleep 0.02; done
-check "idle return ($hang): hung client started while holding activity lock" '[ -s "$tmp/return-child.pid" ]'
+child="$(ship_wait_for_pid "$tmp/return-child.pid")"
+client="$(ship_read_pid "$tmp/return.pid")"  # published before the child is forked
 rc=0; timeout -k 1 20 bash "$script" stop > "$tmp/stop-log" 2>&1 || rc=$?
 wait "$hung_watcher" 2>/dev/null || true
 check "idle return ($hang): timeout unblocks stop without deleting licence or releasing seat" \
   '[ "$rc" = 0 ] && grep -q "idle return failed" "$tmp/hung-watch-log" && [ -f "$ULF" ] && [ -f "$OUT_DIR/unity-seat.held" ]'
 check "idle return ($hang): client and TERM-resistant child are killed" \
-  '! alive "$(cat "$tmp/return.pid")" && ! alive "$(cat "$tmp/return-child.pid")"'
+  '! alive "$client" && ! alive "$child"'
 # Clean up even on the failing-first run, where the outer deadline killed the watcher, not the client.
-for p in "$tmp/return.pid" "$tmp/return-child.pid"; do kill -KILL "$(cat "$p")" 2>/dev/null || true; done
+kill -KILL "$client" "$child" 2>/dev/null || true
 rc=0; timeout -k 1 20 bash "$script" return > "$tmp/retry-log" 2>&1 || rc=$?
 check "idle return ($hang): explicit retry succeeds after timeout and releases seat" \
   '[ "$rc" = 0 ] && [ ! -f "$ULF" ] && [ ! -f "$OUT_DIR/unity-seat.held" ]'

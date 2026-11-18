@@ -16,14 +16,15 @@ EOF
 chmod +x "$tmp/unity2/Editor/Unity" "$tmp/bin/late-child"; rm -f "$tmp/late.pid" "$tmp/unity2.pid"
 ( UNITY_ROOT="$tmp/unity2" bash "$script" open 2>&1 | { echo $BASHPID > "$tmp/tee.pid"; exec tee "$tmp/tee.log" >/dev/null; } ) &
 pipe=$!
-wait_for "$tmp/unity2.pid"; wait_for "$tmp/tee.pid"; runner="$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")"
+editor="$(ship_wait_for_pid "$tmp/unity2.pid")"; tee_pid="$(ship_wait_for_pid "$tmp/tee.pid")"
+runner="$(cut -d" " -f1 "$OUT_DIR/linux-unity.pid")"
 bash "$script" stop 2>"$tmp/err"; wait "$pipe" 2>/dev/null || true
-late="$(cat "$tmp/late.pid" 2>/dev/null || true)"
+late="$(ship_read_pid "$tmp/late.pid" || true)"
 check "a child the editor forks on TERM (in timeout's process group) is killed too" \
-  '[ -n "$late" ] && ! alive "$late" && ! alive "$(cat "$tmp/unity2.pid")" && ! alive "$runner"'
+  '[ -n "$late" ] && ! alive "$late" && ! alive "$editor" && ! alive "$runner"'
 [ -z "$late" ] || ! alive "$late" || kill -9 "$late"
 check "a pipeline peer (| tee) is not killed: it ends on EOF with the log" \
-  'grep -q "\[linux-unity\]" "$tmp/tee.log" && ! grep -q "stop: killing $(cat "$tmp/tee.pid")" "$tmp/err"'
+  'grep -q "\[linux-unity\]" "$tmp/tee.log" && ! grep -q "stop: killing $tee_pid" "$tmp/err"'
 
 # #180 review (cn-1d5388e628r): marked() lists pid:start, and stop re-checks the start time and this run's marker right
 # before each KILL, so a pid reused between the listing and the KILL survives. marked is stubbed (the script sourced)

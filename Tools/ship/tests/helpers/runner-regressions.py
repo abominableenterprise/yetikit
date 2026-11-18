@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+import re
 import shutil
 import shlex
 import signal
@@ -34,6 +35,33 @@ def until(predicate, runner=None, seconds=15):
             assert runner.poll() is None, 'runner exited before fixture readiness'
         assert time.monotonic() < deadline, 'fixture deadline exceeded'
         time.sleep(.02)
+
+
+def fixture_pid(path):
+    try:
+        record = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    # Require the line terminator: a prefix of the PID may also be numeric.
+    if re.fullmatch(rb'[1-9][0-9]*\n', record):
+        return int(record)
+
+
+def delayed_pid_write(case):
+    path = case.state / 'delayed.pid'
+    assert fixture_pid(path) is None
+    # Hold the producer open across reads so the empty/partial windows are
+    # guaranteed even on a loaded worker. A digit alone is not the PID.
+    with path.open('w', buffering=1) as writer:
+        assert fixture_pid(path) is None, 'empty PID file reported ready'
+        writer.write('4')
+        writer.flush()
+        assert fixture_pid(path) is None, 'partial PID file reported ready'
+        writer.write('242\n')
+        assert fixture_pid(path) == 4242
+    for invalid in ('not-a-pid\n', '0\n', '-4242\n', '4242\n5\n'):
+        path.write_text(invalid)
+        assert fixture_pid(path) is None, invalid
 
 
 def live(pid):
@@ -210,8 +238,14 @@ timeout -k 60 300 bash -c '
 wait
 ''')
     runner = case.start(jobs=1)
-    until(lambda: (case.state / 'stubborn.pid').exists(), runner)
-    pid = int((case.state / 'stubborn.pid').read_text())
+    pid = None
+
+    def stubborn_ready():
+        nonlocal pid
+        pid = fixture_pid(case.state / 'stubborn.pid')
+        return pid is not None
+
+    until(stubborn_ready, runner)
     assert live(pid)
     started = time.monotonic()
     if sig == signal.SIGINT:
@@ -241,7 +275,9 @@ wait
     assert 'timed out after 1 s' in output, output
     assert (case.state / 'next').exists(), 'timeout stopped remaining files'
     assert (case.state / 'cleaned').exists(), 'timeout skipped EXIT cleanup'
-    assert not live(int((case.state / 'stubborn.pid').read_text()))
+    pid = fixture_pid(case.state / 'stubborn.pid')
+    assert pid is not None, 'missing complete stubborn PID after timeout'
+    assert not live(pid)
 
 
 with tempfile.TemporaryDirectory(prefix='runner-regressions-') as directory:
@@ -254,4 +290,5 @@ with tempfile.TemporaryDirectory(prefix='runner-regressions-') as directory:
             check(kind, label, callback)
         for sig in (signal.SIGTERM, signal.SIGINT):
             check(kind, f'cancel-{sig.name}', lambda case, sig=sig: cancellation(case, sig))
+    check('shared', 'delayed-pid-write', delayed_pid_write)
     check('shared', 'bounded-file-timeout', timeout)
