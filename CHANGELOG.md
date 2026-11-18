@@ -20,6 +20,92 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ### Adapter changes
 - None.
 
+## [0.1.12] - 2026-11-18
+
+### Added
+- The Quest gate explains which working-tree changes block it, and permission
+  reports identify the foreground Android user
+  ([#173](https://github.com/abominableenterprise/yetikit/pull/173),
+  [#160](https://github.com/abominableenterprise/yetikit/pull/160)).
+
+### Fixed
+- Release worktree cleanup preserves concurrent checkout and ref changes;
+  gate and build verify that prepared worktrees still match the intended commit
+  ([#111](https://github.com/abominableenterprise/yetikit/pull/111),
+  [#143](https://github.com/abominableenterprise/yetikit/pull/143),
+  [#163](https://github.com/abominableenterprise/yetikit/pull/163)).
+- Linux Unity cleanup protects shared files when live editors or helpers cannot
+  be ruled out, handles non-root runners, and returns seats before locked Git cleanup
+  ([#119](https://github.com/abominableenterprise/yetikit/pull/119),
+  [#122](https://github.com/abominableenterprise/yetikit/pull/122),
+  [#127](https://github.com/abominableenterprise/yetikit/pull/127),
+  [#150](https://github.com/abominableenterprise/yetikit/pull/150),
+  [#167](https://github.com/abominableenterprise/yetikit/pull/167),
+  [#170](https://github.com/abominableenterprise/yetikit/pull/170)).
+- Interrupted Quest releases preserve recovery state and retain locks when
+  worker exit is uncertain; performance cancellation still attempts proximity restoration
+  ([#152](https://github.com/abominableenterprise/yetikit/pull/152),
+  [#156](https://github.com/abominableenterprise/yetikit/pull/156),
+  [#159](https://github.com/abominableenterprise/yetikit/pull/159)).
+- Quest installs and crash rollbacks use the same per-device transaction;
+  launch verdicts stay conservative when process checks or logs are incomplete
+  ([#135](https://github.com/abominableenterprise/yetikit/pull/135),
+  [#148](https://github.com/abominableenterprise/yetikit/pull/148)).
+- Quest release reports distinguish per-device outcomes, cancellations, and
+  install provenance failures. Follow-up commands and `wait` use the right
+  release outcome even when runs reuse a report directory
+  ([#125](https://github.com/abominableenterprise/yetikit/pull/125),
+  [#129](https://github.com/abominableenterprise/yetikit/pull/129),
+  [#145](https://github.com/abominableenterprise/yetikit/pull/145),
+  [#168](https://github.com/abominableenterprise/yetikit/pull/168),
+  [#174](https://github.com/abominableenterprise/yetikit/pull/174)).
+- Quest performance reports retain combined timing when one component mean is
+  missing and remove stale single-device summaries before list captures
+  ([#113](https://github.com/abominableenterprise/yetikit/pull/113),
+  [#154](https://github.com/abominableenterprise/yetikit/pull/154)).
+- Android APK checks cover permission declaration variants and resolve exported
+  launcher booleans. Quest log counts match literal tags
+  ([#139](https://github.com/abominableenterprise/yetikit/pull/139),
+  [#162](https://github.com/abominableenterprise/yetikit/pull/162),
+  [#171](https://github.com/abominableenterprise/yetikit/pull/171)).
+- Ship selects tests from literal paths, includes changed headless fixtures,
+  and tightens test selection and retry evidence
+  ([#121](https://github.com/abominableenterprise/yetikit/pull/121),
+  [#123](https://github.com/abominableenterprise/yetikit/pull/123),
+  [#124](https://github.com/abominableenterprise/yetikit/pull/124),
+  [#157](https://github.com/abominableenterprise/yetikit/pull/157)).
+- Offline fixtures isolate caller state, wait for complete PID records, and
+  preserve failure and leak evidence when process inspection is incomplete;
+  rollback coverage includes process disappearance without crash logs
+  ([#114](https://github.com/abominableenterprise/yetikit/pull/114),
+  [#115](https://github.com/abominableenterprise/yetikit/pull/115),
+  [#136](https://github.com/abominableenterprise/yetikit/pull/136),
+  [#138](https://github.com/abominableenterprise/yetikit/pull/138),
+  [#141](https://github.com/abominableenterprise/yetikit/pull/141),
+  [#164](https://github.com/abominableenterprise/yetikit/pull/164)).
+- Vendoring fetches the exact tag, copies raw Git blobs, and restores Ship if
+  installation fails before the package manifest is replaced
+  ([#131](https://github.com/abominableenterprise/yetikit/pull/131)).
+
+### Behaviour changes
+- Quest doctor stays read-only, and the release gate requires evidence that at
+  least one test passed before deployment
+  ([#133](https://github.com/abominableenterprise/yetikit/pull/133)).
+- PR verification avoids duplicate broad Ship test runs
+  ([#134](https://github.com/abominableenterprise/yetikit/pull/134)).
+
+### Adapter changes
+- Use dedicated uppercase environment variable names in Quest signing config.
+  Rename mappings that collide with shell or runner settings or overlap with
+  release-note or previous-commit variables
+  ([#117](https://github.com/abominableenterprise/yetikit/pull/117),
+  [#165](https://github.com/abominableenterprise/yetikit/pull/165)).
+- If an existing shared Unity cleanup lock is private, grant runner accounts
+  read access in place. Move an old prepared Library without a completion
+  marker aside and rerun `prepare`. Use unambiguous `quest.launchLogTags` and
+  install `flock` for vendoring; see the updated [Ship](Tools/ship/README.md)
+  and [vendor](Tools/vendor/README.md) guides.
+
 ## [0.1.11] - 2026-11-18
 
 ### Added
