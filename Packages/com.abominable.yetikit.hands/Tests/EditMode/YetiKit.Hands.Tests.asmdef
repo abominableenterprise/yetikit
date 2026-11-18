@@ -3,6 +3,7 @@
   "rootNamespace": "YetiKit.Hands.Tests",
   "references": [
     "YetiKit.Hands",
+    "Unity.XR.Hands",
     "Unity.XR.Interaction.Toolkit",
     "Unity.InputSystem",
     "UnityEngine.TestRunner",
