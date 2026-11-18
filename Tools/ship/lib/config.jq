@@ -9,6 +9,9 @@ def apk_asset:
   if type == "object" then keys == ["glob"] and (.glob | relpath)
   else relpath end;
 def strings: if type == "array" then all(.[]; nonempty) else false end;
+# Logcat's text formats pad tag fields and do not escape tag delimiters.
+def launch_log_tags:
+  if strings then all(.[]; test(" $|: |\\([ ]*[0-9]+\\):") | not) else false end;
 def methods: if strings then length > 0 else false end;
 def invalid($key): "missing or invalid key: \($key)";
 def noise_keys: ["artRoot", "atlasPath", "codeRegex", "fixedTimestepCount", "fontAssetPaths",
@@ -74,7 +77,8 @@ elif has("quest") and (.quest | has("signing")) and (.quest.signing.keyAliasEnv 
 elif has("quest") and (.quest.signing // {} | has("keyPassEnv")) and (.quest.signing.keyPassEnv | signing_envname | not) then invalid_signing_env("keyPassEnv")
 elif has("quest") and (.quest | has("dataFiles")) and (.quest.dataFiles | basenames | not) then invalid("quest.dataFiles")
 elif has("quest") and (.quest | has("launchArgs")) and (.quest.launchArgs | strings | not) then invalid("quest.launchArgs")
-elif has("quest") and (.quest | has("launchLogTags")) and (.quest.launchLogTags | strings | not) then invalid("quest.launchLogTags")
+elif has("quest") and (.quest | has("launchLogTags")) and (.quest.launchLogTags | launch_log_tags | not) then
+  invalid("quest.launchLogTags (use nonempty tags without trailing spaces, ': ', or '(digits):' with optional spaces before the digits)")
 elif has("quest") and (.quest | has("launcherChecks")) and (.quest.launcherChecks | type) != "object" then invalid("quest.launcherChecks")
 elif has("quest") and (.quest.launcherChecks // {} | has("package")) and (.quest.launcherChecks.package != .quest.package) then invalid("quest.launcherChecks.package (must match quest.package)")
 elif has("quest") and (.quest.launcherChecks // {} | has("permissions")) and (.quest.launcherChecks.permissions | strings | not) then invalid("quest.launcherChecks.permissions")

@@ -40,7 +40,7 @@ check "both shell broadcasts are counted without converting them into a crash" \
 # This case mutates the config, so restore the real loader instead of the fixture's immutable cache.
 unset -f jq qr_config_get
 . "$QR_DIR/quest-release/config.sh"
-jq '.quest.launchLogTags = ["Synthetic.Tag", "Synthetic\\Tag", "Synthetic:Part", "NotSeen"]' "$YETIKIT_CONFIG" > "$tmp/tag-config.json"
+jq '.quest.launchLogTags = ["Synthetic.Tag", "Synthetic\\Tag", "Synthetic:Part", "NotSeen", " Worker", "Worker"]' "$YETIKIT_CONFIG" > "$tmp/tag-config.json"
 export YETIKIT_CONFIG="$tmp/tag-config.json"
 reset_logs; FAKE_LOGCAT="$FAKE_LOGCAT
 10-31 12:00:33.000  4242  4260 I Synthetic.Tag : synthetic line
@@ -49,9 +49,12 @@ W/Synthetic.Tag( 4242): another line
 10-31 12:00:35.000  4242  4260 I Synthetic.TagExtra : prefixed tag
 10-31 12:00:36.000  4242  4260 I Synthetic\Tag : backslash is literal
 10-31 12:00:37.000  4242  4260 I Unity : Synthetic.Tag: not its tag
-10-31 12:00:38.000  4242  4260 I Synthetic:Part: a colon within the tag" run launch
+10-31 12:00:38.000  4242  4260 I Synthetic:Part: a colon within the tag
+10-31 12:00:39.000  4242  4260 I  Worker : threadtime leading space with padding
+10-31 12:00:40.000  4242  4260 I Worker  : threadtime without a leading space
+W/ Worker ( 4242): brief leading space with padding" run launch
 check "launch prints exact tag counts (including zero) without additional adb calls" \
-  '[ "$rc" = 0 ] && [ "$(grep -c "logcat -d" "$tmp/adb.log")" = 1 ] && test "$(grep -F "logcat tag [" "$tmp/out")" = "$(printf "%s\n" "logcat tag [Synthetic.Tag]: 2" "logcat tag [Synthetic\Tag]: 1" "logcat tag [Synthetic:Part]: 1" "logcat tag [NotSeen]: 0")"'
+  '[ "$rc" = 0 ] && [ "$(grep -c "logcat -d" "$tmp/adb.log")" = 1 ] && test "$(grep -F "logcat tag [" "$tmp/out")" = "$(printf "%s\n" "logcat tag [Synthetic.Tag]: 2" "logcat tag [Synthetic\Tag]: 1" "logcat tag [Synthetic:Part]: 1" "logcat tag [NotSeen]: 0" "logcat tag [ Worker]: 2" "logcat tag [Worker]: 1")"'
 check "launch saves tag counts in the launch report" \
   'grep -Fq "logcat tag [Synthetic.Tag]: 2" "$root"/release-logs/"$short"-*/launch-report.txt'
 
