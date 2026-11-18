@@ -11,3 +11,8 @@ reduce (["build", "apkPath"], ["build", "releaseApkPath"], ["build", "profile"],
        else setpath($p; getpath($p) | canonical) end)
 | if .scene.keepPaths? then .scene.keepPaths |= map(canonical) else . end
 | if .noise.fontAssetPaths? then .noise.fontAssetPaths |= map(canonical) else . end
+# Preserve every dependency when multiple spellings refer to the same builder.
+| if .tests.builderFixtures? then .tests.builderFixtures |= (
+    reduce to_entries[] as {$key, $value} ({}; .[$key | canonical] += $value)
+    | map_values(unique)
+  ) else . end

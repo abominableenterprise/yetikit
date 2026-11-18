@@ -21,7 +21,8 @@ printf 'class RuntimeType {}\n' > "$proj/$scripts/Area/RuntimeType.cs"
 printf 'class Mapped {}\n' > "$proj/$builder"
 jq --arg root "$root" --arg edit "$edit" --arg scripts "$scripts" --arg editor "$editor" --arg builder "$builder" '
   .tests = {root: $root, editModeRoot: $edit, scriptsRoot: $scripts, editorRoot: $editor,
-    builderFixtures: {($builder): ["Fixture.Tests.BuilderTests"]}}' "$proj/yetikit.json" > "$tmp/config.json"
+    builderFixtures: {("./" + $builder): ["Fixture.Tests.BuilderTests"],
+      (($builder | sub("/"; "//"))): ["Fixture.Tests.ChangedTests"]}}' "$proj/yetikit.json" > "$tmp/config.json"
 mv "$tmp/config.json" "$proj/yetikit.json"
 commit literal-roots
 
@@ -51,15 +52,15 @@ rm "$proj/$scripts/Area/NewRuntimeType.cs"
 
 echo '// edited' >> "$proj/$builder"
 pick
-check 'tracked builder resolves its exact configured key without a source reference' \
-  '[ "$(< "$tmp/picked")" = Fixture.Tests.BuilderTests ] && grep -Fq "why: configured builder dependency" "$tmp/pick-err"'
+check 'tracked builder resolves and merges equivalent configured keys without a source reference' \
+  '[ "$(< "$tmp/picked")" = $'"'"'Fixture.Tests.BuilderTests\nFixture.Tests.ChangedTests'"'"' ] && grep -Fq "why: configured builder dependency" "$tmp/pick-err"'
 # Recreate the same builder path untracked against a base that does not contain it.
 git -C "$proj" rm -qf -- "$builder"
 commit remove-builder
 mkdir -p "$proj/$builder_dir"
 printf 'class Mapped {}\n' > "$proj/$builder"
 pick
-check 'untracked builder resolves its exact configured key without a source reference' \
-  '[ "$(< "$tmp/picked")" = Fixture.Tests.BuilderTests ] && grep -Fq "why: configured builder dependency" "$tmp/pick-err"'
+check 'untracked builder resolves equivalent configured keys without a source reference' \
+  '[ "$(< "$tmp/picked")" = $'"'"'Fixture.Tests.BuilderTests\nFixture.Tests.ChangedTests'"'"' ] && grep -Fq "why: configured builder dependency" "$tmp/pick-err"'
 
 [ "$fails" = 0 ] && echo 'all passed' || { echo "$fails failed"; exit 1; }
