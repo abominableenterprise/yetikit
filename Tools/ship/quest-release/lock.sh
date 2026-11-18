@@ -103,13 +103,18 @@ qr_lock_note_run() {
   printf '%s\n' "$QR_RUN_DIR" > "$(qr_lock_dir)/run_dir" 2>/dev/null || true
 }
 
-# This invocation's terminal result for `wait`: $QR_LOGS/last-result (pid, cmd, rc, run folder), written (atomically)
-# while the lock is still held, so `wait` judges the run it watched by that run's own exit status, never an older
-# run's summary.
+# Publish while holding the run lock. For list releases ($3=1), rc already
+# contains the aggregate verdict. Bundle the report too, since a successor can
+# overwrite the shared summary in the same run folder before wait polls again.
 qr_lock_result() {
   [ "${QR_LOCK_HELD:-}" = 1 ] || return 0
-  printf 'pid=%s\ncmd=%s\nrc=%s\nrun=%s\n' "$$" "$1" "$2" "${QR_RUN_DIR:-}" > "$QR_LOGS/last-result.$$" \
-    && mv -f "$QR_LOGS/last-result.$$" "$QR_LOGS/last-result"
+  local result="$QR_LOGS/last-result"
+  (
+    printf 'pid=%s\ncmd=%s\nrc=%s\nrun=%s\n' "$$" "$1" "$2" "${QR_RUN_DIR:-}" || exit 1
+    if [ "${3:-0}" = 1 ]; then
+      printf 'list-summary:\n' && cat "$QR_RUN_DIR/summary.txt" || exit 1
+    fi
+  ) > "$result.$$" && mv -f "$result.$$" "$result"
 }
 
 # Run the foreground step as a job in its own process group. Bash handles a trapped signal promptly while in
@@ -137,7 +142,7 @@ qr_run_step() {
     # it already exists on the child's first timeslice. Bash's $$ remains the lock owner in this subshell.
     kill -0 "$$" 2>/dev/null || exit 1
     [ "$(cat "$d/pid" 2>/dev/null)" = "$$" ] || exit 1
-    "$@"
+    QR_STEP_DIR="$step" "$@"
   ) &
   if ! { printf '%s\n' "$!" > "$d/group" && touch "$step/ready"; }; then
     rc=1

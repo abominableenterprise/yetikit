@@ -136,15 +136,19 @@ qr_all() {
     qr_log "gate failed: not installing; APK kept at $apk"
     return 1
   fi
-  ( qr_verify "$apk" ) || { qr_set install "skipped: verify failed"; return 1; }
-  QR_VERIFIED_APK="$apk"
   if [ "${#QR_SERIALS[@]}" -gt 1 ]; then
-    local force_value=0
+    local force_value=0 snapshot
     [ -z "$force" ] || force_value=1
-    qr_multi all "$apk" "$force_value" "$rollback" || rc=$?
+    if ! snapshot="$(qr_multi_snapshot "$apk" primary)" || ! ( qr_verify "$snapshot" "$apk" ); then
+      qr_set install 'skipped: verify failed'
+      return 3
+    fi
+    qr_multi all "$snapshot" "$force_value" "$rollback" || rc=$?
     ( qr_cleanup ) || true
     return "$rc"
   fi
+  ( qr_verify "$apk" ) || { qr_set install "skipped: verify failed"; return 1; }
+  QR_VERIFIED_APK="$apk"
   # shellcheck disable=SC2086 # $force is empty or --force
   ( qr_install "$apk" $force ) || return 1
   ( qr_launch ) || rc=$?
@@ -263,7 +267,7 @@ qr_main() {
     rc=0; qr_multi_finish || rc=$?
   fi
   qr_summary
-  qr_lock_result "$cmd" "$rc"
+  qr_lock_result "$cmd" "$rc" "$list_release"
   qr_lock_release
   return "$rc"
 }

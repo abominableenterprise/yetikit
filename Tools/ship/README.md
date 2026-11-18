@@ -577,7 +577,9 @@ subsequent launch in `all`). Standalone `launch` retains the existing behavior:
 connectivity/manufacturer checks, but no install idle check. Rollback targets
 only the device whose launch confirmed a crash, and still respects its idle check
 unless `all --force` was supplied. A rollback APK is verified once separately
-before any device operations.
+before any device operations. List installs verify and install private, temporary
+copies: replacing the source APK during the run cannot change what later devices
+receive.
 
 Multi-device artifacts live inside the run folder at `devices/<encoded-serial>/`:
 `install-adb.log`, `rollback-adb.log` when used, `launch-logcat.txt`,
@@ -637,7 +639,9 @@ standalone gate passed), 1 means failure/missing terminal result, and 124 means
 the bounded wait expired. It prints progress once a minute. Mutating commands
 publish their invocation identity before device discovery; `wait` requires that
 invocation's terminal result even when discovery fails before preparing a new
-run folder, rather than accepting an earlier release's successful summary.
+run folder, rather than accepting an earlier release's successful summary. For
+list releases, that result includes the aggregate verdict and report, even if
+a successor has already started changing the shared summary in the same folder.
 
 ## Quest performance capture
 

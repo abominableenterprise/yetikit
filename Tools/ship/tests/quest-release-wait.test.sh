@@ -169,6 +169,30 @@ check "a replacement owner's successful result never substitutes for the watched
   '[ "$rc" = 1 ] && grep -q "pid $live.*without writing its result" "$tmp/err"'
 on_sleep() { :; }
 
+# The successor begins in the same folder before the waiter's next poll.
+new_run 'not run at root'; lock "$$"
+on_sleep() {
+  (
+    export QR_RUN_DIR="$logs/abc-1"
+    QR_LOCK_HELD=1
+    qr_multi_begin install
+    qr_multi_append install synthetic-a 'OK: watched install'
+    qr_set multi_result 0
+    qr_multi_finish
+    qr_summary >/dev/null
+    qr_lock_result install 0 1
+    echo "$live" > "$logs/run.lock/pid"
+    qr_multi_begin install
+    qr_summary >/dev/null
+  )
+}
+run_wait 2
+check 'wait uses the completed list verdict and report despite a successor in the same folder' \
+  '[ "$rc" = 0 ] && [ "$(wc -l < "$tmp/sleeps")" = 1 ] && grep -q "pid $$) exited 0" "$tmp/err" &&
+    grep -q "install\[synthetic-a\]: OK: watched install" "$tmp/out" && grep -q "^overall: *OK (exit 0)" "$tmp/out" &&
+    grep -q "^overall: *INFRA" "$run/summary.txt"'
+on_sleep() { :; }
+
 # --- prepare can publish its folder and hand the lock to gate entirely between polls.
 # Hooks publish in a subshell: assigning the fixture's run must not overwrite qr_wait's dynamically scoped local run.
 for previous in absent present; do
