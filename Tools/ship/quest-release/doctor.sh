@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# quest-release `doctor`: a read-only preflight in seconds, before a 25-minute `all`. One `ok` / `warn` / `FAIL` line
-# per item; exits 1 when any item FAILs. It never prepares a worktree, writes a run folder, starts Unity, installs or
-# changes the device (adb get-state, getprop and dumpsys only). Sourced by Tools/ship/quest-release.sh; bash 3.2.
+# quest-release `doctor`: preflight before `all`. One `ok` / `warn` / `FAIL` line per item; exits 1 on any FAIL.
+# Never prepares worktrees, writes a run folder, starts Unity or installs. It may reconnect the selected adb transport.
+# Sourced by Tools/ship/quest-release.sh; Bash 3.2.
 
 qr_doctor_line() {
   printf '%-4s %-10s %s\n' "$1" "$2" "$3"
@@ -115,19 +115,6 @@ qr_doctor_disk() {
   esac
 }
 
-qr_doctor_device() {
-  local why verdict rc=0
-  command -v adb >/dev/null 2>&1 || { qr_doctor_line FAIL device "no adb on PATH"; qr_doctor_line warn idle "not checked (no device)"; return; }
-  if ! why="$(qr_device_status)"; then qr_doctor_line FAIL device "$why"; qr_doctor_line warn idle "not checked (no device)"; return; fi
-  qr_doctor_line ok device "$why"
-  verdict="$(qr_idle_verdict)" || rc=$?
-  case "$rc" in
-    0) qr_doctor_line ok idle "idle ($verdict)" ;;
-    1) qr_doctor_line warn idle "in use ($verdict): install would refuse without --force" ;;
-    *) qr_doctor_line warn idle "unknown ($verdict): install would refuse, even with --force" ;;
-  esac
-}
-
 qr_doctor_running() {
   local st=0 eds pid proj log
   qr_lock_read || st=$?
@@ -150,7 +137,7 @@ EOF
 qr_doctor() {
   local java_ok=0
   QR_DOCTOR_FAILS=0
-  echo "==== Quest release doctor (read-only) ===="
+  echo "==== Quest release doctor ===="
   qr_doctor_java && java_ok=1
   qr_doctor_apksigner "$java_ok"
   qr_doctor_keystore

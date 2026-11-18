@@ -2,7 +2,7 @@
 # Release a configured Unity project to an attached Quest from macOS.
 #
 # Usage: Tools/ship/quest-release.sh <command> [args]
-#   doctor            read-only Java, SDK, configured signing/debug keystore, Unity, disk and headset preflight
+#   doctor            Java, SDK, configured signing/debug keystore, Unity, disk and headset preflight
 #   all [<ref>] [--rollback <apk>] [--force] [--full] [--notes <file>]
 #                     prepare, gate/build in parallel, verify, install, launch, cleanup
 #   prepare [<ref>]   fetch origin and prepare two clean worktrees (default origin/main)
@@ -61,6 +61,8 @@ QR_SHIP_DIR="$QR_DIR"
 . "$QR_DIR/quest-release/lock.sh"
 # shellcheck source=Tools/ship/quest-release/doctor.sh
 . "$QR_DIR/quest-release/doctor.sh"
+# shellcheck source=Tools/ship/quest-release/doctor-device.sh
+. "$QR_DIR/quest-release/doctor-device.sh"
 # shellcheck source=Tools/ship/quest-release/wait.sh
 . "$QR_DIR/quest-release/wait.sh"
 
@@ -162,7 +164,7 @@ qr_main() {
   [ $# -gt 0 ] && shift
   case "$cmd" in ''|-h|--help|help) qr_usage; return 0 ;; esac
   qr_config || return 1
-  # doctor is read-only: no logs folder, run folder, lock or summary.
+  # doctor creates no logs folder, run folder, run lock or summary.
   if [ "$cmd" = doctor ]; then
     qr_select_device || return 1
     ( qr_doctor "$@" ) || rc=$?; return "$rc"
