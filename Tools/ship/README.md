@@ -765,8 +765,11 @@ timestamp gap greater than 1.5 seconds. No interpolation fills lost samples.
 
 Each selected `QUEST_SERIAL` receives `perf-summary.txt`, `perf-summary.json`
 and `perf-logcat.txt` in the current run directory (encoded `devices/`
-subfolders for lists, same as install/launch). The installed APK SHA-256 is
-included alongside installed versionName/versionCode; absent metadata is
+subfolders for lists, same as install/launch). A list capture removes any
+previous single-device summary files at the root of the reused run. Read
+`summary.txt` for the overall verdict and `devices/` for the device reports.
+The installed APK SHA-256 is included alongside installed
+versionName/versionCode; absent metadata is
 unavailable. Thermal readings use first/last sample `Temp`, falling back to
 `dumpsys thermalservice` status at the capture boundaries, or unavailable. Example synthetic gate-mode summary excerpt:
 

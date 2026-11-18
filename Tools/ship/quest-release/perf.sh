@@ -292,6 +292,14 @@ qr_perf() {
   QR_PERF_CURSOR="$(qr_lock_dir)/perf-device"
   qr_set device_results ''; qr_set multi_command ''; qr_set overall ''
   if [ "${#QR_SERIALS[@]}" = 1 ]; then qr_perf_device; return $?; fi
+  # List reports live under devices/. Retire any earlier single-device verdict
+  # before a device cursor can send cancellation reporting to a subfolder.
+  if ! rm -f "$run/perf-summary.json" "$run/perf-summary.txt"; then
+    qr_log 'error: cannot remove previous single-device performance reports'
+    qr_set perf 'INFRA: cannot remove previous single-device performance reports'
+    qr_set perf_result 3
+    return 3
+  fi
   qr_set perf 'per-device performance captures (see below)'
   qr_set multi_command perf; qr_set multi_result 3
   for serial in "${QR_SERIALS[@]}"; do
