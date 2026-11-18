@@ -96,6 +96,24 @@ jq 'del(.quest.signing.keyPassEnv)' "$YETIKIT_CONFIG" > "$tmp/no-keypass.json"
 cp "$tmp/no-keypass.json" "$YETIKIT_CONFIG"
 run no-keypass doctor
 check 'keyPassEnv can be omitted' '[ "$rc" = 0 ]'
+# Bash locals in the resolver, its callers and the checker must not turn valid
+# exports into missing credentials or pass a different password to keytool.
+export name="$SYNTHETIC_KEY_ALIAS" ks="$SYNTHETIC_KEY_ALIAS" got="$SYNTHETIC_STORE_PASS"
+for mapping in keyAliasEnv:name keyAliasEnv:ks storePassEnv:got keyPassEnv:QR_KEYSTORE_ALIAS; do
+  field="${mapping%:*}"
+  variable="${mapping#*:}"
+  if [ "$variable" = QR_KEYSTORE_ALIAS ]; then export QR_KEYSTORE_ALIAS="$SYNTHETIC_KEY_PASS"; fi
+  jq --arg field "$field" --arg variable "$variable" \
+    '.quest.signing[$field] = $variable' "$tmp/no-keypass.json" > "$YETIKIT_CONFIG"
+  for command in build doctor; do
+    rm -f "$tmp/editor" "$tmp/keytool.argv"
+    run "reserved-$field-$variable-$command" "$command"
+    check "$command rejects reserved $field mapping $variable before checking credentials" \
+      '[ "$rc" != 0 ] && grep -Fq "quest.signing.$field" "$tmp/reserved-$field-$variable-$command.err" &&
+        [ ! -e "$tmp/editor" ] && [ ! -e "$tmp/keytool.argv" ]'
+  done
+done
+unset name ks got QR_KEYSTORE_ALIAS
 configure
 # Custom signing must not scrub environment names used by the consumer, including XDG_CONFIG_HOME.
 export XDG_CONFIG_HOME="$tmp/xdg"

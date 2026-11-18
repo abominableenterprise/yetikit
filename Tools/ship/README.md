@@ -445,8 +445,12 @@ names, **not** paths, aliases or passwords:
 }
 ```
 
-Each configured name must match `[A-Za-z_][A-Za-z0-9_]*`. There are no fallback
-signing environment variables: when `signing` is present, supply the variables
+Use dedicated signing variables: every mapped name must match
+`[A-Z][A-Z0-9_]*` and must not start with `QR_` (reserved for the runner).
+Lowercase names such as `name`, `ks` and `got` can collide with Bash locals,
+and leading underscores are not supported. Rename any such variable in both
+the launcher environment and the signing config. There are no fallback signing
+environment variables: when `signing` is present, supply the variables
 named by its three required fields. Omit `keyPassEnv` if the consumer build does
 not need a separate key password. The runner does not use it for certificate
 lookup, but build preflight and doctor require every named variable (including
