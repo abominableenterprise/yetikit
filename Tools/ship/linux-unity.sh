@@ -200,8 +200,8 @@ unity_pids() {
       unity_match=0
       case "$exe" in "$UNITY_ROOT"/*) unity_match=1 ;; esac
       if [ "${2:-}" = shared-files ]; then
-        # Only an Editor tree containing an executable Unity binary identifies a foreign installation.
-        # Include its nested helpers, but never infer Unity ownership from a name containing "unity".
+        # A running Editor/Unity remains identifiable after unlink; keep the raw path for diagnostics.
+        case "$exe" in */Editor/Unity" (deleted)") unity_match=1 ;; esac
         editor="${exe%/*}"
         while [ "$unity_match" = 0 ] && [ -n "$editor" ] && [ "$editor" != / ]; do
           if [ "${editor##*/}" = Editor ] && [ -f "$editor/Unity" ] && [ -x "$editor/Unity" ]; then
@@ -209,6 +209,10 @@ unity_pids() {
           fi
           editor="${editor%/*}"
         done
+        if [ "$unity_match" = 0 ] && [ "${1:-}" = strict ]; then
+          # A deleted helper may be all that remains of an unconfirmed Editor tree.
+          case "$exe" in */Editor/*" (deleted)") incomplete=1 ;; esac
+        fi
         [ "$unity_match" = 0 ] || printf ' %s (%s)' "${p#/proc/}" "${exe//$'\n'/ }"
       else
         [ "$unity_match" = 0 ] || printf ' %s' "${p#/proc/}"
