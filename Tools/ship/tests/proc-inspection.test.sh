@@ -5,12 +5,14 @@ python3 -B - "$(dirname "$0")/helpers" <<'PY'
 import contextlib
 import io
 from pathlib import Path
+import signal
 import sys
 import tempfile
-from unittest.mock import patch
+import unittest
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, sys.argv[1])
-from proc_inspection import available, marked, require
+from proc_inspection import available, cleanup_session, marked, require, wait_marked
 
 with tempfile.TemporaryDirectory() as directory:
     proc = Path(directory) / 'missing-proc'
@@ -89,4 +91,73 @@ with tempfile.TemporaryDirectory() as directory:
     with patch.object(Path, 'read_bytes', exited):
         assert marked('descendant exited during scan', marker, 101, proc) == []
 print('ok   restricted descendant environments are explicitly skipped, not reported clean')
+
+
+class ProcRaces(unittest.TestCase):
+    marker = b'FIXTURE=synthetic'
+    session = 301
+    worker = 302
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.proc = Path(directory.name)
+        self.child = self.proc / str(self.worker)
+        self.child.mkdir()
+        self.stat = self.child / 'stat'
+        self.stat.write_bytes(b'302 (fixture) S 1 302 301\n')
+        self.environ = self.child / 'environ'
+        self.environ.write_bytes(self.marker + b'\0')
+        self.unrelated = self.proc / '401'
+        self.unrelated.mkdir()
+        (self.unrelated / 'stat').write_bytes(b'401 (unrelated) S 1 401 401\n')
+        self.unreadable = set()
+        for mock in (patch.object(Path, 'iterdir', lambda path: iter((self.unrelated, self.child))),
+                     patch.object(Path, 'read_bytes', lambda path: self.read_bytes(path))):
+            mock.start()
+            self.addCleanup(mock.stop)
+
+    def read_bytes(self, path):
+        if path in self.unreadable:
+            raise PermissionError('synthetic restricted proc entry')
+        return read_bytes(path)
+
+    def test_scan_continues_after_unreadable_stat(self):
+        self.unreadable.add(self.unrelated / 'stat')
+        self.assertEqual(marked('later readable leak', self.marker, self.session), [self.worker])
+        self.environ.write_bytes(b'FIXTURE=other\0')
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertIsNone(marked('unknown session membership', self.marker, self.session))
+        self.assertIn('SKIP: unknown session membership', output.getvalue())
+
+    def test_cleanup_continues_after_unreadable_stat(self):
+        self.unreadable.add(self.unrelated / 'stat')
+        process = Mock(pid=self.session)
+        with patch('proc_inspection.os.killpg') as killpg, patch('proc_inspection.os.kill') as kill:
+            cleanup_session(process)
+        killpg.assert_called_once_with(self.session, signal.SIGKILL)
+        kill.assert_called_once_with(self.worker, signal.SIGKILL)
+        process.wait.assert_called_once_with(timeout=5)
+
+    def test_observed_leak_survives_unreadable_entry(self):
+        for path in (self.environ, self.stat):
+            with self.subTest(file=path.name):
+                self.unreadable.clear()
+                with patch('proc_inspection.time.monotonic', side_effect=[0, 0, 2]), \
+                        patch('proc_inspection.time.sleep', side_effect=lambda _: self.unreadable.add(path)), \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(wait_marked('observed live leak', self.marker, self.session), [self.worker])
+                self.assertNotIn('SKIP', output.getvalue())
+
+    def test_observed_leak_can_exit_between_polls(self):
+        def exit_after_first_poll(_):
+            self.stat.unlink()
+            self.unreadable.add(self.environ)
+
+        with patch('proc_inspection.time.monotonic', side_effect=[0, 0, 2]), \
+                patch('proc_inspection.time.sleep', side_effect=exit_after_first_poll):
+            self.assertEqual(wait_marked('observed process exited', self.marker, self.session), [])
+
+
+unittest.main(argv=[sys.argv[0]])
 PY
