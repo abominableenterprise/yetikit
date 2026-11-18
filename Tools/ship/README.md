@@ -466,13 +466,22 @@ Tools/yetikit/quest-release.sh install /tmp/game.apk
 Tools/yetikit/quest-release.sh launch
 Tools/yetikit/quest-release.sh rollback /tmp/previous.apk
 Tools/yetikit/quest-release.sh cleanup
+Tools/yetikit/quest-release.sh cleanup --discard-noise
 Tools/yetikit/quest-release.sh summary
 Tools/yetikit/quest-release.sh wait 28
 ```
 
 `cleanup` removes only clean worktrees, without forcing Git removal. Any local
 change (even a material/settings re-save) is preserved for manual inspection;
-file extensions alone never prove disposable noise.
+file extensions alone never prove disposable noise. Opt into `cleanup
+--discard-noise` to discard changes in a release worktree only when every
+change is an unstaged file edit recognized by Ship's editor-run noise rules
+(the same rules used after `open` and `test`, including configured noise paths).
+For prefabs, only spelling changes in recognized transform vectors that keep
+the same serialized float value count as noise.
+A worktree with staged or untracked work, deletions, or unclassified edits is
+kept intact with a reason. This flag is only for standalone `cleanup`; `all`
+continues to remove only clean worktrees.
 
 `all` fetches origin and resolves a commit, creates separate detached test/build
 worktrees with independent cloned Libraries, runs gate/build in parallel, then

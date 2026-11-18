@@ -21,7 +21,8 @@
 #                     launch installed app, exclude warm-up, capture VrApi and gate/report
 #                     exit 0 PASS/REPORT, 1 gate failed, 3 infrastructure/no data
 #   perf start|stop   bracket a running app; stop writes the same reports
-#   cleanup           remove release worktrees only when safe
+#   cleanup [--discard-noise]
+#                     remove clean release worktrees; opt in to discarding recognized editor noise
 #   summary           print the current run summary
 #   wait [minutes]    read-only, default 45; exit 0 success, 1 failure, 124 timeout
 #
@@ -38,6 +39,8 @@ QR_SHIP_DIR="$QR_DIR"
 . "$QR_DIR/quest-release/common.sh"
 # shellcheck source=Tools/ship/quest-release/prepare.sh
 . "$QR_DIR/quest-release/prepare.sh"
+# shellcheck source=Tools/ship/quest-release/cleanup-noise.sh
+. "$QR_DIR/quest-release/cleanup-noise.sh"
 # shellcheck source=Tools/ship/quest-release/unity-steps.sh
 . "$QR_DIR/quest-release/unity-steps.sh"
 # shellcheck source=Tools/ship/test-passes.sh

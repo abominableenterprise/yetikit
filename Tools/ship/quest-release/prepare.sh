@@ -167,25 +167,35 @@ qr_prepare() {
   qr_log "worktrees ready: $(qr_wt test), $(qr_wt build)"
 }
 
-# Remove only clean worktrees. Paths cannot distinguish Unity re-saves from authored edits.
+# Remove only clean worktrees, optionally after reversing recognized editor noise.
 qr_cleanup_one() {
-  local wt="$1" status_file
+  local wt="$1" discard="${2:-}" status_file noise_rc=0
   [ -d "$wt" ] || { echo "absent"; return 0; }
-  status_file="$(mktemp "${QR_RUN_DIR}/status.XXXXXX")" || { echo "inspection failed"; return 1; }
-  if ! git -C "$wt" status --porcelain -z --untracked-files=all > "$status_file" 2>/dev/null; then
+  if [ "$discard" = --discard-noise ]; then
+    qr_discard_noise "$wt" || noise_rc=$?
+    case "$noise_rc" in
+      0) ;;
+      1) echo "kept (real or unclassified changes)"; return 1 ;;
+      *) qr_log "cannot safely discard editor noise in $wt; preserving worktree"
+         echo "kept (noise inspection or discard failed)"; return 1 ;;
+    esac
+  else
+    status_file="$(mktemp "${QR_RUN_DIR}/status.XXXXXX")" || { echo "inspection failed"; return 1; }
+    if ! git -C "$wt" status --porcelain -z --untracked-files=all > "$status_file" 2>/dev/null; then
+      rm -f "$status_file"
+      qr_log "cannot inspect $wt; preserving worktree"
+      echo "kept (inspection failed)"
+      return 1
+    fi
+    # Any status record means local work, including staged changes, untracked files and deletions.
+    if [ -s "$status_file" ]; then
+      rm -f "$status_file"
+      qr_log "keeping $wt: local changes; cleanup requires a clean worktree"
+      echo "kept (local changes)"
+      return 1
+    fi
     rm -f "$status_file"
-    qr_log "cannot inspect $wt; preserving worktree"
-    echo "kept (inspection failed)"
-    return 1
   fi
-  # Any status record means local work, including staged changes, untracked files and deletions.
-  if [ -s "$status_file" ]; then
-    rm -f "$status_file"
-    qr_log "keeping $wt: local changes; cleanup requires a clean worktree"
-    echo "kept (local changes)"
-    return 1
-  fi
-  rm -f "$status_file"
   # Do not force: Git must also refuse changes made after the status check.
   if qr_git worktree remove "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1; then
     echo "removed"
@@ -195,10 +205,14 @@ qr_cleanup_one() {
 }
 
 qr_cleanup() {
+  local discard="${1:-}" rc=0 t b
+  if [ "$#" -gt 0 ] && { [ "$#" -ne 1 ] || [ "$discard" != --discard-noise ]; }; then
+    qr_log "cleanup: unknown option or extra argument (usage: cleanup [--discard-noise])"
+    return 2
+  fi
   qr_need_commit
-  local rc=0 t b
-  t="$(qr_cleanup_one "$(qr_wt test)")" || rc=1
-  b="$(qr_cleanup_one "$(qr_wt build)")" || rc=1
+  t="$(qr_cleanup_one "$(qr_wt test)" "$discard")" || rc=1
+  b="$(qr_cleanup_one "$(qr_wt build)" "$discard")" || rc=1
   qr_set cleanup "test $t; build $b"
   qr_log "cleanup: test $t; build $b"
   return "$rc"
