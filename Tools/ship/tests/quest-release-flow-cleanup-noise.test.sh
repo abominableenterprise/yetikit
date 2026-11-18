@@ -10,7 +10,13 @@ qr_config_get() {
 
 mat=Assets/Mats/A.mat
 prefab='Assets/Mats/Test [1].prefab'
-printf '  scale: 1.000000\n' > "$repo/$prefab"
+prefab_contents() {
+  printf '%s\n' '--- !u!4 &1' 'Transform:' "  m_LocalPosition: {x: $1, y: -0, z: 1}" \
+    '--- !u!114 &2' 'MonoBehaviour:' "  m_text: Version $2" "  m_custom: $3" \
+    "  m_LocalPosition: {x: $4, y: 0, z: 1}" \
+    '--- !u!224 &3' 'RectTransform:' "  m_LocalRotation: {x: 0, y: 0, z: -0, w: ${5:-1.0}}"
+}
+prefab_contents 0.100000001 1.10 1.10 1.10 > "$repo/$prefab"
 printf '  m_Floats:\n  - _ZTest: 4\n' > "$repo/$mat"
 git -C "$repo" add -- ":(literal)$mat" ":(literal)$prefab" && git -C "$repo" commit -qm 'Material fixture' || exit 1
 git -C "$repo" update-ref refs/remotes/origin/main HEAD || exit 1
@@ -19,7 +25,7 @@ qr_flow_prepare
 test_wt="$root/rel-$short-test"; build_wt="$root/rel-$short-build"
 material_noise() { printf '  m_Floats:\n  - _ZTest: 8\n' > "$1/$mat"; }
 material_noise "$test_wt"; material_noise "$build_wt"
-printf '  scale: 1.0\n' > "$test_wt/$prefab"
+prefab_contents 0.1 1.10 1.10 1.10 1 > "$test_wt/$prefab"
 run cleanup --discard-nois
 check 'cleanup rejects a misspelled flag without touching either worktree' \
   '[ "$rc" = 2 ] && out_has "unknown option" && [ -d "$test_wt" ] && [ -d "$build_wt" ]'
@@ -34,8 +40,27 @@ check 'opt-in removes and unregisters the noise-only worktree' \
 check 'opt-in preserves a mixed worktree intact and says why' \
   '[ "$rc" != 0 ] && out_has "real changes" && grep -q authored "$build_wt/Assets/Scripts/C.cs" && grep -q "_ZTest: 8" "$build_wt/$mat"'
 
-# A staged real edit can be hidden by a worktree edit relative to HEAD.
 git -C "$build_wt" restore -- Assets/Scripts/C.cs
+keep_prefab_edit() {
+  local description="$1"; shift
+  prefab_contents "$@" > "$tmp/expected-prefab"
+  cp "$tmp/expected-prefab" "$build_wt/$prefab"
+  run cleanup --discard-noise
+  check "$description" \
+    '[ "$rc" != 0 ] && out_has "real changes" && cmp -s "$tmp/expected-prefab" "$build_wt/$prefab" && grep -q "_ZTest: 8" "$build_wt/$mat"'
+  # Recreate the worktree if the regression removed it so each case is independent.
+  if [ ! -d "$build_wt" ]; then
+    git -C "$repo" worktree add -q --detach "$build_wt" "$sha" || exit 1
+    material_noise "$build_wt"
+  fi
+}
+keep_prefab_edit 'opt-in keeps a number-like change in prefab text' 0.1 1.1 1.10 1.10
+keep_prefab_edit 'opt-in keeps an unrecognized prefab scalar edit' 0.1 1.10 1.1 1.10
+keep_prefab_edit 'opt-in keeps a transform-like field edit in a script component' 0.1 1.10 1.10 1.1
+keep_prefab_edit 'opt-in keeps a real transform edit below five significant digits' 0.100001 1.10 1.10 1.10
+git -C "$build_wt" restore -- ":(literal)$prefab"
+
+# A staged real edit can be hidden by a worktree edit relative to HEAD.
 printf 'authored\n' > "$build_wt/$mat"
 git -C "$build_wt" add -- "$mat"
 material_noise "$build_wt"

@@ -477,6 +477,8 @@ file extensions alone never prove disposable noise. Opt into `cleanup
 --discard-noise` to discard changes in a release worktree only when every
 change is an unstaged file edit recognized by Ship's editor-run noise rules
 (the same rules used after `open` and `test`, including configured noise paths).
+For prefabs, only spelling changes in recognized transform vectors that keep
+the same serialized float value count as noise.
 A worktree with staged or untracked work, deletions, or unclassified edits is
 kept intact with a reason. This flag is only for standalone `cleanup`; `all`
 continues to remove only clean worktrees.

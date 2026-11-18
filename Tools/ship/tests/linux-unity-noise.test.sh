@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests the noise revert after `linux-unity.sh open` and `test`: tracked *.mat files whose diff only touches `_ZTest`
-# lines and *.prefab files whose diff only re-formats floats (same numbers to 5 significant digits) are checked out;
+# lines and *.prefab files whose diff only re-formats serialized transform floats are checked out;
 # real changes, files dirty before the run and --keep paths are kept; a bare --keep skips the revert. Fake editor.
 # Run: bash Tools/ship/tests/linux-unity-noise.test.sh
 set -euo pipefail
@@ -12,7 +12,7 @@ proj="$tmp/proj"
 
 m="$proj/Assets/Art/Mats"; p="$proj/Assets/Prefabs"; mkdir -p "$m" "$p" "$proj/Library"
 mat() { printf 'Material:\n  m_SavedProperties:\n    m_Floats:\n    - _Cull: 2\n    - _ZTest: %s\n    - _ZWrite: 1\n' "$1"; }
-prefab() { printf 'Transform:\n  m_LocalPosition: {x: %s, y: 1.5, z: -0}\n  m_LocalScale: {x: 1, y: 1, z: 1}\n  m_Father: {fileID: %s}\n' "$1" "$2"; }
+prefab() { printf '%s\n' '--- !u!4 &1'; printf 'Transform:\n  m_LocalPosition: {x: %s, y: 1.5, z: -0}\n  m_LocalScale: {x: 1, y: 1, z: 1}\n  m_Father: {fileID: %s}\n' "$1" "$2"; }
 for n in Ztest Real Kept Dirty; do mat 4 > "$m/$n.mat"; done
 for n in Floats Moved Ids Kept; do prefab 0.1 100 > "$p/$n.prefab"; done
 printf 'Material:\n  m_Floats: []\n' > "$m/Empty.mat"
@@ -43,7 +43,7 @@ check "open: a .mat with a real change next to _ZTest is kept" '! clean Assets/A
 check "open: a .mat changed before the run is kept" '! clean Assets/Art/Mats/Dirty.mat && grep -q "keeping Assets/Art/Mats/Dirty.mat (changed before the run)" "$tmp/err"'
 check "open: a .prefab with only float formatting changes (0.100000001, -0, 1.0, 1e0) is reverted and logged" \
   'clean Assets/Prefabs/Floats.prefab && grep -q "reverting Assets/Prefabs/Floats.prefab (only float formatting)" "$tmp/err"'
-check "open: a .prefab with a number changed at 5 significant digits is kept" '! clean Assets/Prefabs/Moved.prefab'
+check "open: a .prefab with a changed transform value is kept" '! clean Assets/Prefabs/Moved.prefab'
 check "open: a .prefab with a changed integer (fileID) is kept" '! clean Assets/Prefabs/Ids.prefab'
 
 # --- test, --keep -----------------------------------------------------------------------------------------------------------

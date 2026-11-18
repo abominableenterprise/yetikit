@@ -129,32 +129,46 @@ noise_ztest_lines_only() {
   ! grep -qvE '^[+-][[:space:]]*(- )?_ZTest:|^[+-][[:space:]]*m_Floats:( \[\])?[[:space:]]*$' <<< "$lines"
 }
 
-# True when tracked $1 differs from HEAD only in how floats are written: the same lines, and every changed number
-# token is the same value to 5 significant digits (0 and -0 alike). Two integers (fileIDs, counts) must be equal, and
-# any change outside a number is real.
+# Only standard Transform/RectTransform vectors may change spelling. Compare
+# their serialized float32 values (including signed zero), not decimal prefixes.
+# In particular, a script component may use the same field name for other data.
 noise_float_format_only() {
   noise_git cat-file -e "HEAD:$1" 2>/dev/null || return 1
   perl -e '
-    my ($fa, $fb) = @ARGV;
-    open(my $ha, "-|", "git", "show", "HEAD:$fa") or exit 1; my @a = <$ha>; close $ha or exit 1;
-    open(my $hb, "<", $fb) or exit 1; my @b = <$hb>;
+    use POSIX qw(isfinite);
+    my ($path) = @ARGV;
+    open(my $ha, "-|", "git", "show", "HEAD:$path") or exit 1; my @a = <$ha>; close $ha or exit 1;
+    open(my $hb, "<", $path) or exit 1; my @b = <$hb>;
     exit 1 if @a != @b;
-    my $num = qr/(?<![\w.])-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?(?![\w.])/;
-    sub g { my $v = $_[0] + 0; $v = 0 if $v == 0; sprintf("%.5g", $v) }
-    my $changed = 0;
+    my $num = qr/-?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/;
+    my $vec = qr/\{x: ($num), y: ($num), z: ($num)/;
+    my ($component, $changed);
     for my $i (0 .. $#a) {
-      next if $a[$i] eq $b[$i];
-      $changed = 1;
-      my @x = split /($num)/, $a[$i]; my @y = split /($num)/, $b[$i];
-      exit 1 if @x != @y;
-      for my $j (0 .. $#x) {
-        next if $x[$j] eq $y[$j];
-        exit 1 if $j % 2 == 0;                                  # text outside a number changed
-        if ($x[$j] !~ /[.eE]/ && $y[$j] !~ /[.eE]/) { exit 1 if $x[$j] != $y[$j]; next }  # integers: exact (-0 is 0)
-        exit 1 if g($x[$j]) ne g($y[$j]);
+      my ($before, $after) = ($a[$i], $b[$i]);
+      if ($before =~ /\A---/) {
+        undef $component;
+        if ($i < $#a && $before =~ /\A--- !u!(4|224) &-?[0-9]+\r?\n\z/) {
+          my $name = $1 == 4 ? "Transform" : "RectTransform";
+          $component = $name if $a[$i + 1] =~ /\A\Q$name\E:\r?\n\z/;
+        }
       }
+      next if $before eq $after;
+      exit 1 unless $component;
+      my ($field) = $before =~ /\A  (m_Local(?:Position|Scale|Rotation|EulerAnglesHint)): /;
+      exit 1 unless defined $field;
+      my $values = $field eq "m_LocalRotation" ? qr/$vec, w: ($num)/ : $vec;
+      my ($eol) = $before =~ /(\r?\n?)\z/;
+      my $line = qr/\A  \Q$field\E: $values\}\Q$eol\E\z/;
+      my @x = $before =~ $line;
+      my @y = $after =~ $line;
+      exit 1 unless @x && @y;
+      for my $j (0 .. $#x) {
+        my ($old, $new) = map { unpack("f", pack("f", $_)) } ($x[$j], $y[$j]);
+        exit 1 unless isfinite($old) && isfinite($new) && $old == $new;
+      }
+      $changed = 1;
     }
-    exit($changed ? 0 : 1);' "$1" "$1"
+    exit($changed ? 0 : 1);' "$1"
 }
 
 # Return the reason only when an existing run-noise rule recognizes the file.
