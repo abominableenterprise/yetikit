@@ -10,11 +10,13 @@ export PATH="$tmp/bin:$PATH"
 cat > "$tmp/bin/git" <<'GIT'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TRACE"
-if [ "$SCENARIO" = recover ] && [ "$(wc -l < "$TRACE")" -eq 2 ]; then
+if [[ "$SCENARIO" = recover || "$SCENARIO" = ssh-reset ]] && [ "$(wc -l < "$TRACE")" -eq 2 ]; then
   echo 'final stdout'
   exit 0
 fi
 case "$SCENARIO" in
+  ssh-reset) echo 'kex_exchange_identification: read: Connection reset by peer' >&2 ;;
+  ssh-denied) echo 'kex_exchange_identification: banner line 0: Permission denied' >&2 ;;
   auth) echo 'git@fixture.invalid: Permission denied (publickey).' >&2 ;;
   conflict) echo 'error: Pulling is not possible because you have unmerged files.' >&2 ;;
   no-ref) exit 2 ;; # ls-remote --exit-code found no matches
@@ -40,9 +42,14 @@ for verb in fetch pull ls-remote; do
     && grep -q '3 attempts' "$tmp/err" && grep -q 'Connection timed out' "$tmp/err" || exit 1
   echo "ok $verb recovers once and reports persistence after three attempts"
 done
-for scenario in auth conflict no-ref; do
+run ssh-reset fetch --quiet origin
+[ "$rc" = 0 ] && [ "$(wc -l < "$TRACE")" -eq 2 ] && [ "$(cat "$tmp/out")" = 'final stdout' ] \
+  && [ "$(cat "$tmp/sleeps")" = 1 ] && grep -q 'retrying' "$tmp/err" \
+  || { echo 'FAIL SSH key-exchange reset did not retry'; exit 1; }
+echo 'ok SSH key-exchange reset retries once'
+for scenario in ssh-denied auth conflict no-ref; do
   case "$scenario" in
-    auth) run auth fetch origin; expected=128 ;;
+    auth|ssh-denied) run "$scenario" fetch origin; expected=128 ;;
     conflict) run conflict pull; expected=128 ;;
     no-ref) run no-ref ls-remote --exit-code origin refs/heads/absent; expected=2 ;;
   esac
