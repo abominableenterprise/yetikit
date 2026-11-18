@@ -77,6 +77,7 @@ emit_samples() {
       missing-fps:10) fields="Stale=$stale,App=${app}ms,CPU=6ms,GPU=4ms" ;;
       optional:*) fields="FPS=72,Stale=$stale,App=${app}ms" ;;
       real:*) fields='FPS=73/72,Prd=23ms,Tear=0,Early=0,Stale=0,Stale2/5/10/max=0/0/0/0,VSnc=1,Lat=-4,Fov=0,CPU4/GPU=2/2,1382/492MHz,OC=3F,TA=0/38/38,SP=N/N/N,Mem=2736MHz,Free=4037MB,PLS=0,Temp=43.0C/0.0C,TW=0.83ms,App=1.82ms,GD=0.00ms,SPC=0.00ms,CPU&GPU=4.51ms,LCnt=1(DR72,LM0),GPU%=0.21,CPU%=0.15(W0.17),CFL=11.85/15.76,ICFLp95=15.02,LD=0,SF=1.00,DpuScale=1.00,LP=0,DVFS=0,Preempt=144,PoseAgeP95=0.00' ;;
+      mixed-timing:*) fields='FPS=72,Stale=0,App=5ms,CPU=6.25ms,CPU&GPU=4.5ms' ;;
       precision:*) fields='FPS=72.444/72,Stale=0,App=13.904ms,CPU=6.1234ms,GPU=4.5678ms,Temp=43.0C/38.5C' ;;
     esac
     [ "$profile" != mixed ] || { [ "$i" -le 3 ] || pid=8888; }
@@ -361,6 +362,15 @@ for fault in apk-path apk-hash; do
   check "$fault reports unavailable without changing the verdict" \
     '[ "$rc" = 0 ] && json_is '\''.apkSha256 == "unavailable" and .overall == "PASS"'\'''
 done
+
+reset_case
+echo mixed-timing > "$tmp/state/a/profile"
+run "$a" perf
+check 'mixed timing captures a CPU mean and a combined mean without a separate GPU mean' \
+  '[ "$rc" = 0 ] && json_is '\''.cpuMs == 6.25 and .gpuMs == "unavailable" and .combinedMs == 4.5'\'''
+check 'mixed timing text shows both the separate CPU mean and the combined mean' \
+  'grep -Fxq "CPU/GPU frame time mean: 6.25 / unavailable ms" "$run_dir/perf-summary.txt" && grep -Fxq "CPU&GPU frame time mean (combined): 4.50 ms" "$run_dir/perf-summary.txt"'
+
 reset_case
 echo precision > "$tmp/state/a/profile"
 configure '.quest.perf.maxP95AppMs = 13.904'
