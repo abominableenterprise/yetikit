@@ -62,9 +62,11 @@ NOISE_REPACK_RE="$(ship_config_get '.noise.repackRegex // "a^"')"
 NOISE_LIGHTMAP_DIR="$(ship_config_get '.scene.lightmapDir // ""')"
 NOISE_LIGHTMAP_DIR="${NOISE_LIGHTMAP_DIR%/}"
 
-# Tracked files whose working tree or index differs from HEAD, plus untracked files. Keep the
-# human-readable --before snapshot format, but use raw Git names instead of C-quoted display names.
-noise_path_lines() { tr '\000' '\n'; }
+# Keep the human-readable --before snapshot format. The prop inventory requests raw
+# Git records instead, so a newline inside a path cannot split it into two entries.
+noise_path_lines() {
+  if [ "${noise_inventory_nul:-0}" = 1 ]; then cat; else tr '\000' '\n'; fi
+}
 
 # Include staged edits even if the working file was restored to HEAD: cleanup validates against HEAD,
 # but `git checkout -- <path>` restores from the index. Never reintroduce a staged setting as editor noise.
@@ -98,15 +100,23 @@ noise_only_ztest() {
 
 # True when a prop source changed: a GLB/FBX/texture under noise.propsDir or the configured generator code. Any prop
 # counts for every prefab and atlas mesh: one changed texture re-packs the shared atlas and so every prop's UVs.
-# The atlas itself is an output, not a source. $1: changed paths.
+# The atlas itself is an output, not a source. Scene cleanup caches the raw inventory result; other callers
+# can supply a line-delimited list of changed paths.
 noise_sources_changed() {
+  if [ -n "${noise_prop_inventory_match:-}" ]; then
+    [ "$noise_prop_inventory_match" = 1 ]
+  else
+    noise_read_sources $'\n' <<< "$1"
+  fi
+}
+noise_read_sources() {
   local f
-  while IFS= read -r f; do
+  while IFS= read -r -d "$1" f; do
     [ -n "$f" ] || continue
     if [ -n "$NOISE_ATLAS" ] && { [ "$f" = "$NOISE_ATLAS" ] || [ "$f" = "$NOISE_ATLAS.meta" ]; }; then continue; fi
     [[ "$f" =~ $NOISE_GENERATORS_RE ]] && return 0
     if [[ "$f" == "$NOISE_PROPS_DIR/"* && "$f" =~ $NOISE_SOURCE_RE ]]; then return 0; fi
-  done <<< "$1"
+  done
   return 1
 }
 
@@ -148,16 +158,18 @@ noise_kept() {
 
 # $1: dirty files before the build (noise_dirty_files output). Remaining args: paths to keep.
 revert_editor_noise() { noise_lock_checked noise_revert_editor "$@"; }
-noise_revert_editor() {
-  local before="$1"; shift
+noise_revert_editor() (
+  local before="$1" prop_inventory; shift
   NOISE_KEEP=("$@")
   local f
   local -a paths=(":(literal)$NOISE_ART_ROOT/" ":(literal)$NOISE_TIME_MANAGER" ":(literal)$NOISE_PROPS_DIR")
   [ -z "$NOISE_ATLAS" ] || paths+=(":(literal)$NOISE_ATLAS")
   [ -z "$NOISE_SPECULAR_MATERIAL" ] || paths+=(":(literal)$NOISE_SPECULAR_MATERIAL")
   for f in ${NOISE_FONT_PATHS[@]+"${NOISE_FONT_PATHS[@]}"}; do paths+=(":(literal)$f"); done
+  prop_inventory="$(mktemp)" || return
+  trap 'rm -f -- "$prop_inventory"' EXIT
   noise_with_diff_paths noise_revert_editor_paths "$before" "${paths[@]}"
-}
+)
 
 # Buffer and check Git before touching any candidate. The NUL-delimited
 # consumers skip names with newlines, which --before cannot record unambiguously.
@@ -179,8 +191,11 @@ noise_revert_editor_paths() {
     unknown="no merge-base with ${NOISE_BASE:-origin/main}, branch changes unknown"
     noise_log "warning: $unknown: keeping the atlas, atlas meshes and prefabs (fetch the base or set NOISE_BASE)"
   fi
-  all_changed="$(noise_changed_paths "$mb")" || return
-  all_changed="$(sort -u <<< "$all_changed")"
+  # Match props on the raw inventory before converting it for the line-based code check.
+  local noise_prop_inventory_match=0
+  noise_inventory_nul=1 noise_changed_paths "$mb" > "$prop_inventory" || return
+  if noise_read_sources '' < "$prop_inventory"; then noise_prop_inventory_match=1; fi
+  all_changed="$(tr '\000' '\n' < "$prop_inventory" | sort -u)" || return
   while IFS= read -r -d '' f; do
     [[ "$f" != *$'\n'* ]] || continue
     reason=""

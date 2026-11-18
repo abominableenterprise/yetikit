@@ -250,7 +250,7 @@ apk_swap_reclaim() (
 # that had no Android entry. The old APK is removed first, so a failed build never
 # reports a stale one.
 cmd_apk() {
-  local kind="${1:-dev}" method apk profile cold=0 rc=0 before size sum cache_source="existing Library"
+  local kind="${1:-dev}" method apk profile cold=0 rc=0 nrc=0 before size sum cache_source="existing Library"
   [ $# -le 1 ] || die "usage: apk [dev|release|contest]"
   case "$kind" in
     dev) method="$(ship_config_get '.build.devMethod')"; apk="$(ship_config_get '.build.apkPath')" ;;
@@ -300,7 +300,7 @@ cmd_apk() {
   if [ -n "$profile" ]; then
     ensure_licence
     local cli; cli="$(ship_config_get '.build.cli // "unity"')"
-    xvfb-run -a -s "-screen 0 1280x1024x24" timeout -s KILL "$APK_TIMEOUT" \
+    supervise xvfb-run -a -s "-screen 0 1280x1024x24" timeout -s KILL "$APK_TIMEOUT" \
       "$cli" build "$PROJECT" --profile "$profile" -e "$UNITY_BIN" --output-path "$PROJECT/$apk" \
       --android-export-type apk --allow-dirty-build --timeout "$APK_TIMEOUT" --no-tail \
       -l "$OUT_DIR/apk.log" >&2 || rc=$?
@@ -309,12 +309,17 @@ cmd_apk() {
     UNITY_TIMEOUT="$APK_TIMEOUT" UNITY_TIMEOUT_VAR=APK_TIMEOUT UNITY_RUN_LABEL=apk unity -quit -buildTarget Android \
       -executeMethod "$method" -logFile "$OUT_DIR/apk.log" || rc=$?
   fi
-  revert_run_noise_after "$before"
+  revert_run_noise_after "$before" || nrc=$?
   local build_class="${method%.*}"; build_class="${build_class##*.}"
   grep -hF "[$build_class]" "$OUT_DIR/apk.log" >&2 2>/dev/null || true
-  [ "$rc" = 0 ] || die "$method failed (exit $rc; see $OUT_DIR/apk.log)"
-  [ -s "$PROJECT/$apk" ] || die "$method wrote no $apk (see $OUT_DIR/apk.log)"
+  if [ "$rc" != 0 ] || [ ! -s "$PROJECT/$apk" ]; then
+    if [ "$nrc" != 0 ]; then noise_revert_failed "$nrc" "$before" "APK build failed" --run || :; fi
+    [ "$rc" = 0 ] || die "$method failed (exit $rc; see $OUT_DIR/apk.log)"
+    die "$method wrote no $apk (see $OUT_DIR/apk.log)"
+  fi
   size="$(stat -c %s "$PROJECT/$apk")"; sum="$(sha256sum "$PROJECT/$apk" | cut -c1-64)"
+  # Save recovery context before the best-effort cache upload or any subsequent interruption.
+  if [ "$nrc" != 0 ]; then noise_revert_failed "$nrc" "$before" "APK built" --run || nrc=$?; fi
   # The Android Gradle build leaves its prefab scratch in the project root (not git-ignored before this).
   rm -rf "$PROJECT/.utmp"
   if [ "$cold" = 1 ]; then
@@ -326,4 +331,5 @@ cmd_apk() {
   log "apk: $PROJECT/$apk"
   log "apk: size $size bytes ($((size / 1048576)) MB)"
   log "apk: sha256 $sum"
+  return "$nrc"
 }
