@@ -20,6 +20,7 @@ printf 'synthetic first payload\n' > "$tmp/first.json"
 printf 'synthetic second payload\n' > "$tmp/second.csv"
 QR_DATA_FILES='first.json second.csv missing.json'
 QR_DATA_DIR=/synthetic
+QR_LOGS="$tmp"
 qr_log() { printf '%s\n' "$*" >&2; }
 qr_device_locked() { "$@"; }
 qr_java_setup() { :; }

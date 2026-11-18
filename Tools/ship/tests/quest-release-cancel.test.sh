@@ -90,7 +90,15 @@ qr_build() {
   esac
   bash "$CANCEL_TMP/worker.sh" build
 }
-qr_verify() { echo verify >> "$CANCEL_TMP/later"; }
+qr_verify() { [ "$CANCEL_PHASE" = list ] || echo verify >> "$CANCEL_TMP/later"; }
+qr_device_locked() { "$@"; }
+qr_install_apk_locked() {
+  if [ "$QUEST_SERIAL" = synthetic-a ]; then
+    qr_set install 'install ok (synthetic APK)'
+  else
+    bash "$CANCEL_TMP/worker.sh" install
+  fi
+}
 qr_install() { echo install >> "$CANCEL_TMP/later"; }
 qr_launch() { echo launch >> "$CANCEL_TMP/later"; }
 qr_cleanup() { echo cleanup >> "$CANCEL_TMP/later"; }
@@ -100,13 +108,18 @@ if [ "$CANCEL_PHASE" = registration ]; then
   set -T
   trap 'if [ "$BASH_COMMAND" = '\''QR_ACTIVE_STEP=$!'\'' ]; then read -r -t 60 _ <&8; kill -TERM "$$"; fi' DEBUG
 fi
-qr_main "$CANCEL_CMD"
+if [ "$CANCEL_PHASE" = list ]; then
+  QUEST_SERIAL=synthetic-a,synthetic-b qr_main install "$CANCEL_TMP/fixture.apk"
+else
+  qr_main "$CANCEL_CMD"
+fi
 RUN
+printf apk > "$tmp/fixture.apk"
 
 for sig in TERM HUP INT; do
-  for phase in prepare parallel standalone timebox watchdog registration stubborn stopped; do
-    # One deterministic registration / escalation / stopped-process regression is enough.
-    case "$phase:$sig" in registration:TERM|stubborn:INT|stopped:TERM) ;; registration:*|stubborn:*|stopped:*) continue ;; esac
+  for phase in list prepare parallel standalone timebox watchdog registration stubborn stopped; do
+    # One deterministic list / registration / escalation / stopped-process regression is enough.
+    case "$phase:$sig" in list:TERM|registration:TERM|stubborn:INT|stopped:TERM) ;; list:*|registration:*|stubborn:*|stopped:*) continue ;; esac
     rm -rf "$tmp/logs"; rm -f "$tmp"/*.pid "$tmp"/*.stopped "$tmp"/*.finished "$tmp/later" "$tmp/early-result" "$tmp"/*.ready
     rm -f "$tmp/registration"; mkfifo "$tmp/registration"
     # Open both ends so the registration handshake cannot block while the worker starts.
@@ -117,7 +130,7 @@ for sig in TERM HUP INT; do
     set -m
     qr_fixture_bash "$tmp/run.sh" > "$tmp/out" 2>&1 & owner=$!
     set +m
-    if [ "$phase" = parallel ]; then workers='gate build'; elif [ "$phase" = prepare ]; then workers=prepare; else workers=gate; fi
+    case "$phase" in list) workers=install ;; parallel) workers='gate build' ;; prepare) workers=prepare ;; *) workers=gate ;; esac
     ready=1
     for worker in $workers; do
       qr_fixture_wait_ready "$tmp/$worker.ready" "$owner" || ready=0
@@ -145,6 +158,13 @@ for sig in TERM HUP INT; do
     for worker in $workers; do [ ! -f "$tmp/$worker.finished" ] || stopped=0; done
     check "$sig during $phase forwards to every child and waits for cleanup, without later release stages" \
       '[ "$ready" = 1 ] && [ "$recorded" = "$owner" ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ ! -f "$tmp/later" ] && [ ! -f "$tmp/early-result" ] && [ ! -e "$tmp/logs/run.lock" ] && grep -q "^pid=$owner$" "$tmp/logs/last-result" && grep -q "^rc=1$" "$tmp/logs/last-result"'
+    if [ "$phase" = list ]; then
+      check 'cancelled list reports completed device A, not unfinished device B, without certifying success' \
+        '( . "$tmp/logs/current.env" && for report in "$tmp/out" "$QR_RUN_DIR/summary.txt" "$tmp/logs/last-result"; do
+          grep -Fq "install[synthetic-a]: OK: install ok" "$report" && ! grep -Fq "install[synthetic-b]:" "$report" &&
+            grep -q "^overall: *INFRA" "$report" || exit 1
+        done )'
+    fi
   done
 done
 # A fake compiler outlives the editor, ignores TERM, and notices if publication happens before it is killed.

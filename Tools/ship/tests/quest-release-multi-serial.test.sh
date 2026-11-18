@@ -445,6 +445,21 @@ check 'wait shows retained failed install without failing the successful launch'
   '[ "$wrc" = 0 ] && wait_result_is install "$a" INFRA && wait_result_is launch "$a" OK'
 
 reset_case
+run "$a,$b" install "$tmp/new.apk"
+# Simulate a pre-upgrade combined summary without per-step files. Include a
+# stale launch to check that only other steps are carried forward.
+rm -f "$run_dir/summary/device_results_install"
+printf 'rollback[%s]: OK: legacy rollback\nlaunch[%s]: CRASH: legacy launch\n' "$a" "$wifi" >> "$run_dir/summary/device_results"
+run "$b,$a" launch
+check 'first list launch after upgrade retains legacy install and rollback but replaces launch' \
+  '[ "$rc" = 0 ] && result_is install "$a" OK && result_is install "$b" OK && result_is rollback "$a" OK &&
+    result_is launch "$a" OK && ! grep -Fq "legacy launch" "$summary" && grep -q "^overall: *OK (exit 0)" "$summary"'
+run "$b,$a" launch
+check 'legacy rows stay migrated without duplication in the next list summary' \
+  '[ "$rc" = 0 ] && [ "$(grep -Fc "install[$a]: OK" "$summary")" = 1 ] &&
+    [ "$(grep -Fc "rollback[$a]: OK" "$summary")" = 1 ]'
+
+reset_case
 echo crash > "$tmp/state/a/fault"
 run "$a,$b" all --rollback "$tmp/old.apk"
 check 'equal-second rollback then primary installs select the last actual install, not the larger SHA' \

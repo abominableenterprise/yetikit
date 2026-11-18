@@ -9,6 +9,7 @@ qr_test_config "$tmp/config"
 QR_DATA_DIR="$tmp/device"
 QR_BACKUP_ROOT="$tmp/backups"
 QR_RUN_DIR="$tmp/run"
+QR_LOGS="$tmp"
 QR_DATA_FILES='playtest.json throws.csv'
 mkdir -p "$QR_DATA_DIR" "$QR_BACKUP_ROOT" "$QR_RUN_DIR"
 printf '%s\n' '{"uploadKey":"synthetic-private-value"}' > "$QR_DATA_DIR/playtest.json"

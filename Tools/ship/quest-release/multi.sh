@@ -84,8 +84,22 @@ qr_multi_steps() {
   case "$1" in all) printf '%s\n' install launch rollback ;; *) printf '%s\n' "$1" ;; esac
 }
 
+# Older runs have only the combined view. An existing per-step file, even
+# empty, takes precedence: it may represent a newer attempt with no results.
+qr_multi_migrate() {
+  local step rows combined
+  combined="$(qr_get device_results '')"
+  [ -n "$combined" ] || return 0
+  for step in install launch rollback; do
+    [ ! -f "$QR_RUN_DIR/summary/device_results_$step" ] || continue
+    rows="$(grep "^$step\[" <<< "$combined")" || continue
+    qr_set "device_results_$step" "$rows"
+  done
+}
+
 qr_multi_begin() {
   local cmd="$1" step
+  qr_multi_migrate
   qr_set device_results ''
   qr_set multi_command "$cmd"
   qr_set multi_result 3
@@ -107,13 +121,18 @@ qr_multi_append() {
   qr_set "$key" "${previous:+$previous$'\n'}$1[$2]: $3"
 }
 
-qr_multi_finish() {
-  local step rows summary='' rc result
+qr_multi_collect() {
+  local step rows summary=''
   for step in install launch rollback; do
     rows="$(qr_get "device_results_$step" '')"
     [ -z "$rows" ] || summary="${summary:+$summary$'\n'}$rows"
   done
   qr_set device_results "$summary"
+}
+
+qr_multi_finish() {
+  local rc result
+  qr_multi_collect
   # The device reducer alone can certify a crash or success. An exit 1 from
   # argument parsing, preparation or verification is not evidence of a crash.
   rc="$(qr_get multi_result 3)"

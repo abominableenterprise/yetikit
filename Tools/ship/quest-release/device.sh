@@ -127,7 +127,7 @@ qr_install_apk() {
 
 qr_install_apk_locked() {
   local apk="$1" force="$2" label="$3" flags="${4:-}" after dir out rc=0 f before_file installed_sha
-  local baseline='' recorded before
+  local baseline='' recorded before pending="$QR_LOGS/latest-install.pending" was_pending=0
   # This attempt is the step's latest result even when the APK check stops it (any earlier success is stale).
   qr_set install "$label stopped before adb install (see release.log)"
   qr_set permissions "-"
@@ -152,23 +152,35 @@ qr_install_apk_locked() {
   recorded="$(cat "$before_file")" && [ "$recorded" = "$baseline" ] \
     || qr_die "$label: missing or incomplete data baseline before install"
   qr_idle_check "$force"
+  # Arm the guard before adb: a full disk or interrupted step after adb must
+  # not leave an older commit authoritative. A later successful install repairs it.
+  if [ -L "$QR_LOGS/latest-install" ] || { [ -e "$QR_LOGS/latest-install" ] && [ ! -f "$QR_LOGS/latest-install" ]; }; then
+    qr_die "$label: latest-install must be a regular file or absent"
+  fi
+  if [ -d "$pending" ] && [ ! -L "$pending" ]; then
+    was_pending=1
+  else
+    mkdir "$pending" || qr_die "$label: cannot guard latest install before adb"
+  fi
   qr_log "$label: adb install -r${flags:+ $flags} $apk"
   # shellcheck disable=SC2086 # $flags is empty or -d
   out="$(qr_adb install -r $flags "$apk" 2>&1)" || rc=$?
   printf '%s\n' "$out" > "$QR_RUN_DIR/$label-adb.log"
   if [ "$rc" != 0 ] || ! printf '%s\n' "$out" | grep -q '^Success'; then
+    [ "$was_pending" = 1 ] || rmdir "$pending" || qr_log "$label: cannot clear latest-install guard"
     qr_set install "$label FAILED: $(printf '%s\n' "$out" | tail -n1)"
     qr_die "$label: adb install -r${flags:+ $flags} failed: $(printf '%s\n' "$out" | tail -n1)"
   fi
-  # adb has replaced the APK even if a later data check fails. Record its own commit, not this run's commit.
-  installed_sha="$(qr_apk_commit "$apk")"
-  # The run lock serializes installs, including across run folders. Publish a
-  # single atomic record so same-second installs and unknown SHAs are ordered
-  # by successful adb completion, not by timestamp or SHA sort order.
-  qr_record_latest_install "$installed_sha" || qr_die "$label: cannot record latest install"
+  qr_set install "$label: adb install ok ($apk), provenance publication not finished"
+  # Record the installed APK's own commit, even if a later data check fails.
+  installed_sha="$(qr_apk_commit "$apk")" || installed_sha=''
+  if ! qr_record_latest_install "$installed_sha" || ! rmdir "$pending"; then
+    qr_set install "$label: adb install ok ($apk), provenance publication failed; data checks not run"
+    qr_die "$label: adb install succeeded but provenance publication failed"
+  fi
+  qr_set install "$label: adb install ok ($apk), data checks not finished"
   qr_set installed_commit "$installed_sha"
   qr_set installed_at "$(qr_timestamp)"
-  qr_set install "$label: adb install ok ($apk), data checks not finished"
   recorded="$(cat "$before_file")" && [ "$recorded" = "$baseline" ] \
     || qr_die "$label: missing or incomplete data baseline after install; backup: $dir"
   while read -r before f; do

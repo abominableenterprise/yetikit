@@ -481,7 +481,14 @@ List release artifacts go under `devices/<encoded-serial>/`. Lowercase ASCII
 letters, digits, hyphens and underscores stay literal; other bytes (including
 uppercase letters) use `%HH` escapes so case-only serials have separate paths.
 In a reused run, the summary keeps the latest list rows for each step. Its
-`overall` verdict and exit code describe only the current command.
+`overall` verdict and exit code describe only the current command. A cancelled
+list release reports devices that completed before cancellation and still fails.
+
+If adb succeeds but the runner cannot publish the latest-install record, the
+install reports a provenance failure, not an adb failure. Automatic release
+notes then use the last-eight-merges fallback rather than an older install.
+After fixing the log storage problem, a successful install or rollback restores
+the automatic baseline. Use `--notes` to supply explicit notes in the meantime.
 
 ### Optional release signing
 
