@@ -11,6 +11,13 @@ command() {
   builtin command "$@"
 }
 jq() { command "${SHIP_TEST_REAL_JQ:-jq}" "$@"; }
+mv() {
+  command mv "$@" || return $?
+  if [ "${QR_MANUAL_BLOCK:-}" = committed-start ] && [ "${3:-}" = "$(marker_for a)" ] &&
+     jq -e 'has("start")' "$3" >/dev/null; then
+    qr_fixture_block_until_term "$tmp/blocker"
+  fi
+}
 serial_id() {
   case "$1" in "$a") echo a ;; "$b") echo b ;; *) return 99 ;; esac
 }
@@ -65,7 +72,11 @@ export QUEST_ADB_WAIT=1 QR_PERF_RESTORE_WAIT=1
 cleanup() {
   if [ -n "$owner" ]; then kill -TERM "$owner" 2>/dev/null || true; wait "$owner" 2>/dev/null || true; fi
   local id marker
-  for id in a b; do marker="$(marker_for "$id")"; rm -f "$marker" "$marker.tmp"; done
+  for id in a b; do
+    marker="$(marker_for "$id")"
+    if [ -d "$marker.tmp" ]; then rmdir "$marker.tmp"; fi
+    rm -f "$marker" "$marker.tmp"
+  done
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -135,20 +146,42 @@ run "$a" perf stop
 check 'a completed stop cannot reuse its start' '[ "$rc" = 3 ] && grep -q "no matching perf start" "$tmp/out"'
 
 cancel() {
-  local action="$1"
+  local action="$1" block="${2:-$1}" fault="${3:-}"
   rm -f "$tmp/blocker.started" "$tmp/blocker.terminated"
-  ( export QUEST_SERIAL="$a" QR_MANUAL_BLOCK="$action"; qr_fixture_bash "$0" --worker "$action" ) > "$tmp/out" 2>&1 & owner=$!
-  if qr_fixture_wait_ready "$tmp/blocker.started" "$owner"; then kill -TERM "$owner"; fi
+  ( export QUEST_SERIAL="$a" QR_MANUAL_BLOCK="$block"; qr_fixture_bash "$0" --worker "$action" ) > "$tmp/out" 2>&1 & owner=$!
+  if qr_fixture_wait_ready "$tmp/blocker.started" "$owner"; then
+    # Fail the recovery write even when this fixture runs as root, without
+    # interfering with the device lock or the ability to unlink the record.
+    if [ "$fault" = save-fails ]; then mkdir "$key_a.tmp" || exit 1; fi
+    kill -TERM "$owner"
+  fi
   rc=0; wait "$owner" || rc=$?; owner=''
+  if [ -d "$key_a.tmp" ]; then rmdir "$key_a.tmp" || exit 1; fi
   run_dir="$(. "$QUEST_LOG_ROOT/current.env" && printf '%s' "$QR_RUN_DIR")"
   report="$run_dir/perf-summary.json"
 }
 cancel start
 check 'cancelling start drains the broadcast and restores before clearing ownership' \
   '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && json '\''.message == "capture cancelled"'\'' '
+cancel start committed-start save-fails
+check 'cancelling a committed start still restores under lock when invalidation cannot be written' \
+  '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/unlocked-restore" ] && json '\''.overall == "INFRA" and (.message | contains("could not invalidate manual capture state"))'\'' && ! grep -q "retry perf stop" "$tmp/out"'
 run "$b" perf start
-run "$a" perf start
+: > "$tmp/a.restore-fails"
+: > "$tmp/events"
+cancel start committed-start save-fails
+check 'a failed write and failed broadcast leave the original reservation pending under its owner' \
+  '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && json '\''has("start")'\'' "$key_a" && [ -e "$tmp/a.override" ] && [ -e "$tmp/b.override" ] && [ ! -e "$tmp/unlocked-restore" ] && grep -q "^a|.*automation_disable" "$tmp/events" && grep -q "could not invalidate manual capture state" "$tmp/out" && grep -q "retry perf stop" "$tmp/out"'
+rm -f "$tmp/a.restore-fails"
 clock a 1700000004.250000000 5000
+sample 1700000003.000000 'App=5ms' > "$tmp/a.samples"
+run "$a" perf stop
+check 'retry stop restores only and never reads the cancelled window, even after the reservation is writable again' \
+  '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0'\'' && grep -q "restoring proximity only" "$tmp/out" && ! grep -q "logcat" "$tmp/events" && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ -e "$key_b" ] && [ -e "$tmp/b.override" ]'
+run "$a" perf start
+check 'a new start can replace the cancellation fallback in the same run' \
+  '[ "$rc" = 0 ] && json '\''has("start")'\'' "$key_a" && [ -e "$tmp/a.override" ]'
+clock a 1700000006.250000000 7000
 : > "$tmp/a.restore-fails"
 cancel stop
 check 'cancelling stop with adb restoration failure keeps recovery state but not a reusable window' \
