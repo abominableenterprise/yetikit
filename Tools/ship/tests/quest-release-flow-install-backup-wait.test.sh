@@ -15,8 +15,8 @@ $(qr_sha256 "$backup/throws.csv")  throws.csv" ]'
 check "playtest.json contents never reach stdout or stderr" '! grep -q "synthetic-private-value\|uploadKey" "$tmp/out" "$tmp/err" && ! grep -rq synthetic-private-value "$root/release-logs"'
 check 'the default backup prefix and unchanged data appear in the summary' \
   'grep -Fq "backup:      $backup (verified" "$tmp/out" && grep -Fq "data hash:   configured data files unchanged" "$tmp/out"'
-check 'an empty permissions list skips the package query and reports no permissions' \
-  'out_has "permissions: none configured" && ! grep -q "dumpsys package" "$tmp/adb.log" && ! out_has RECORD_AUDIO'
+check 'an empty permissions list skips both device queries and reports no permissions' \
+  'out_has "permissions: none configured" && ! grep -qE "get-current-user|dumpsys package" "$tmp/adb.log" && ! out_has RECORD_AUDIO'
 reset_logs; FAKE_CORRUPT=1 run install "$apk"
 check "a backup copy that differs from the device stops the install" '[ "$rc" != 0 ] && out_has "does not match the device" && [ ! -f "$tmp/installed" ]'
 
@@ -41,18 +41,36 @@ reset_logs; run install "$apk"
 backup="$HOME/Synthetic_Backup-$(qr_timestamp)"
 check 'the configured prefix replaces the default while keeping the timestamp and verified backup' \
   '[ "$rc" = 0 ] && [ -s "$backup/SHA256SUMS" ] && grep -Fq "backup:      $backup (verified" "$tmp/out"'
-check 'omitting launcherChecks also skips the package query' \
-  'out_has "permissions: none configured" && ! grep -q "dumpsys package" "$tmp/adb.log" && ! out_has RECORD_AUDIO'
-jq '.quest.launcherChecks.permissions = ["android.permission.CAMERA", "android.permission.BLUETOOTH_CONNECT", "android.permission.VIBRATE"]' \
+check 'omitting launcherChecks also skips both device queries' \
+  'out_has "permissions: none configured" && ! grep -qE "get-current-user|dumpsys package" "$tmp/adb.log" && ! out_has RECORD_AUDIO'
+jq '.quest.launcherChecks.permissions = ["android.permission.CAMERA", "android.permission.BLUETOOTH_CONNECT", "android.permission.POST_NOTIFICATIONS", "android.permission.VIBRATE"]' \
   "$YETIKIT_CONFIG" > "$tmp/permissions.json"
 YETIKIT_CONFIG="$tmp/permissions.json"
 reset_logs; run install "$apk"
-check 'install reports only configured permissions with exact names and their distinct states' \
+check 'install uses only the current user runtime grants and retains package-wide install grants' \
   '[ "$rc" = 0 ] && [ "$(grep -c "dumpsys package" "$tmp/adb.log")" = 1 ] &&
-    grep -Fxq "permissions: android.permission.CAMERA granted=false; android.permission.BLUETOOTH_CONNECT granted=true; android.permission.VIBRATE not requested" "$tmp/out" &&
+    grep -Fxq "permissions: user 10: android.permission.CAMERA granted=false; android.permission.BLUETOOTH_CONNECT granted=true; android.permission.POST_NOTIFICATIONS unavailable; android.permission.VIBRATE not requested" "$tmp/out" &&
     ! out_has RECORD_AUDIO'
+qr_flow_old_apk
+reset_logs; FAKE_CURRENT_USER=0 run rollback "$old"
+check 'rollback persists the grant of user 0 when it is the current user' \
+  '[ "$rc" = 0 ] && out_has "permissions: user 0: android.permission.CAMERA granted=true"'
+
+permissions_unavailable() {
+  [ "$rc" = 0 ] && out_has "android.permission.CAMERA unavailable" &&
+    out_has "android.permission.BLUETOOTH_CONNECT unavailable" && ! out_has "not requested" && ! out_has "granted="
+}
+for mode in empty timeout other; do
+  reset_logs; FAKE_PACKAGE_MODE="$mode" run install "$apk"
+  check "a successful $mode package dump cannot establish permission state" 'permissions_unavailable'
+done
 reset_logs; FAKE_PACKAGE_RC=1 run install "$apk"
-check 'a failed permission probe is unavailable, not a failed install or an absent permission' \
-  '[ "$rc" = 0 ] && out_has "android.permission.CAMERA unavailable" && ! out_has "not requested"'
+check 'a failed package query is unavailable without failing install' 'permissions_unavailable'
+reset_logs; FAKE_CURRENT_USER='invalid' run install "$apk"
+check 'an invalid current user cannot establish permission state' 'permissions_unavailable'
+reset_logs; FAKE_CURRENT_USER_RC=1 run install "$apk"
+check 'a failed current-user query cannot establish permission state' 'permissions_unavailable'
+reset_logs; FAKE_CURRENT_USER=20 run install "$apk"
+check 'a dump without the current user cannot establish permission state' 'permissions_unavailable'
 
 qr_flow_finish

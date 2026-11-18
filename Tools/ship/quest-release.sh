@@ -53,6 +53,8 @@ QR_SHIP_DIR="$QR_DIR"
 . "$QR_DIR/quest-release/verify.sh"
 # shellcheck source=Tools/ship/quest-release/device.sh
 . "$QR_DIR/quest-release/device.sh"
+# shellcheck source=Tools/ship/quest-release/permissions.sh
+. "$QR_DIR/quest-release/permissions.sh"
 # shellcheck source=Tools/ship/quest-release/launch-log-tags.sh
 . "$QR_DIR/quest-release/launch-log-tags.sh"
 # shellcheck source=Tools/ship/quest-release/idle.sh

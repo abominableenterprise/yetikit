@@ -142,10 +142,13 @@ adb() {
           [ ! -f "$state/busy" ] || fixture=game-mounted
           command cat "$here/fixtures/quest-idle/$fixture.txt" ;;
         'getprop sys.hmt.mounted') : ;;
+        'am get-current-user') if [ "$id" = a ]; then echo 0; else echo 10; fi ;;
         'dumpsys package '*)
-          local granted=false
-          [ "$id" != a ] || granted=true
-          printf '  android.permission.CAMERA: granted=%s\n' "$granted" ;;
+          printf '%s\n' 'Packages:' "  Package [$3] (abcd):" \
+            '    User 0: installed=true hidden=false' '      runtime permissions:' \
+            '        android.permission.CAMERA: granted=true' \
+            '    User 10: installed=true hidden=false' '      runtime permissions:' \
+            '        android.permission.CAMERA: granted=false' ;;
         *) return 99 ;;
       esac ;;
     *) return 99 ;;
@@ -211,8 +214,8 @@ check 'each device completes launch before the next install begins' \
 check 'healthy summary retains both install and launch results' \
   'result_is install "$a" OK && result_is install "$b" OK && result_is launch "$a" OK && result_is launch "$b" OK'
 check 'the summary shows the permission state for each device separately' \
-  'grep -F "install[$a]:" "$summary" | grep -Fq "android.permission.CAMERA granted=true" &&
-    grep -F "install[$b]:" "$summary" | grep -Fq "android.permission.CAMERA granted=false"'
+  'grep -F "install[$a]:" "$summary" | grep -Fq "permissions: user 0: android.permission.CAMERA granted=true" &&
+    grep -F "install[$b]:" "$summary" | grep -Fq "permissions: user 10: android.permission.CAMERA granted=false"'
 check 'multi-device artifacts do not overwrite each other or use the single-device root' \
   '[ -s "$run_dir/devices/$a/install-adb.log" ] && [ -s "$run_dir/devices/$b/install-adb.log" ] && [ -s "$run_dir/devices/$a/launch-report.txt" ] && [ -s "$run_dir/devices/$b/launch-report.txt" ] && [ ! -e "$run_dir/install-adb.log" ] && [ ! -e "$run_dir/launch-report.txt" ]'
 check 'each logcat capture belongs to its selected device' \

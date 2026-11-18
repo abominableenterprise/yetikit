@@ -436,7 +436,7 @@ projects must supply a development execute method for this runner).
 | `perfLogTag` | Optional literal log tag preceding `fps=…`; omitted means no FPS extraction. |
 | `launcherChecks` | Optional object; Unity GameActivity/VR launcher/theme and ZIP checks always apply. |
 | `launcherChecks.package` | Optional expected package, must equal `quest.package`. |
-| `launcherChecks.permissions` | Optional array of full permission names required in the APK. After install or rollback, the report shows only these permissions' grant states. An omitted or empty list skips the device permission query. |
+| `launcherChecks.permissions` | Optional array of full permission names required in the APK. After install or rollback, the report names the foreground Android user and shows only the configured permissions, using that user's runtime grants and package-wide install grants. It reports `unavailable` when the queries do not establish a state. An omitted or empty list skips both queries. |
 | `launcherChecks.assets` | Optional array of exact APK entry strings or `{"glob": "pattern"}` objects; default empty. Each requirement must match. No absolute paths or parent traversal. |
 | `launchLogTags` | Optional array of nonempty, literal logcat tags. Omitted or empty means no counts are printed. |
 | `whatsNewEnv` | Build notes environment-variable name; default `YETIKIT_WHATS_NEW`. `--notes` exports the absolute notes filename. |

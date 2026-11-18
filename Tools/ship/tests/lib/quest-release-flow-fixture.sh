@@ -127,7 +127,7 @@ fixtures="$(dirname "$0")/fixtures/quest-idle"
 FAKE_FIXTURE=home-multi-top-resumed FAKE_ACTIVITY_MODE=normal FAKE_POWER_MODE=normal FAKE_VR=1 FAKE_HMT=""
 fixture_section() { awk -v h="$1" '/^[A-Z][A-Z ]+ \(dumpsys /{ p = index($0, h) == 1 } p' "$fixtures/$FAKE_FIXTURE.txt"; }
 fake_shell() {
-  local f
+  local f package
   case "$1" in
     "getprop ro.product.manufacturer") echo "$FAKE_MAKER" ;;
     "getprop sys.hmt.mounted") printf '%s\r\n' "$FAKE_HMT"; return "${FAKE_HMT_RC:-0}" ;;
@@ -148,13 +148,35 @@ fake_shell() {
         conflicting) printf 'Display Power: state=ON\nDisplay Power: state=OFF\n'; return 0 ;;
       esac
       fixture_section "POWER MANAGER" ;;
+    "am get-current-user")
+      printf '%s\r\n' "${FAKE_CURRENT_USER-10}"; return "${FAKE_CURRENT_USER_RC:-0}" ;;
     "dumpsys package "*)
       [ "${FAKE_PACKAGE_RC:-0}" = 0 ] || return "$FAKE_PACKAGE_RC"
-      printf '      %s\r\n' \
-        'android.permission.RECORD_AUDIO: granted=true, flags=[ USER_SET ]' \
-        'com.example.android.permission.CAMERA: granted=true' \
-        'android.permission.CAMERA: granted=false, flags=[ USER_SET ]' \
-        'android.permission.BLUETOOTH_CONNECT: granted=true, flags=[ USER_SET ]' ;;
+      case "${FAKE_PACKAGE_MODE:-normal}" in
+        empty) return 0 ;;
+        timeout) echo "*** SERVICE 'package' DUMP TIMEOUT (10000ms) EXPIRED ***"; return 0 ;;
+        other) package="${1#dumpsys package }.other" ;;
+        *) package="${1#dumpsys package }" ;;
+      esac
+      printf '%s\r\n' \
+        'Packages:' "  Package [$package] (abcd):" \
+        '    requested permissions:' \
+        '      android.permission.CAMERA' \
+        '      android.permission.BLUETOOTH_CONNECT' \
+        '      android.permission.POST_NOTIFICATIONS' \
+        '    install permissions:' \
+        '      android.permission.BLUETOOTH_CONNECT: granted=true' \
+        '    User 0: installed=true hidden=false' \
+        '      runtime permissions:' \
+        '        android.permission.CAMERA: granted=true, flags=[ USER_SET ]' \
+        '    User 10: installed=true hidden=false' \
+        '      runtime permissions:' \
+        '        android.permission.RECORD_AUDIO: granted=true, flags=[ USER_SET ]' \
+        '        com.example.android.permission.CAMERA: granted=true' \
+        '        android.permission.CAMERA: granted=false, flags=[ USER_SET ]' \
+        '    User 11: installed=true hidden=false' \
+        '      runtime permissions:' \
+        '        android.permission.CAMERA: granted=true, flags=[ USER_SET ]' ;;
     "pidof "*) ( pidof() { [ "$FAKE_ALIVE" = 1 ] && echo 4242; }; eval "$1" ) ;;
     "am start "*) echo "Starting: Intent { $1 }" ;;
     *sha256sum*)
