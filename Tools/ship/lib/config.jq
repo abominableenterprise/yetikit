@@ -7,7 +7,7 @@ def relpath:
 def strings: if type == "array" then all(.[]; nonempty) else false end;
 def methods: if strings then length > 0 else false end;
 def invalid($key): "missing or invalid key: \($key)";
-def noise_keys: ["atlasPath", "codeRegex", "fixedTimestepCount", "fontAssetPaths",
+def noise_keys: ["artRoot", "atlasPath", "codeRegex", "fixedTimestepCount", "fontAssetPaths",
   "generatorsRegex", "propsDir", "protectedRegex", "repackRegex", "sourceRegex",
   "specularMaterialPath", "timeManagerPath"];
 def envname: if nonempty then test("^[A-Za-z_][A-Za-z0-9_]*$") else false end;
@@ -42,6 +42,8 @@ elif has("quest") and (.build.devMethod | nonempty | not) then invalid("build.de
 elif has("quest") and (.quest | has("worktreeRoot")) and (.quest.worktreeRoot | nonempty | not) then invalid("quest.worktreeRoot")
 elif has("quest") and (.quest | has("apkKeepName")) and
   (.quest.apkKeepName | if nonempty then test("^[A-Za-z0-9_.{}-]+\\.apk$") and contains("{sha}") else false end | not) then invalid("quest.apkKeepName")
+elif has("quest") and (.quest | has("backupPrefix")) and
+  (.quest.backupPrefix | if nonempty then test("^[A-Za-z0-9_][A-Za-z0-9_.-]*$") else false end | not) then invalid("quest.backupPrefix")
 elif has("quest") and (.quest | has("perf")) and (.quest.perf | type) != "object" then invalid("quest.perf")
 elif has("quest") and ([.quest.perf // {} | to_entries[] |
   select(.key == "seconds" or .key == "warmupSeconds") |
@@ -87,6 +89,8 @@ elif has("noise") and (.noise | has("fontAssetPaths")) and
   (.noise.fontAssetPaths | if type == "array" then all(.[]; relpath) else false end | not) then invalid("noise.fontAssetPaths")
 elif has("noise") and ([.noise | to_entries[] | select(.key != "fontAssetPaths") | select(.value | nonempty | not) | .key] | length) > 0 then
   invalid("noise." + ([.noise | to_entries[] | select(.key != "fontAssetPaths") | select(.value | nonempty | not) | .key][0]))
+elif has("noise") and (.noise | has("artRoot")) and
+  (.noise.artRoot | (relpath and (split("/") | any(. != "" and . != "."))) | not) then invalid("noise.artRoot")
 elif has("noise") and (.noise | has("fixedTimestepCount")) and (.noise.fixedTimestepCount | test("^[1-9][0-9]*$") | not) then invalid("noise.fixedTimestepCount")
 elif has("noise") and ([.noise | to_entries[] | select(.key == "atlasPath" or .key == "timeManagerPath" or .key == "specularMaterialPath" or .key == "propsDir") | select(.value | relpath | not) | .key] | length) > 0 then
   invalid("noise." + ([.noise | to_entries[] | select(.key == "atlasPath" or .key == "timeManagerPath" or .key == "specularMaterialPath" or .key == "propsDir") | select(.value | relpath | not) | .key][0]))

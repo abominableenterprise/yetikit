@@ -4,7 +4,7 @@
 #   Tools/ship/scene-noise.sh [--run] [--before <file>] [--keep <path>]...
 #
 # Reverts (git checkout --) only tracked files that were clean before the build ($NOISE_DIRTY_BEFORE) and are not kept:
-#   1. files under Assets/Art/ whose whole diff is `_ZTest` / `m_Floats` lines (the editor adding the URP ZTest float);
+#   1. files under noise.artRoot (default Assets/Art) whose whole diff is `_ZTest` / `m_Floats` lines;
 #   2. the configured noise.atlasPath and files matching noise.repackRegex (disabled when absent)
 #      when no prop source (GLB/FBX/texture, or the configured generator code) changed against HEAD, the base branch or
 #      as an untracked file: the atlas and the prefabs are then a re-pack of the same inputs. The prefabs and atlas
@@ -51,6 +51,7 @@ NOISE_PROTECTED_RE="$(ship_config_get '.noise.protectedRegex // "^Assets/Scenes/
 NOISE_SOURCE_RE="$(ship_config_get '.noise.sourceRegex // "\\.(glb|fbx|jpg|jpeg|png|tga|psd)(\\.meta)?$"')"
 NOISE_GENERATORS_RE="$(ship_config_get '.noise.generatorsRegex // "a^"')"
 NOISE_CODE_RE="$(ship_config_get '.noise.codeRegex // "^Assets/(Scripts|Editor)/|\\.(cs|asmdef)$"')"
+NOISE_ART_ROOT="$(ship_config_get '.noise.artRoot // "Assets/Art"')"
 NOISE_ATLAS="$(ship_config_get '.noise.atlasPath // ""')"
 # shellcheck source=Tools/ship/lib/run-noise.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/run-noise.sh"
@@ -148,12 +149,12 @@ noise_revert_editor() {
   local before="$1"; shift
   NOISE_KEEP=("$@")
   local changed all_changed f prop reason mb="" unknown=""
-  local -a paths=(Assets/Art "$NOISE_TIME_MANAGER" "$NOISE_PROPS_DIR")
+  local -a paths=(":(literal)$NOISE_ART_ROOT/" "$NOISE_TIME_MANAGER" "$NOISE_PROPS_DIR")
   [ -z "$NOISE_ATLAS" ] || paths+=("$NOISE_ATLAS")
   [ -z "$NOISE_SPECULAR_MATERIAL" ] || paths+=("$NOISE_SPECULAR_MATERIAL")
   for f in ${NOISE_FONT_PATHS[@]+"${NOISE_FONT_PATHS[@]}"}; do paths+=(":(literal)$f"); done
   changed="$(noise_git diff --name-only HEAD -- "${paths[@]}")" || return
-  [ -n "$changed" ] || { noise_log "no changes under Assets/Art or configured noise paths"; return 0; }
+  [ -n "$changed" ] || { noise_log "no changes under $NOISE_ART_ROOT or configured noise paths"; return 0; }
   if ! mb="$(noise_merge_base)"; then
     mb=""
     unknown="no merge-base with ${NOISE_BASE:-origin/main}, branch changes unknown"

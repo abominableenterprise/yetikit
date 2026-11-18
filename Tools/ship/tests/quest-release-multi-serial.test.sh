@@ -16,6 +16,8 @@ cleanup() {
 }
 trap cleanup EXIT
 qr_test_config "$tmp/config"
+jq '.quest.launcherChecks.permissions = ["android.permission.CAMERA"]' "$YETIKIT_CONFIG" > "$tmp/permissions.json"
+YETIKIT_CONFIG="$tmp/permissions.json"
 export QUEST_REPO="$tmp" QUEST_WT_ROOT="$tmp/wt" QUEST_BACKUP_ROOT="$tmp"
 export QUEST_LOG_ROOT="$tmp/wt/release-logs" QUEST_APK_DIR="$tmp/apks"
 export QR_LAUNCH_WAIT=1 QR_ADB_WAIT=1 QUEST_WAIT_GRACE=0
@@ -113,7 +115,11 @@ adb() {
           fixture=home-multi-top-resumed
           [ ! -f "$state/busy" ] || fixture=game-mounted
           command cat "$here/fixtures/quest-idle/$fixture.txt" ;;
-        'getprop sys.hmt.mounted'|'dumpsys package '*) : ;;
+        'getprop sys.hmt.mounted') : ;;
+        'dumpsys package '*)
+          local granted=false
+          [ "$id" != a ] || granted=true
+          printf '  android.permission.CAMERA: granted=%s\n' "$granted" ;;
         *) return 99 ;;
       esac ;;
     *) return 99 ;;
@@ -175,6 +181,9 @@ check 'each device completes launch before the next install begins' \
   '[ "$(grep -E "\\|install |\\|shell am start " "$tmp/adb.log" | cut -d "|" -f1)" = "$(printf "%s\n%s\n%s\n%s" "$a" "$a" "$b" "$b")" ]'
 check 'healthy summary retains both install and launch results' \
   'result_is install "$a" OK && result_is install "$b" OK && result_is launch "$a" OK && result_is launch "$b" OK'
+check 'the summary shows the permission state for each device separately' \
+  'grep -F "install[$a]:" "$summary" | grep -Fq "android.permission.CAMERA granted=true" &&
+    grep -F "install[$b]:" "$summary" | grep -Fq "android.permission.CAMERA granted=false"'
 check 'multi-device artifacts do not overwrite each other or use the single-device root' \
   '[ -s "$run_dir/devices/$a/install-adb.log" ] && [ -s "$run_dir/devices/$b/install-adb.log" ] && [ -s "$run_dir/devices/$a/launch-report.txt" ] && [ -s "$run_dir/devices/$b/launch-report.txt" ] && [ ! -e "$run_dir/install-adb.log" ] && [ ! -e "$run_dir/launch-report.txt" ]'
 check 'each logcat capture belongs to its selected device' \

@@ -53,6 +53,14 @@ for expression in '.schema = 2' 'del(.quest.package)' '.quest.package = ""' '.qu
   mutate "$expression"; load
   check "rejects invalid config: $expression" '[ "$rc" != 0 ]'
 done
+for value in null 42 '""' '"../outside-"' '"/tmp/backup-"' '"nested/backup-"' '".hidden-"' '"backup\n-"'; do
+  mutate ".quest.backupPrefix = $value"; load
+  check "rejects invalid backup prefix: $value" '[ "$rc" != 0 ] && grep -Fq quest.backupPrefix "$tmp/err"'
+done
+# The shared schema already validates the permissions list; keep that contract.
+mutate '.quest.launcherChecks.permissions = [42]'
+load
+check 'rejects non-string permission entries by key' '[ "$rc" != 0 ] && grep -Fq quest.launcherChecks.permissions "$tmp/err"'
 mutate '.noise.codeRegex = "["'
 load
 check 'Quest config rejects malformed noise regex by key' '[ "$rc" != 0 ] && grep -Fq noise.codeRegex "$tmp/err"'
