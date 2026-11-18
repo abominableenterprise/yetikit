@@ -15,6 +15,10 @@ mkdir -p "$SHM_DIR" "$PROJECT/Temp"
 . "$script"
 /bin/sleep 300 & foreign=$!
 export foreign UNITY_ROOT
+partial="$tmp/partial/Editor"
+mkdir -p "$partial/Data/Tools" "$partial/Data/Resources/Licensing/Client"
+cp /usr/bin/sleep "$partial/Data/Resources/Licensing/Client/Unity.Licensing.Client"
+export partial
 
 # Host processes are outside the fixture's view. The synthetic foreign process
 # is unreadable as UID 1001. Privileged inspection may or may not resolve it.
@@ -27,6 +31,7 @@ readlink() {
       case "$view" in
         editor) printf '%s/Editor/Unity\n' "$UNITY_ROOT" ;;
         deleted-helper) printf '/fixture/removed/Editor/Worker (deleted)\n' ;;
+        partial-install) printf '%s/Data/Tools/Helper\n' "$partial" ;;
         *) printf '/fixture/system-daemon\n' ;;
       esac ;;
     *) printf '/fixture/host-process\n' ;;
@@ -87,11 +92,11 @@ run_wipe
 check 'failed owner lookup: unverified resources survive' foreign_retained
 check 'failed owner lookup: verified resources are still wiped' owned_removed
 file_uid=1001
-for view in unknown no-sudo editor deleted-helper; do
+for view in unknown no-sudo editor deleted-helper partial-install; do
   run_wipe
   check "$view: all shared files survive" all_retained
-  if [ "$view" = editor ]; then
-    check 'foreign editor is reported' grep -q 'Unity processes remain' "$tmp/log"
+  if [ "$view" = editor ] || [ "$view" = partial-install ]; then
+    check "$view: foreign process is reported" grep -q 'Unity processes remain' "$tmp/log"
   else
     check "$view: incomplete inspection warns" incomplete_warning
   fi

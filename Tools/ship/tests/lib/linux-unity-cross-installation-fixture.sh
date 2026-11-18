@@ -19,8 +19,10 @@ ship_fixture "$tmp/project"
 ship_fixture_process_view "$tmp/process-view"
 export PATH="$tmp/process-view:$PATH" SHIP_FIXTURE_PIDS=''
 export UNITY_ROOT="$tmp/A" SHM_DIR="$tmp/shm"
-mkdir -p "$UNITY_ROOT/Editor" "$tmp/B/Editor/Data/Tools" "$tmp/other/Editor" "$SHM_DIR" "$PROJECT/Temp"
-for exe in A/Editor/Unity B/Editor/Unity B/Editor/Data/Tools/Helper unity-helper-not-editor other/Editor/helper; do
+mkdir -p "$UNITY_ROOT/Editor" "$tmp/B/Editor/Data/Tools" "$tmp/partial/Editor/Data/Tools" \
+  "$tmp/other/Editor/Data/Tools" "$SHM_DIR" "$PROJECT/Temp"
+for exe in A/Editor/Unity B/Editor/Unity B/Editor/Data/Tools/Helper partial/Editor/Unity \
+  partial/Editor/Data/Tools/Helper unity-helper-not-editor other/Editor/Data/Tools/Helper; do
   cp /usr/bin/sleep "$tmp/$exe"
 done
 . "$script"
@@ -46,8 +48,9 @@ for scenario in "$@"; do
   case "$scenario" in
     editor|deleted-editor) exe="$tmp/B/Editor/Unity" ;;
     helper|deleted-helper) exe="$tmp/B/Editor/Data/Tools/Helper" ;;
+    partial-install) exe="$tmp/partial/Editor/Data/Tools/Helper" ;;
     name-only) exe="$tmp/unity-helper-not-editor" ;;
-    unrelated-tree) exe="$tmp/other/Editor/helper" ;;
+    unrelated-tree) exe="$tmp/other/Editor/Data/Tools/Helper" ;;
     alone) exe='' ;;
   esac
   if [ -n "$exe" ]; then
@@ -55,6 +58,12 @@ for scenario in "$@"; do
     export SHIP_FIXTURE_PIDS="${pids[*]}"
     ship_wait_until exe_ready "$foreign" "$exe"
     case "$scenario" in
+      partial-install)
+        mkdir -p "$tmp/partial/Editor/Data/Resources/Licensing/Client"
+        cp /usr/bin/sleep "$tmp/partial/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"
+        rm -f "$tmp/partial/Editor/Unity"
+        check "$scenario: running executable still exists" exe_ready "$foreign" "$exe"
+        ;;
       deleted-*)
         rm -f "$exe" "$tmp/B/Editor/Unity"
         check "$scenario: running executable is unlinked" exe_ready "$foreign" "$exe (deleted)"
@@ -92,7 +101,7 @@ for scenario in "$@"; do
     check "$scenario $action: succeeds" test "$rc" = 0
     if [ -n "$foreign" ]; then check "$scenario $action: foreign process survives" alive "$foreign"; fi
     case "$scenario" in
-      editor|helper|deleted-editor)
+      editor|helper|partial-install|deleted-editor)
         check "$scenario $action: shm and lockfile survive" fixtures_present
         check "$scenario $action: warning names foreign PID" grep -qE "warning: Unity processes remain \(PIDs:.*\b$foreign\b" "$log_file"
         check "$scenario $action: warning names executable path" grep -qF "$exe" "$log_file"

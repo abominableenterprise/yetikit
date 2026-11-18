@@ -199,7 +199,7 @@ lock_unity() {
 # an unreadable live userspace process is not evidence of absence. Kernel threads, zombies and exits are exempt.
 # shared-files scope additionally scans other installations, reporting executable paths with the PIDs.
 unity_pids() {
-  local p exe status stat flags editor unity_match incomplete=0
+  local p exe status stat flags editor client unity_match incomplete=0
   local -r PF_KTHREAD=2097152 # Linux task flag (0x00200000), available before Kthread: in status.
   for p in /proc/[0-9]*; do
     case "${p#/proc/}" in "$$"|"$BASHPID") continue ;; esac
@@ -211,8 +211,13 @@ unity_pids() {
         case "$exe" in */Editor/Unity" (deleted)") unity_match=1 ;; esac
         editor="${exe%/*}"
         while [ "$unity_match" = 0 ] && [ -n "$editor" ] && [ "$editor" != / ]; do
-          if [ "${editor##*/}" = Editor ] && [ -f "$editor/Unity" ] && [ -x "$editor/Unity" ]; then
-            unity_match=1
+          if [ "${editor##*/}" = Editor ]; then
+            # The bundled licensing client can still identify a partial installation.
+            client="$editor/${LC_REL#Editor/}"
+            if { [ -f "$editor/Unity" ] && [ -x "$editor/Unity" ]; } ||
+              { [ -f "$client" ] && [ -x "$client" ]; }; then
+              unity_match=1
+            fi
           fi
           editor="${editor%/*}"
         done
