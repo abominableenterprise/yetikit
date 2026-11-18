@@ -36,7 +36,7 @@
 #                       Gfx, test pr's Gfx pass) is killed after UNITY_GFX_TIMEOUT s (3600), the others after
 #                       UNITY_TIMEOUT s (1800); a caller's UNITY_TIMEOUT alone sets both.
 #   test pr [base] [extra Unity args...]
-#                       the full pure pass, then the Gfx pass only for the [Category("Gfx")] fixtures declared in test
+#                       the full pure pass (opt-in selection via tests.prPure), then Gfx for fixtures declared in test
 #                       files changed since `git merge-base base HEAD` (base: origin/main) or in the EditMode test
 #                       folder referencing a changed <tests.scriptsRoot>/<Area>/<Class>.cs (max TEST_PR_GFX_MAX, 12).
 #                       No matching fixture skips Gfx. Stage timings: build/test-stages.log.
@@ -121,6 +121,7 @@ log() { printf '[linux-unity] %s\n' "$*" >&2; }
 . "$(dirname "${BASH_SOURCE[0]}")/scene-noise.sh"
 # shellcheck source=Tools/ship/test-passes.sh
 . "$(dirname "${BASH_SOURCE[0]}")/test-passes.sh"
+. "$SHIP_TOOL_DIR/test-pr-pure.sh"
 # shellcheck source=Tools/ship/test-evidence.sh
 . "$(dirname "${BASH_SOURCE[0]}")/test-evidence.sh"
 # shellcheck source=Tools/ship/test-stages.sh
@@ -642,7 +643,6 @@ test_passes() {
   return $rc
 }
 
-# test pr [base] [extra Unity args]: the full pure pass, then the Gfx pass for the fixtures the branch touches.
 test_pr() {
   local base=origin/main mb fixtures areas rc=0 gfx_rc=0 TEST_ALLOW_EMPTY=0 TEST_EVIDENCE_ONLY=0
   if [ $# -gt 0 ] && [[ "$1" != -* ]]; then base="$1"; shift; fi
@@ -659,7 +659,7 @@ test_pr() {
     printf '  %s\n' $(cd "$PROJECT" && pr_area_tests <<< "$areas") >&2
   fi
   rm -f "$OUT_DIR/editmode.xml" "$OUT_DIR/editmode-gfx.xml"
-  run_pass editmode -nographics -runTests -testPlatform EditMode -testCategory "$PURE_CATEGORIES" "$@" || rc=$?
+  run_pr_pure_pass "$mb" "$@" || rc=$?
   if [ -z "$fixtures" ]; then
     log "test pr: no Gfx fixtures touched since $base (${mb:0:12}); Gfx pass skipped"
   elif [ "${EDITMODE_GFX:-1}" != 1 ]; then

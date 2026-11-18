@@ -4,13 +4,13 @@
 # Print every class the C# files named on stdin declare at namespace level, fully qualified (Ns.Class), one per line.
 # With a category $1 (1 means Gfx), print only the classes carrying [Category("$1")], on the class or on one of its
 # members (a method-level Gfx test runs in the render pass too, and -testFilter <class> reaches it). Nested classes
-# count as their outer one.
+# count as their outer one. Pass `class` as $2 to match only class-level tags.
 cs_classes() {
   local f cat="${1:-0}"
   [ "$cat" = 1 ] && cat=Gfx
   while IFS= read -r f; do
     [ -f "$f" ] || continue
-    awk -v gfx="$([ "$cat" = 0 ] && echo 0 || echo 1)" -v cat="$cat" '
+    awk -v gfx="$([ "$cat" = 0 ] && echo 0 || echo 1)" -v cat="$cat" -v scope="${2:-}" '
       BEGIN { tag = "\\[[^]]*Category\\(\"" cat "\"\\)" }
       function fq(c) { return ns == "" ? c : ns "." c }
       function braces(s,   o, c) { o = gsub(/\{/, "{", s); c = gsub(/\}/, "}", s); depth += o - c }
@@ -27,10 +27,10 @@ cs_classes() {
         if (match(line, /(^|[^A-Za-z0-9_])class[[:space:]]+[A-Za-z0-9_]+/)) {
           c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
           if (depth <= nsdepth) { top = c; if (!gfx) print fq(top) }
-          if (pending && gfx) print fq(top)
+          if (pending && gfx && (scope != "class" || depth <= nsdepth)) print fq(top)
           pending = 0
         } else if (pending && !attr && line ~ /[^[:space:]]/) {
-          if (gfx && top != "") print fq(top)
+          if (gfx && scope != "class" && top != "") print fq(top)
           pending = 0
         }
         braces(line)

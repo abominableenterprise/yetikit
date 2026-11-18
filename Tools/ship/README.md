@@ -77,7 +77,7 @@ file while a run is active.
 | `open [--keep [path]]...` | Compile/open without graphics. A cold project restores/saves the Library cache. |
 | `test editmode [Unity args...]` | Pure pass (`!Gfx;!MacOnly`) without graphics, then Gfx on Xvfb. A caller's `-testFilter` may match either pass, but must execute tests overall. `EDITMODE_GFX=0` skips Gfx and requires executed pure tests; it is not needed for pure-only filters. |
 | `test playmode [Unity args...]` | PlayMode tests on Xvfb. |
-| `test pr [base] [Unity args...]` | Full pure pass, then only touched Gfx fixtures (default base `origin/main`). Changed runtime types search their area's tests; editor builders search all tests. No caller `-testFilter`/`-testCategory`. |
+| `test pr [base] [Unity args...]` | Full pure pass by default (opt in to selection via `tests.prPure`), then only touched Gfx fixtures. The default base is `origin/main`. No caller `-testFilter`/`-testCategory`. |
 | `scene [--keep path]... [--area Area]...` | Run configured generated-scene steps; optionally only configured area steps, then conservative noise cleanup. Without `scene`, explain that no generated scene is configured. |
 | `lab [--keep [path]]...` | Run the optional `labMethod`; cleanup/`--keep` as in `open`. |
 | `apk [dev\|release\|contest]` | Android build on Xvfb; `contest` is a compatibility alias for `release`. Print path, size and SHA-256; remove stale APK before building. |
@@ -160,6 +160,29 @@ to zero to disable. Swap is removed on exit. Other operational overrides include
 `NOISE_GIT_TRIES` and `NOISE_GIT_DELAY`. These control environment/resources, not
 game policy. A profile-based APK requires an installed Unity CLI as well.
 
+### Opt-in pure selection for `test pr`
+
+With `tests.prPure`, Ship selects changed EditMode fixtures, fixtures in the
+EditMode areas of changed runtime C# files, and configured smoke fixtures. It
+uses committed changes since the merge base, local tracked changes, and
+untracked files. The pure category filter still applies. Gfx selection is
+unchanged: changed runtime types search their area's tests; editor builders
+search all tests.
+
+Ship runs the full pure pass if selection is empty or exceeds the cap; it never
+trims the list. Changes to the running Ship bundle, `Tools/yetikit/`,
+`yetikit.json`, `Packages/`, `ProjectSettings/`, `.github/`, assembly definitions,
+assembly references, response files or C# under `tests.editorRoot` also force
+full pure. Use `fallbackRegex` to add project-specific paths, such as shared
+fixture helpers or runtime files used across areas. Both selected fixtures and
+full-pass reasons are written to `test-stages.log` when opted in. A selected
+pure pass must still execute tests to pass.
+
+Set `TEST_PR_PURE_ALL=1` to force full pure, or `TEST_PR_PURE_MAX` to override the
+configured cap (decimal integer, zero forces full; invalid values also run
+full). Neither variable enables selection without the config block.
+`test editmode`, PlayMode and release testing are unaffected.
+
 ## `yetikit.json` schema 1
 
 Required keys are `schema`, `unityVersion`, and `build`. Unknown keys are reserved
@@ -215,6 +238,10 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `tests.scriptsRoot` | Optional relative runtime code root; default `Assets/Scripts`. Changes under `<scriptsRoot>/<Area>/` search that area's EditMode fixtures. |
 | `tests.editorRoot` | Optional relative editor code root; default `Assets/Editor`. Builder changes search all fixtures under `tests.root` for references. |
 | `tests.builderFixtures` | Optional object mapping exact builder paths to arrays of fully qualified fixture names. |
+| `tests.prPure` | Optional object enabling pure fixture selection for `test pr`; omit to retain full pure. |
+| `tests.prPure.smokeFixtures` | Array of fixture class names (namespace-qualified when applicable), default empty. Include only fixtures intended for the headless pure pass. |
+| `tests.prPure.max` | Integer cap from 0 through 9999999, default 12. Zero forces the full pass. |
+| `tests.prPure.fallbackRegex` | Optional nonempty jq regex matched against project-relative changed paths, in addition to built-in infrastructure checks. |
 
 Configuration paths are normalized once on load: `./`, repeated separators,
 and trailing separators do not change keep safeguards or source detection.
