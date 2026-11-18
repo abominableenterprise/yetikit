@@ -3,7 +3,8 @@
 #                       snippet, in the project) and, for -runTests, writes canned NUnit result XML to -testResults:
 #                       one passed test per -testFilter name (or ExampleGame.Fake.Tests.Ok), plus every name in
 #                       $FAKE_FAILS (;-separated) as failed, and each $FAKE_SUITE_FAILS fixture as failed in its TearDown. A run whose results file ends in -retry.xml uses
-#                       $FAKE_RETRY_FAILS instead. Exits 2 when a test failed (as Unity does), $FAKE_UNITY_RC otherwise.
+#                       $FAKE_RETRY_FAILS instead. Exits $FAKE_TEST_FAILURE_RC (default 2, as Unity does) when a
+#                       test failed, $FAKE_UNITY_RC otherwise.
 #                       It writes a line to -logFile. FAKE_NO_XML=1 writes no XML and exits 1 (a crash). FAKE_SLEEP=n sleeps n seconds first.
 #                       FAKE_XML_MODE=no-file|empty|garbage|zero|skipped simulates exit-0 evidence failures.
 #                       FAKE_GFX_XML_MODE and FAKE_RETRY_XML_MODE override that mode for Gfx and retry runs.
@@ -70,7 +71,7 @@ unset IFS
 mkdir -p "$(dirname "$res")"
 printf '<?xml version="1.0" encoding="utf-8"?>\n<test-run id="2" total="%d" passed="%d" failed="%d" skipped="%d">\n%s</test-run>\n' \
   $((passed + failed + skipped)) "$passed" "$failed" "$skipped" "$body" > "$res"
-[ "$failed" = 0 ] || exit 2
+[ "$failed" = 0 ] || exit "${FAKE_TEST_FAILURE_RC:-2}"
 exit "${FAKE_UNITY_RC:-0}"
 EOF
 cat > "$tmp/bin/xvfb-run" <<'EOF'
@@ -91,7 +92,7 @@ export FAKE_TMP="$tmp" PATH="$tmp/bin:$PATH" PROJECT="$proj" UNITY_ROOT="$tmp/un
   PIDFILE_FALLBACK="$tmp/fallback.pid" SHM_DIR="$tmp/shm" TASK_CACHE=no-task-cache NOISE_BASE=HEAD UNITY_USERNAME=u UNITY_PASSWORD=p
 # Never reach the real hub (a task VM exports these): the seat lease is tested with a fake curl.
 unset THEROBOTS_HUB_URL THEROBOTS_TASK_ID THEROBOTS_TASK_TOKEN
-unset FAKE_FAILS FAKE_SUITE_FAILS FAKE_RETRY_FAILS FAKE_RETRY_PASSES FAKE_RETRY_SKIPS FAKE_MUTATE FAKE_NO_XML FAKE_XML_MODE FAKE_GFX_XML_MODE FAKE_RETRY_XML_MODE FAKE_SLEEP FAKE_EDITOR_GATE FAKE_XVFB FAKE_UNITY_RC EDITMODE_GFX KNOWN_FLAKES PIDFILE APK_SWAPFILE
+unset FAKE_FAILS FAKE_SUITE_FAILS FAKE_RETRY_FAILS FAKE_RETRY_PASSES FAKE_RETRY_SKIPS FAKE_MUTATE FAKE_NO_XML FAKE_XML_MODE FAKE_GFX_XML_MODE FAKE_RETRY_XML_MODE FAKE_SLEEP FAKE_EDITOR_GATE FAKE_XVFB FAKE_UNITY_RC FAKE_TEST_FAILURE_RC EDITMODE_GFX KNOWN_FLAKES PIDFILE APK_SWAPFILE
 
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # A temp git repo in $proj, everything committed on main (origin/main points at it).

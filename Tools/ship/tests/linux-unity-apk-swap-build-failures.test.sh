@@ -6,7 +6,7 @@ set -euo pipefail
 # shellcheck source=Tools/ship/tests/lib/linux-unity-apk-fixture.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/linux-unity-apk-fixture.sh"
 apk_module
-swapfiles() { find "$tmp/swap" -name "linux-unity-apk.swap.*" | wc -l; }
+swapfiles() { find "$tmp/swap" -name 'linux-unity-apk.swap*' | wc -l; }
 : > "$tmp/swap-calls"
 
 check "APK_SWAP_GB=4 makes a 4 GB swapfile; APK_SWAP_GB=0 none" \

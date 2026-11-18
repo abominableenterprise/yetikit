@@ -10,6 +10,11 @@ check "a crash with no results XML is never a flake" '[ "$rc" != 0 ] && [ "$(wc 
 FAKE_FAILS="$ballers" run playmode; FAKE_NO_XML=1 run playmode
 check "a crash after an earlier flaky run never reruns the stale XML's flakes" \
   '[ "$rc" != 0 ] && [ "$(wc -l < "$tmp/runs")" = 1 ] && [ ! -f "$OUT_DIR/playmode.xml" ] && ! grep -q flaky-passed "$tmp/err"'
+for abnormal_rc in 1 124 137 143; do
+  FAKE_TEST_FAILURE_RC="$abnormal_rc" FAKE_FAILS="$ballers" run playmode
+  check "exit $abnormal_rc with complete flake XML is not retryable" \
+    '[ "$rc" = "$abnormal_rc" ] && [ "$(wc -l < "$tmp/runs")" = 1 ] && grep -q "failed=\"1\"" "$OUT_DIR/playmode.xml" && [ ! -e "$OUT_DIR/playmode-retry.xml" ]'
+done
 KNOWN_FLAKES="$tmp/none.txt" FAKE_FAILS="$ballers" EDITMODE_GFX=0 run editmode
 check "no known-flakes file: every failure is real" '[ "$rc" != 0 ] && [ "$(wc -l < "$tmp/runs")" = 1 ]'
 

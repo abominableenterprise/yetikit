@@ -20,48 +20,229 @@ apk_swap_size() {
     && echo "$APK_SWAP_GB" || echo 0
 }
 
-# Add the build's swapfile (best effort: a filesystem that refuses swap only logs a warning). APK_SWAPFILE is set only
-# once the file exists, so apk_swap_off removes exactly what this run created.
+# Trust only real directories owned by root or this user, with sticky protection
+# wherever others can write (e.g. /var/tmp). Check ancestors too: a safe leaf can be replaced through its parent.
+apk_swap_dir() {
+  local dir="$APK_SWAP_DIR" path part meta owner mode
+  [[ "/$dir/" != *'/../'* ]] || return 1
+  dir="$(realpath -es -- "$dir")" || return 1
+  local -a parts
+  IFS=/ read -r -d '' -a parts < <(printf '%s\0' "$dir") || return 1
+  path=""
+  # Walk top-down so a checked component is already protected by its parent.
+  for part in "${parts[@]}"; do
+    path="${path%/}/$part"
+    meta="$(stat -c '%u %f' -- "$path" 2>/dev/null)" || return 1
+    read -r owner mode <<< "$meta"
+    [[ "$owner" == 0 || "$owner" == "$EUID" ]] || return 1
+    (( (16#$mode & 0170000) == 0040000 && (!(16#$mode & 0022) || (16#$mode & 01000)) )) || return 1
+  done
+  printf '%s\n' "$dir"
+}
+
+apk_swap_regular() {
+  local meta owner links mode
+  # lstat in one operation: never combine a path type check with metadata from a later entry.
+  if [ "${2:-}" = private ]; then
+    meta="$(as_root stat -c '%u %h %f' -- "$1" 2>/dev/null)" || return 1
+  else
+    meta="$(stat -c '%u %h %f' -- "$1" 2>/dev/null)" || return 1
+  fi
+  read -r owner links mode <<< "$meta"
+  [[ "$links" == 1 && ( "$owner" == 0 || "$owner" == "$EUID" ) ]] || return 1
+  (( (16#$mode & 0170000) == 0100000 && !(16#$mode & 0022) )) || return 1
+  [ "${2:-}" != private ] || (( (16#$mode & 07777) == 0600 ))
+}
+
+apk_swap_private_dir() {
+  local meta
+  local owner mode
+  meta="$(stat -c '%u %f' -- "$1" 2>/dev/null)" || return 1
+  read -r owner mode <<< "$meta"
+  [[ "$owner" == 0 || "$owner" == "$EUID" ]] && (( 16#$mode == (0040000 | 0700) ))
+}
+
+# Make both the private directory and its file exclusively. On some hosts the
+# swap volume is root-owned, so allow sudo to allocate and inspect the file.
 apk_swap_on() {
-  local f; f="$APK_SWAP_DIR/linux-unity-apk.swap.$$"
-  log "apk: adding a ${1} GB swapfile $f (removed on exit)"
-  as_root fallocate -l "${1}G" "$f" || { as_root rm -f "$f"; log "warning: could not create $f; building without swap"; return 0; }
+  local base dir f
+  if ! base="$(apk_swap_dir)" ||
+    ! dir="$(as_root mktemp -d --suffix=".$$" -- "${base%/}/linux-unity-apk.swapdir.XXXXXXXXXX")" ||
+    ! apk_swap_private_dir "$dir"; then
+    log "warning: could not create a safe swap directory in $APK_SWAP_DIR; building without swap"
+    return 0
+  fi
+  f="$dir/linux-unity-apk.swapfile"
+  if ! (umask 077; as_root dd if=/dev/null conv=excl status=none of="$f") ||
+    ! apk_swap_regular "$f" private; then
+    as_root rmdir -- "$dir" || :
+    log "warning: could not create a safe swapfile in $dir; building without swap"
+    return 0
+  fi
   APK_SWAPFILE="$f"
-  as_root chmod 600 "$f" && as_root mkswap -q "$f" >/dev/null && as_root swapon "$f" \
+  log "apk: adding a ${1} GB swapfile $f (removed on exit)"
+  if ! as_root fallocate -l "${1}G" "$f"; then
+    apk_swap_remove "$f" private && APK_SWAPFILE=""
+    log "warning: could not create $f; building without swap"
+    return 0
+  fi
+  as_root mkswap -q "$f" >/dev/null && as_root swapon "$f" \
     || log "warning: swapon $f failed; building without swap"
 }
+
+apk_swap_remove() {
+  as_root rm -f -- "$1" || return "$?"
+  [ "${2:-}" != private ] || as_root rmdir -- "${1%/*}"
+}
+
+# swapoff also fails for an inactive file. Unlink after a failure only if the
+# kernel's swap table is readable and every entry can be ruled out, including aliases.
+apk_swap_inactive() {
+  local table active type size used priority rest
+  table="$(cat /proc/swaps)" || return 1
+  [[ "$table" == Filename[[:space:]]* ]] || return 1
+  [[ "$table" == *$'\n'* ]] || return 0
+  while read -r active type size used priority rest; do
+    [[ "$active" == /* && -n "$priority" && -z "$rest" ]] || return 1
+    printf -v active '%b' "${active//\\/\\0}" # /proc/swaps encodes path whitespace and backslashes as octal.
+    [[ "$active" != "$1" && -e "$active" && ! "$active" -ef "$1" ]] || return 1
+  done <<< "${table#*$'\n'}"
+}
+
 apk_swap_off() {
   [ -n "${APK_SWAPFILE:-}" ] || return 0
-  local rc=0 rm_rc=0
-  as_root swapoff "$APK_SWAPFILE" 2>/dev/null || rc=$?
-  as_root rm -f "$APK_SWAPFILE" || rm_rc=$?
+  local rc=0 rm_rc=0 layout=""
+  if [[ "$APK_SWAPFILE" == */linux-unity-apk.swapfile ]]; then
+    apk_swap_private_dir "${APK_SWAPFILE%/*}" || return 1
+    layout=private
+  fi
+  if ! apk_swap_regular "$APK_SWAPFILE" "$layout"; then
+    log "warning: refusing to clean an unexpected swap path $APK_SWAPFILE"
+    return 1
+  fi
+  if as_root swapoff "$APK_SWAPFILE" 2>/dev/null; then :; else
+    rc=$?
+    if ! apk_swap_inactive "$APK_SWAPFILE"; then
+      log "warning: swapoff $APK_SWAPFILE failed; keeping the swapfile"
+      return "$rc"
+    fi
+  fi
+  apk_swap_remove "$APK_SWAPFILE" "$layout" || rm_rc=$?
   if [ "$rm_rc" = 0 ]; then log "apk: removed swapfile $APK_SWAPFILE"; APK_SWAPFILE=""; fi
   [ "$rc" != 0 ] || rc=$rm_rc
   return "$rc"
 }
-# Save the Android Library cache without Library/Bee (~7 GB of IL2CPP/Gradle intermediates after a build: task-cache
-# would tar it next to Library on a disk with ~8 GB left). Bee is set aside in Temp/ (same filesystem, git-ignored)
-# and put back, so the next apk on this VM stays incremental.
-apk_cache_save() {
-  local aside="$PROJECT/Temp/apk-bee-aside" rc=0
-  rm -rf "$aside"
-  if [ -d "$PROJECT/Library/Bee" ]; then mkdir -p "$PROJECT/Temp"; mv "$PROJECT/Library/Bee" "$aside"; fi
-  cmd_cache save android || rc=$?
-  if [ -d "$aside" ]; then mv "$aside" "$PROJECT/Library/Bee"; fi
-  return $rc
+# GNU mv -n can report success without moving anything. Check that the source
+# disappeared, and never move into a destination directory or replace it.
+apk_bee_move() {
+  mv -nT -- "$1" "$2" || return "$?"
+  [ ! -e "$1" ] && [ ! -L "$1" ]
 }
 
-# Swapfiles of earlier apk runs that are gone (KILLed before their trap ran): swapoff and delete, so their space counts.
-apk_swap_reclaim() {
-  local f pid
-  for f in "$APK_SWAP_DIR"/linux-unity-apk.swap.*; do
-    [ -e "$f" ] || continue
-    pid="${f##*.}"
-    [ "$pid" != "$$" ] && ! kill -0 "$pid" 2>/dev/null || continue
-    as_root swapoff "$f" 2>/dev/null || true
-    as_root rm -f "$f"; log "apk: removed stale swapfile $f"
-  done
+apk_bee_restore() {
+  local aside="$PROJECT/Temp/apk-bee-aside" identity
+  [ -n "$APK_BEE_ID" ] && [ -d "$aside" ] || return 0
+  identity="$(stat -c '%d:%i' -- "$aside")" || return "$?"
+  # If move-out failed and another aside appeared, it isn't ours to restore.
+  [ "$identity" = "$APK_BEE_ID" ] || return 0
+  apk_bee_move "$aside" "$PROJECT/Library/Bee" || {
+    local rc=$?
+    log "error: could not restore Library/Bee; recover it from $aside"
+    return "$rc"
+  }
+  APK_BEE_ID=""
 }
+
+apk_cache_interrupt() {
+  # Don't exit in the gap between starting the cache job and recording its PID.
+  if [ "$APK_CACHE_STARTING" = 1 ]; then APK_CACHE_SIGNAL="$1"; else exit "$1"; fi
+}
+
+apk_cache_cleanup() {
+  if [ -n "$APK_CACHE_PID" ]; then
+    # The save (including its tar/upload children) runs in its own process
+    # group. Stop it before putting Bee back into the tree it was reading.
+    kill -KILL -- "-$APK_CACHE_PID" 2>/dev/null || :
+    wait "$APK_CACHE_PID" 2>/dev/null || :
+  fi
+  apk_bee_restore
+}
+
+# Save the cache without ~7 GB of Bee intermediates. Keep it on the project
+# filesystem so moving it aside and back doesn't copy those files.
+apk_cache_save() {
+  local bee="$PROJECT/Library/Bee" aside="$PROJECT/Temp/apk-bee-aside" save_rc=0 monitor=0 temp_device
+  if [ -e "$aside" ] || [ -L "$aside" ]; then
+    log "error: refusing to overwrite existing Bee aside $aside"
+    return 1
+  fi
+  if [ -d "$bee" ]; then
+    mkdir -p -- "$PROJECT/Temp" || return
+    # Only an atomic rename preserves Bee's identity across cancellation.
+    temp_device="$(stat -Lc '%d' -- "$PROJECT/Temp")" || return
+    APK_BEE_ID="$(stat -c '%d:%i' -- "$bee")" || return
+    if [ "${APK_BEE_ID%%:*}" != "$temp_device" ]; then
+      log "error: Library/Bee and Temp are on different filesystems; not moving Bee"
+      return 1
+    fi
+    apk_bee_move "$bee" "$aside" || {
+      local rc=$?
+      log "error: could not move Library/Bee aside to $aside"
+      return "$rc"
+    }
+  fi
+  APK_CACHE_STARTING=1
+  if [[ $- != *m* ]]; then set -m; monitor=1; fi
+  cmd_cache save android &
+  APK_CACHE_PID=$!
+  if [ "$monitor" = 1 ]; then set +m; fi
+  APK_CACHE_STARTING=0
+  [ -z "$APK_CACHE_SIGNAL" ] || exit "$APK_CACHE_SIGNAL"
+  wait "$APK_CACHE_PID" || save_rc=$?
+  APK_CACHE_PID=""
+  apk_bee_restore || return
+  # Provider failures are best-effort; losing track of Bee is not.
+  [ "$save_rc" = 0 ] || log "warning: cache-save failed (exit $save_rc)"
+}
+
+# Only ESRCH establishes that the owner is gone. EPERM (a live owner under
+# another UID) and unexpected probe failures both leave the file alone.
+apk_swap_pid_gone() {
+  local probe
+  if probe="$(LC_ALL=C kill -0 "$1" 2>&1)"; then return 1; fi
+  [[ "$probe" == *"($1) - No such process" ]]
+}
+
+# Reclaim both the legacy PID-only files and the new private allocations.
+apk_swap_reclaim() (
+  local dir entry f pid lock layout
+  dir="$(apk_swap_dir)" || return 0
+  # Without serialization a second reclaimer can validate a path just before the
+  # first unlinks it, allowing someone in a sticky directory to plant a replacement.
+  exec {lock}<"$dir" && flock -xn "$lock" || return 0
+  for entry in "${dir%/}"/linux-unity-apk.swap.* "${dir%/}"/linux-unity-apk.swapdir.*; do
+    layout=""
+    if [[ "${entry##*/}" =~ ^linux-unity-apk\.swap\.([1-9][0-9]{0,9})$ ]]; then
+      pid="${BASH_REMATCH[1]}"; f="$entry"
+    elif [[ "${entry##*/}" =~ ^linux-unity-apk\.swapdir\.[[:alnum:]]{10}\.([1-9][0-9]{0,9})$ ]]; then
+      pid="${BASH_REMATCH[1]}"; f="$entry/linux-unity-apk.swapfile"; layout=private
+      apk_swap_private_dir "$entry" || continue
+    else
+      continue
+    fi
+    [[ "$pid" != "$$" ]] && (( pid <= 2147483647 )) && apk_swap_pid_gone "$pid" || continue
+    if ! apk_swap_regular "$f" "$layout"; then
+      # The owner might have died between creating the directory and its file.
+      if [ "$layout" = private ]; then as_root rmdir -- "$entry" 2>/dev/null || :; fi
+      continue
+    fi
+    if ! as_root swapoff "$f" 2>/dev/null && ! apk_swap_inactive "$f"; then
+      log "warning: swapoff $f failed; keeping the stale swapfile"
+    elif apk_swap_remove "$f" "$layout"; then
+      log "apk: removed stale swapfile $f"
+    fi
+  done
+)
 
 # Build the configured APK for Android on Xvfb (never
 # -nographics: the player build needs a graphics device for shaders). A cold build (no Library/) restores the Android
@@ -136,7 +317,12 @@ cmd_apk() {
   size="$(stat -c %s "$PROJECT/$apk")"; sum="$(sha256sum "$PROJECT/$apk" | cut -c1-64)"
   # The Android Gradle build leaves its prefab scratch in the project root (not git-ignored before this).
   rm -rf "$PROJECT/.utmp"
-  if [ "$cold" = 1 ]; then apk_cache_save || log "warning: cache-save failed"; fi
+  if [ "$cold" = 1 ]; then
+    APK_BEE_ID="" APK_CACHE_PID="" APK_CACHE_STARTING=0 APK_CACHE_SIGNAL=""
+    chain_exit_trap apk_cache_cleanup
+    trap 'apk_cache_interrupt 143' TERM; trap 'apk_cache_interrupt 130' INT; trap 'apk_cache_interrupt 129' HUP
+    apk_cache_save || return
+  fi
   log "apk: $PROJECT/$apk"
   log "apk: size $size bytes ($((size / 1048576)) MB)"
   log "apk: sha256 $sum"
