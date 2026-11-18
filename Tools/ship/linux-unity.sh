@@ -185,8 +185,13 @@ cache_restore() {
 # and installations using that SHM_DIR. Refuse overlap instead of killing a peer.
 lock_unity() {
   [ -z "${UNITY_CLEANUP_FD:-}" ] || return 0
-  exec {UNITY_CLEANUP_FD}> "$SHM_DIR/.linux-unity-cleanup.lock"
-  flock -n "$UNITY_CLEANUP_FD" || die "another Unity run owns $SHM_DIR; wait for it or stop its checkout"
+  local lock="$SHM_DIR/.linux-unity-cleanup.lock" flock_args=(-n)
+  # Publish once with shared read access, without truncating/replacing a peer's
+  # inode. Linux flock can take an exclusive lock on a read-only descriptor.
+  [ -e "$lock" ] || (umask 022; set -C; : > "$lock") 2>/dev/null || true
+  exec {UNITY_CLEANUP_FD}< "$lock" || die "cannot read $lock; ensure all runner accounts have read access"
+  [ "$#" = 0 ] || flock_args=(-w "$1")
+  flock "${flock_args[@]}" "$UNITY_CLEANUP_FD" || die "another Unity run owns $SHM_DIR; wait for it or stop its checkout"
   chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
 }
 
@@ -333,7 +338,7 @@ same_proc() {
 # Kill the run of this script recorded in the pidfile and everything it launched (xvfb-run, Xvfb, timeout, the editor
 # and its helpers). Only that process tree: never `pkill -f`, never another editor.
 cmd_stop() {
-  local f pid start found=0 p procs new i left fd
+  local f pid start found=0 p procs new i left fd wrapper_live run
   for f in "$PIDFILE" "$PIDFILE_FALLBACK"; do
     [ -d "$(dirname "$f")" ] || continue
     if ! { exec {fd}> "$f.lock"; } 2>/dev/null; then log "stop: cannot open $f.lock; trying next pidfile"; continue; fi
@@ -341,8 +346,13 @@ cmd_stop() {
     if [ ! -f "$f" ]; then exec {fd}>&-; continue; fi
     found=1
     read -r pid start < "$f" || true
-    if [ -z "${pid:-}" ] || [ "$pid" = "$$" ] || [ "$(proc_start "$pid" || true)" != "$start" ]; then
-      log "stop: pid ${pid:-?} from $f is not running (stale pidfile removed)"; rm -f "$f"; exec {fd}>&-; continue
+    if ! [[ "${pid:-}" =~ ^[1-9][0-9]*$ && "${start:-}" =~ ^[0-9]+$ ]] || [ "$pid" = "$$" ]; then
+      log "stop: invalid owner in $f (stale pidfile removed)"; rm -f "$f"; exec {fd}>&-; continue
+    fi
+    run="$pid:$start"; wrapper_live=0; procs=""
+    if same_proc "$run"; then
+      kill -STOP "$pid" 2>/dev/null || true
+      wrapper_live=1; procs="$run"
     fi
     # Freeze the script (SIGSTOP), so it starts no further pass, then its tree until a scan finds nothing new: a
     # stopped process forks nothing, so no xvfb-run, Xvfb or editor can appear after the list is taken. Each entry
@@ -350,19 +360,27 @@ cmd_stop() {
     # The run's marker also finds what left the tree (orphans, other groups); after the grace period every
     # process still carrying it is KILLed until none is left, so what a TERM handler forked meanwhile (all's
     # licence return) dies too.
-    kill -STOP "$pid" 2>/dev/null || true
-    procs="$pid:$start"
     while :; do
       new=0
-      for p in $(descendants "$pid") $(marked "$pid:$start"); do
+      # If the wrapper died (or its PID was reused), only the run marker proves
+      # ownership. Never walk the tree of a process now using the wrapper PID.
+      for p in $(if [ "$wrapper_live" = 1 ] && same_proc "$run"; then descendants "$pid"; fi) $(marked "$run"); do
         case " $procs " in *" ${p%%:*}:"*) continue ;; esac
-        case "$p" in *:*) same_proc "$p" "$pid:$start" || continue ;; *) p="$p:$(proc_start "$p" || echo 0)" ;; esac
+        case "$p" in *:*) same_proc "$p" "$run" || continue ;; *) p="$p:$(proc_start "$p")" || continue ;; esac
+        same_proc "$p" || continue
         kill -STOP "${p%%:*}" 2>/dev/null || true; procs="$procs $p"; new=1
       done
       [ "$new" = 1 ] || break
     done
-    for p in $procs; do log "stop: killing ${p%%:*} ($(cat "/proc/${p%%:*}/comm" 2>/dev/null || echo gone))"; done
-    for p in $procs; do kill -TERM "${p%%:*}" 2>/dev/null || true; kill -CONT "${p%%:*}" 2>/dev/null || true; done
+    if [ -z "$procs" ]; then
+      log "stop: pid $pid from $f is not running (stale pidfile removed)"; rm -f "$f"; exec {fd}>&-; continue
+    fi
+    for p in $procs; do
+      same_proc "$p" || continue
+      log "stop: killing ${p%%:*} ($(cat "/proc/${p%%:*}/comm" 2>/dev/null || echo gone))"
+      kill -TERM "${p%%:*}" 2>/dev/null || true
+      same_proc "$p" && kill -CONT "${p%%:*}" 2>/dev/null || true
+    done
     sleep 2
     for p in $procs; do
       same_proc "$p" && kill -KILL "${p%%:*}" 2>/dev/null || true
@@ -370,14 +388,16 @@ cmd_stop() {
     # Until none is left; each listed pid:start is re-checked (start time and marker) right before its KILL.
     for i in $(seq 50); do
       left=0
-      for p in $(marked "$pid:$start"); do
-        same_proc "$p" "$pid:$start" || continue
+      for p in $(marked "$run"); do
+        same_proc "$p" "$run" || continue
         left=1; kill -KILL "${p%%:*}" 2>/dev/null || true
       done
       [ "$left" = 1 ] || break; sleep 0.1
     done
+    [ "$left" = 0 ] || die "stop: marked workers remain; kept $f for recovery"
+    # Verify that inherited descriptors drained before discarding the record.
+    lock_unity 2
     rm -f "$f"; exec {fd}>&-
-    lock_unity
     wipe_unity_shared_files
   done
   [ "$found" = 1 ] || log "stop: no pidfile ($PIDFILE): nothing this script started is running"

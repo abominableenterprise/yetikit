@@ -251,18 +251,22 @@ qr_build_attempt() (
     {
       printf '#!/bin/bash\nwatch=%q\n' "$watch"
       printf '%s\n' 'printf "%s\n" "$$" > "$watch/editor.pid" || exit 1' \
-        'while [ ! -f "$watch/registered" ]; do [ -d "$watch" ] || exit 1; sleep 0.01; done'
+        'while [ ! -f "$watch/registered" ]; do' \
+        '  [ -d "$watch" ] && kill -0 "$editor_supervisor" 2>/dev/null || exit 1' \
+        '  sleep 0.01' 'done'
       printf 'exec %q "$@"\n' "$bin"
     } > "$watch/editor-group"
     {
       printf '#!/bin/bash\nwatch=%q\n' "$watch"
-      declare -f qr_build_drain
-      printf '%s\n' 'set -m' 'pid=""; cancelled=0' \
+      declare -f qr_build_drain qr_worker_slot qr_worker_publish
+      printf '%s\n' 'pid=""; cancelled=0' 'export editor_supervisor=$$' \
+        'slot="$(qr_worker_slot "${QR_WORKER_ROOT:-}")" || exit 1' 'set -m' \
         'trap '\''cancelled=1'\'' HUP INT TERM' \
         'cancel() { trap "" HUP INT TERM; kill -TERM -- "-$pid" 2>/dev/null; kill -CONT -- "-$pid" 2>/dev/null; wait "$pid" 2>/dev/null; qr_build_drain; exit 143; }'
       # Latch signals across fork/$! registration; the child cannot exec until registration succeeds.
       printf '(set +m; exec %q "$@") &\npid=$!\nset +m\n' "$watch/editor-group"
       printf '%s\n' 'trap cancel HUP INT TERM' '[ "$cancelled" = 0 ] || cancel' \
+        'qr_worker_publish "$slot" "$pid" || cancel' \
         ': > "$watch/registered" || cancel' 'rc=0; wait "$pid" || rc=$?' \
         'qr_build_drain' 'exit "$rc"'
     } > "$watch/editor"

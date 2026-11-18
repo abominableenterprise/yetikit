@@ -65,8 +65,12 @@ finish/return any pre-vendoring session before switching toolsets. Shared watche
 ownership, activation locks, and seat-retirement protections are retained.
 Editor commands sharing `SHM_DIR` are serialized by a persistent cleanup lock:
 an overlapping runner fails before starting an editor or deleting shared memory.
-Wait for the active run or invoke `stop` from its checkout; never remove the lock
-file while a run is active.
+The lock is created with mode `0644` and opened read-only, so runner accounts
+sharing the directory need read access to the same file, not write access to it.
+If an older lock was created with a private mode, have its owner grant the other
+runner accounts read access in place. Do not remove or replace the lock file.
+Wait for the active run or invoke `stop` from its checkout as the run's account.
+`stop` also drains marked workers left by a killed wrapper.
 
 Cleanup removes stale `udsMem*`, `sem.udsMem*`, and the project's
 `Temp/UnityLockfile` only after a complete scan finds no Unity processes. The
