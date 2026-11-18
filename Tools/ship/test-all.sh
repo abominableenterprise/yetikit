@@ -39,7 +39,9 @@ is_slow() { grep -qE '^# test-all: slow([[:space:]]|$)' "$1"; }
 slow_references_script() {
   # Explicit basenames only: incidental comments and helper references must not
   # opt a slow fixture into --changed, including changes to test-all.sh itself.
-  awk -v script="$2" '
+  # Unlike awk -v, ENVIRON preserves literal backslashes in the basename.
+  MATCH_SCRIPT="$2" awk '
+    BEGIN {script = ENVIRON["MATCH_SCRIPT"]}
     $1 == "#" && $2 == "test-all:" && $3 == "slow" {
       for (i = 4; i <= NF; i++) if ($i == script) found = 1
     }
@@ -81,11 +83,16 @@ if ((changed)); then
   merge_base="$(git -C "$repo" merge-base "$base" HEAD)" || {
     echo "ERROR: cannot find merge-base with $base" >&2; exit 1;
   }
-  changed_paths="$(git -C "$repo" diff --name-only "$merge_base" -- "$tool_prefix/" .github/workflows/ship.yml)" || exit 1
-  untracked="$(git -C "$repo" ls-files --others --exclude-standard -- "$tool_prefix/" .github/workflows/ship.yml)" || exit 1
+  # Keep Git's NUL stream intact and check both producers before selecting tests.
+  changed_paths="$(mktemp)"
+  trap 'rm -f -- "$changed_paths"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  git -C "$repo" diff --name-only -z "$merge_base" -- "$tool_prefix/" .github/workflows/ship.yml > "$changed_paths" || exit 1
+  git -C "$repo" ls-files -z --others --exclude-standard -- "$tool_prefix/" .github/workflows/ship.yml >> "$changed_paths" || exit 1
   affected=()
   for test in ${selected[@]+"${selected[@]}"}; do
-    while IFS= read -r path; do
+    while IFS= read -r -d '' path; do
       case "$path" in
         "$tool_prefix"/tests/*.test.sh)
           if [ "$path" = "$tool_prefix/tests/${test##*/}" ]; then affected+=("$test"); break; fi
@@ -101,9 +108,10 @@ if ((changed)); then
           esac
           ;;
       esac
-    done <<< "$changed_paths
-$untracked"
+    done < "$changed_paths"
   done
+  rm -f -- "$changed_paths"
+  trap - EXIT INT TERM
   selected=( ${affected[@]+"${affected[@]}"} )
 fi
 if ((fast)); then
