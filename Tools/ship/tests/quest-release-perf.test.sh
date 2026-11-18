@@ -573,6 +573,16 @@ wrc=0; ( qr_main wait 0 ) > "$tmp/wait.out" 2>&1 || wrc=$?
 check 'wait fails mixed perf and preserves both per-device summaries' \
   '[ "$wrc" = 1 ] && grep -Fq "perf[$a]:" "$tmp/wait.out" && grep -Fq "perf[$b]:" "$tmp/wait.out"'
 
+reset_case
+run "$a" perf --seconds 2 --warmup 0
+check 'single-device capture publishes a root PASS in both formats' \
+  '[ "$rc" = 0 ] && json_is '\''.overall == "PASS"'\'' && grep -Fxq "Quest performance: PASS" "$run_dir/perf-summary.txt"'
+original_run="$run_dir"
+echo app-fail > "$tmp/state/b/profile"
+run "$a,$b" perf --seconds 2 --warmup 0
+check 'failing list capture retires both root reports in the reused run' \
+  '[ "$run_dir" = "$original_run" ] && [ "$rc" = 1 ] && [ ! -e "$report" ] && [ ! -e "$run_dir/perf-summary.txt" ] && jq -e '\''.overall == "FAIL"'\'' "$run_dir/devices/$b_path/perf-summary.json" >/dev/null && grep -Fxq "Quest performance: FAIL" "$run_dir/devices/$b_path/perf-summary.txt"'
+
 # Signal the owner deterministically before worker setup and after worker return.
 for boundary in early late; do
   reset_case
@@ -592,6 +602,9 @@ done
 for cancel_fault in none metadata restore-hang report-blocked pending; do
 reset_case
 if [ "$cancel_fault" = report-blocked ]; then
+  run "$b" perf --seconds 2 --warmup 0
+  check 'list cancellation fixture starts with a reused root PASS in both formats' \
+    '[ "$rc" = 0 ] && json_is '\''.overall == "PASS"'\'' && grep -Fxq "Quest performance: PASS" "$run_dir/perf-summary.txt"'
   echo restore > "$tmp/state/a/fault"
   cancel_serials="$a,$b"
 elif [ "$cancel_fault" = pending ]; then
@@ -653,6 +666,8 @@ if declare -F qr_perf >/dev/null; then
     check 'cancel on device B retries device A after two failed restorations without losing either record' \
       '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && restored a && restored b && [ "$(wc -l < "$tmp/state/a/restore-attempts")" = 3 ] && ! pending "$a" && ! pending "$b" && [ ! -e "$tmp/unowned-restores" ]'
   elif [ "$cancel_fault" = report-blocked ]; then
+    check 'cancelled list capture does not leave the previous root PASS reports' \
+      '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ ! -e "$report" ] && [ ! -e "$run_dir/perf-summary.txt" ]'
     recovery="adb -s $a shell am broadcast -a com.oculus.vrpowermanager.automation_disable"
     check 'failed per-device publication puts manual recovery in the owner summary and keeps the pending record' \
       '[ "$ready" = 1 ] && [ "$rc" = 1 ] && [ "$stopped" = 1 ] && [ -d "$run_dir/devices/$a_path/perf-summary.json" ] && [ -s "$tmp/state/a/restore-attempts" ] && ! restored a && [ ! -e "$QUEST_LOG_ROOT/run.lock" ] && pending "$a" && grep -Fq "$recovery" "$run_dir/summary.txt" && grep -Fq "$recovery" "$tmp/cancel.out"'
