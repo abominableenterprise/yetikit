@@ -74,6 +74,23 @@ qr_keystore_preflight() {
   qr_log "keystore preflight: $ks matches the expected certificate (${got:0:16}...)"
 }
 
+# Copy before verification, never hard-link: replacing or editing the source
+# must not change what adb reads. The lock owner removes the private step dir.
+qr_apk_snapshot() {
+  local source="$1" dir="$QR_STEP_DIR/$2" snapshot
+  [ -f "$source" ] || qr_die "verify: no APK at '$source'"
+  snapshot="$dir/${source##*/}"
+  mkdir "$dir" && cp -- "$source" "$snapshot" && chmod 400 "$snapshot" \
+    || qr_die "cannot stage APK '$source'"
+  printf '%s\n' "$snapshot"
+}
+
+# Keep rollback verification from replacing the primary APK's summary fields.
+qr_verify_rollback_snapshot() (
+  QR_RUN_DIR="$QR_RUN_DIR/rollback-verify"
+  mkdir -p "$QR_RUN_DIR" && qr_verify "$@"
+)
+
 qr_verify() {
   local apk="${1:-}" want got sha rc=0
   qr_require_certificate

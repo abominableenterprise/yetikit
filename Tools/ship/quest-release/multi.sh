@@ -122,28 +122,12 @@ qr_multi_finish() {
   return "$rc"
 }
 
-# Copy before verification, never hard-link: replacing or editing the source
-# must not change what adb reads. The worker's private step dir is removed by
-# the lock owner after the worker and any descendants have stopped.
-qr_multi_snapshot() {
-  local source="$1" dir="$QR_STEP_DIR/$2" snapshot
-  [ -f "$source" ] || qr_die "verify: no APK at '$source'"
-  snapshot="$dir/${source##*/}"
-  mkdir "$dir" && cp -- "$source" "$snapshot" && chmod 400 "$snapshot" \
-    || qr_die "cannot stage APK '$source'"
-  printf '%s\n' "$snapshot"
-}
-
 # The primary snapshot was verified by the caller before any headset work.
 qr_multi() {
-  local cmd="$1" force="$3" rollback="${4:-}" serial path step result rc total=0
-  local run="$QR_RUN_DIR" verified_dir QR_VERIFIED_APK="$2" QR_VERIFIED_ROLLBACK_APK=''
-  if [ -n "$rollback" ]; then
-    QR_VERIFIED_ROLLBACK_APK="$(qr_multi_snapshot "$rollback" rollback)" || return 3
-    # Rollback logs must not replace primary APK/provenance fields.
-    verified_dir="$run/rollback-verify"
-    mkdir -p "$verified_dir" || return 3
-    ( QR_RUN_DIR="$verified_dir"; qr_verify "$QR_VERIFIED_ROLLBACK_APK" "$rollback" ) || return 3
+  local cmd="$1" force="$3" serial path step result rc total=0
+  local run="$QR_RUN_DIR" QR_VERIFIED_APK="$2" QR_VERIFIED_ROLLBACK_APK="${4:-}"
+  if [ -n "$QR_VERIFIED_ROLLBACK_APK" ]; then
+    qr_verify_rollback_snapshot "$QR_VERIFIED_ROLLBACK_APK" "$5" || return 3
   fi
   for serial in "${QR_SERIALS[@]}"; do
     path="$(qr_serial_path "$serial")"
@@ -186,7 +170,7 @@ qr_multi_command() {
   if [ "$cmd" = install ]; then [ -n "$apk" ] || apk="$(qr_get apk '')"; fi
   if [ "$cmd" = rollback ] && [ -z "$apk" ]; then qr_die 'rollback: name the previous APK'; fi
   if [ "$cmd" != launch ]; then
-    snapshot="$(qr_multi_snapshot "$apk" primary)" || return 3
+    snapshot="$(qr_apk_snapshot "$apk" primary)" || return 3
     ( qr_java_setup && qr_verify "$snapshot" "$apk" ) || return 3
   fi
   qr_multi "$cmd" "$snapshot" "$force"
