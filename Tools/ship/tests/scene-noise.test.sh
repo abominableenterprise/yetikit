@@ -9,7 +9,7 @@ check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails
 # Do not pipe echo into grep -q under pipefail: an early match can close the
 # pipe before echo finishes, turning a successful assertion into SIGPIPE (141).
 output_has() { grep -q -- "$1" <<< "$out"; }
-clean() { git diff --quiet HEAD -- "$1"; }
+clean() { git diff --quiet HEAD -- ":(literal)$1"; }
 # The temp repo has no origin/main: HEAD is the base unless a case sets NOISE_BASE itself.
 export NOISE_BASE=HEAD
 
@@ -32,6 +32,9 @@ for p in Soda Cup; do
 done
 echo scene > Assets/Scenes/GeneratedScene.unity; echo stats > docs/art/world/stats.md
 echo code > Assets/Editor/World/GrabCatalog.cs
+custom_art='Assets/Custom [Art]'
+mkdir -p "$custom_art" "$custom_art-sibling" 'Assets/Custom A'
+for dir in "$custom_art" "$custom_art-sibling" 'Assets/Custom A'; do mat '' > "$dir/Noise.mat"; done
 git add -A && git -c user.name=t -c user.email=t@t commit -qm base
 
 # Dirty before the build: Edited.mat.
@@ -61,6 +64,20 @@ check "atlas meshes and prefabs are reverted when no prop source changed" \
   'clean Assets/Art/Props/Soda/Soda_Atlas.asset && clean Assets/Art/Props/Cup/Cup.prefab'
 check "the scene and stats are never touched" '! clean Assets/Scenes/GeneratedScene.unity && ! clean docs/art/world/stats.md'
 check "every revert is printed" 'output_has "reverting Assets/Art/Props/Grabbables_Atlas.png"'
+
+# Run with an alternate config so the default cases below keep using the base config.
+for dir in "$custom_art" "$custom_art-sibling" 'Assets/Custom A'; do
+  mat $'    - _ZTest: 4\n' > "$dir/Noise.mat"
+done
+check 'default scene cleanup leaves art outside Assets/Art alone' \
+  'revert_editor_noise "$before" Assets/Art/World/Materials/Kept.mat && ! clean "$custom_art/Noise.mat"'
+mat $'    - _ZTest: 4\n' > Assets/Art/World/Materials/Fence.mat
+jq --arg p './Assets//Custom [Art]/' '.noise.artRoot = $p' yetikit.json > "$tmp/custom.json"
+check 'custom scene art root is normalized, literal and replaces Assets/Art in the scan' \
+  'YETIKIT_CONFIG="$tmp/custom.json" bash "$lib" && clean "$custom_art/Noise.mat" &&
+    ! clean "$custom_art-sibling/Noise.mat" && ! clean "Assets/Custom A/Noise.mat" &&
+    ! clean Assets/Art/World/Materials/Fence.mat'
+git checkout -q -- ":(literal)$custom_art" ":(literal)$custom_art-sibling" 'Assets/Custom A' Assets/Art/World/Materials/Fence.mat
 # Force a multi-write producer: the assertion must also work when the matching
 # line precedes more than a pipe buffer of diagnostics, regardless of scheduling.
 out+="$(printf '%131072s' '')"

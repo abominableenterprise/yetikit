@@ -222,6 +222,7 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `scene.areaSteps` | Optional nonempty array for area-only generation; default first scene step followed by `areaStep`. |
 | `scene.areasDir` | Relative directory of area prefabs; selected `Area.prefab` paths are protected. |
 | `scene.areasFile` | Optional relative area-to-builder glob table (`Area path-glob...`, comments with `#`); used for informational test selection output. |
+| `noise.artRoot` | Optional project-relative directory scanned for scene serialization noise; default `Assets/Art`. Other configured noise paths are still checked independently. |
 | `noise.protectedRegex` | Protected-path ERE; default `^Assets/Scenes/`. |
 | `noise.sourceRegex` | Prop-source extension ERE; default GLB/FBX/image extensions, including `.meta`. |
 | `noise.generatorsRegex` | Generator-source path ERE; disabled if omitted. |
@@ -356,6 +357,7 @@ projects must supply a development execute method for this runner).
     "package": "com.example.game",
     "worktreeRoot": "$HOME/wt/consumer",
     "apkKeepName": "game-dev-{sha}.apk",
+    "backupPrefix": "consumer-backup-",
     "perfLogTag": "[GamePerf]",
     "launcherChecks": {
       "package": "com.example.game",
@@ -382,10 +384,11 @@ projects must supply a development execute method for this runner).
 | `package` | Required dotted Android application ID. Used for launcher verification, data storage and process/crash attribution. |
 | `worktreeRoot` | Nonempty path; default `$HOME/wt/<repo name>`. Relative paths resolve against the project; leading `~/` and `$HOME/` expand without shell evaluation. |
 | `apkKeepName` | Filename pattern containing `{sha}`, default `game-dev-{sha}.apk`. Only letters, digits, `.`, `_`, `-` and braces; no directories. Substitutes the nine-character commit prefix. |
+| `backupPrefix` | Backup folder name prefix, default `Quest-playtest-backup-`. Use letters, digits or `_` first; remaining characters may also include `.` and `-`. The timestamp is appended directly, followed by a device suffix for multi-headset runs. The parent directory is still selected by `QUEST_BACKUP_ROOT`. |
 | `perfLogTag` | Optional literal log tag preceding `fps=…`; omitted means no FPS extraction. |
 | `launcherChecks` | Optional object; Unity GameActivity/VR launcher/theme and ZIP checks always apply. |
 | `launcherChecks.package` | Optional expected package, must equal `quest.package`. |
-| `launcherChecks.permissions` | Optional array of required permission names; default empty. |
+| `launcherChecks.permissions` | Optional array of full permission names required in the APK. After install or rollback, the report shows only these permissions' grant states. An omitted or empty list skips the device permission query. |
 | `launcherChecks.assets` | Optional array of exact required APK archive paths; default empty. No absolute paths or parent traversal. |
 | `whatsNewEnv` | Build notes environment-variable name; default `YETIKIT_WHATS_NEW`. `--notes` exports the absolute notes filename. |
 | `prevShaEnv` | Previous-installed-commit environment-variable name; default `YETIKIT_PREV_SHA`. Build receives the latest successful install's commit unless already supplied. |

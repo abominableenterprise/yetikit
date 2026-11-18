@@ -4,7 +4,8 @@ def canonical: split("/") | map(select(. != "" and . != ".")) | join("/") | if .
 reduce (["build", "apkPath"], ["build", "releaseApkPath"], ["build", "profile"],
         ["knownFlakes"], ["scene", "lightmapDir"], ["scene", "areasDir"], ["scene", "areasFile"],
         ["tests", "root"], ["tests", "editModeRoot"], ["tests", "scriptsRoot"], ["tests", "editorRoot"],
-        ["noise", "atlasPath"], ["noise", "timeManagerPath"], ["noise", "specularMaterialPath"], ["noise", "propsDir"]) as $p
+        ["noise", "artRoot"], ["noise", "atlasPath"], ["noise", "timeManagerPath"],
+        ["noise", "specularMaterialPath"], ["noise", "propsDir"]) as $p
   (.; if getpath($p) == null then .
        elif $p == ["knownFlakes"] and (getpath($p) | startswith("/")) then .
        else setpath($p; getpath($p) | canonical) end)

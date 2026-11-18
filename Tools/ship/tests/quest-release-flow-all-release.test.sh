@@ -14,6 +14,6 @@ check "all: the happy path verifies, installs, launches and cleans up" \
   '[ "$rc" = 0 ] && [ "$(cat "$tmp/installed")" = "$apk" ] && grep -q "logcat -d" "$tmp/adb.log" && [ ! -d "$root/rel-$short-test" ] && [ ! -d "$root/rel-$short-build" ]'
 check "all: the keystore preflight runs once, not again in build" '[ "$(grep -c . "$tmp/keytool.log")" = 1 ]'
 check "all: the summary block has every field" \
-  'for f in commit: gate: "gate fails:" apk: "apk sha256:" cert: "idle check:" backup: install: "data hash:" mic: launch:; do grep -q "^$f" "$tmp/out" || exit 1; done'
+  'for f in commit: gate: "gate fails:" apk: "apk sha256:" cert: "idle check:" backup: install: "data hash:" permissions: launch:; do grep -q "^$f" "$tmp/out" || exit 1; done'
 
 qr_flow_finish
