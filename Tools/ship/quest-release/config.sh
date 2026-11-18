@@ -37,6 +37,7 @@ qr_config() {
   QR_WHATS_NEW_ENV="$(qr_config_get '.quest.whatsNewEnv // "YETIKIT_WHATS_NEW"')"
   QR_PREV_SHA_ENV="$(qr_config_get '.quest.prevShaEnv // "YETIKIT_PREV_SHA"')"
   QR_LAUNCH_ARGS="$(qr_config_get '.quest.launchArgs // []')"
+  QR_LAUNCH_LOG_TAGS="$(qr_config_get '.quest.launchLogTags[]?')"
   QR_PERF_WARMUP="$(qr_config_get '.quest.perf.warmupSeconds // 10')"
   QR_PERF_SECONDS="$(qr_config_get '.quest.perf.seconds // 60')"
   QR_PERF_MAX_STALE="$(qr_config_get '.quest.perf.maxStalePercent // 1')"

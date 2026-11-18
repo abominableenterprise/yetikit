@@ -367,6 +367,7 @@ qr_launch_locked() {
   crashes="$(wc -l < "$QR_RUN_DIR/launch-game-crashes.txt" | tr -d ' ')"
   {
     echo "fps (configured tag): ${fps:-none}"
+    qr_launch_log_tag_counts "$cat"
     echo "E/Unity lines ($errs):"; grep -E "$QR_RE_UNITY_ERR" "$cat" | head -n 10
     echo "FATAL/AndroidRuntime lines ($fatal):"; grep -E "$QR_RE_FATAL" "$cat" | head -n 20
     echo "process alive: $alive${pid:+ (pid $pid)}"

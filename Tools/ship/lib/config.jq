@@ -4,6 +4,9 @@ def relpath:
   if nonempty then (startswith("/") | not) and
     (split("/") | all(. != "..")) and . != "."
   else false end;
+def apk_asset:
+  if type == "object" then keys == ["glob"] and (.glob | relpath)
+  else relpath end;
 def strings: if type == "array" then all(.[]; nonempty) else false end;
 def methods: if strings then length > 0 else false end;
 def invalid($key): "missing or invalid key: \($key)";
@@ -64,11 +67,12 @@ elif has("quest") and (.quest | has("signing")) and (.quest.signing.keyAliasEnv 
 elif has("quest") and (.quest.signing // {} | has("keyPassEnv")) and (.quest.signing.keyPassEnv | envname | not) then invalid("quest.signing.keyPassEnv")
 elif has("quest") and (.quest | has("dataFiles")) and (.quest.dataFiles | basenames | not) then invalid("quest.dataFiles")
 elif has("quest") and (.quest | has("launchArgs")) and (.quest.launchArgs | strings | not) then invalid("quest.launchArgs")
+elif has("quest") and (.quest | has("launchLogTags")) and (.quest.launchLogTags | strings | not) then invalid("quest.launchLogTags")
 elif has("quest") and (.quest | has("launcherChecks")) and (.quest.launcherChecks | type) != "object" then invalid("quest.launcherChecks")
 elif has("quest") and (.quest.launcherChecks // {} | has("package")) and (.quest.launcherChecks.package != .quest.package) then invalid("quest.launcherChecks.package (must match quest.package)")
 elif has("quest") and (.quest.launcherChecks // {} | has("permissions")) and (.quest.launcherChecks.permissions | strings | not) then invalid("quest.launcherChecks.permissions")
 elif has("quest") and (.quest.launcherChecks // {} | has("assets")) and
-  (.quest.launcherChecks.assets | if type == "array" then all(.[]; relpath) else false end | not) then invalid("quest.launcherChecks.assets")
+  (.quest.launcherChecks.assets | if type == "array" then all(.[]; apk_asset) else false end | not) then invalid("quest.launcherChecks.assets")
 elif has("setup") and (.setup | type) != "object" then invalid("setup")
 elif has("setup") and (.setup | has("craneArchive")) and (.setup.craneArchive | nonempty | not) then invalid("setup.craneArchive")
 elif has("labMethod") and (.labMethod | nonempty | not) then invalid("labMethod")

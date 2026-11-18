@@ -53,6 +53,18 @@ for expression in '.schema = 2' 'del(.quest.package)' '.quest.package = ""' '.qu
   mutate "$expression"; load
   check "rejects invalid config: $expression" '[ "$rc" != 0 ]'
 done
+for expression in '.quest.launchLogTags = "Unity"' '.quest.launchLogTags = null' \
+  '.quest.launchLogTags = [7]' '.quest.launchLogTags = [""]' '.quest.launchLogTags = ["bad\ntag"]' \
+  '.quest.launcherChecks.assets = [{"glob":"/assets/*"}]' '.quest.launcherChecks.assets = [{"glob":"assets/../*"}]' \
+  '.quest.launcherChecks.assets = [{"glob":""}]' '.quest.launcherChecks.assets = [{"glob":7}]' \
+  '.quest.launcherChecks.assets = [{"glob":"assets/*","other":true}]'; do
+  mutate "$expression"; load
+  key="${expression%% =*}"
+  check "rejects $expression by key" '[ "$rc" != 0 ] && grep -Fq "${key#.}" "$tmp/err"'
+done
+mutate '.quest.launchLogTags = ["Unity", "Synthetic.Tag"] | .quest.launcherChecks.assets = ["assets/exact.bin", {"glob":"assets/*.bin"}]'
+load
+check 'schema accepts literal launch tags and mixed exact/glob APK assets' '[ "$rc" = 0 ]'
 for value in null 42 '""' '"../outside-"' '"/tmp/backup-"' '"nested/backup-"' '".hidden-"' '"backup\n-"'; do
   mutate ".quest.backupPrefix = $value"; load
   check "rejects invalid backup prefix: $value" '[ "$rc" != 0 ] && grep -Fq quest.backupPrefix "$tmp/err"'

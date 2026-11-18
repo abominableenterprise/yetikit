@@ -74,7 +74,7 @@ with tempfile.TemporaryDirectory() as directory:
     shard = int(os.environ.get('LAUNCHER_TEST_SHARD', '0'))
     ordinal = 0
 
-    def run(target, expected, label, configured=True, contest=False):
+    def run(target, expected, label, configured=True, contest=False, error=None):
         global ordinal
         ordinal += 1
         if ordinal % 2 != shard:
@@ -86,7 +86,7 @@ with tempfile.TemporaryDirectory() as directory:
             args += ['--config', str(config)]
         result = subprocess.run(args + [str(target)], capture_output=True, text=True,
                                 env={**os.environ, 'AAPT': str(path / 'aapt')})
-        if (result.returncode == 0) != expected:
+        if (result.returncode == 0) != expected or (error is not None and error not in result.stderr):
             failures.append(f'{label}: exit {result.returncode}: {result.stdout}{result.stderr}')
 
     # Source checks remain mandatory with no config and with empty optional checks.
@@ -185,6 +185,32 @@ with tempfile.TemporaryDirectory() as directory:
     run(apk, True, 'launcherChecks omitted')
     make_apk()
     run(apk, True, 'contest launcherChecks omitted', contest=True)
+
+    checks = settings['quest']['launcherChecks'] = {'assets': [{'glob': 'assets/synthetic-*.bin'}]}
+    config.write_text(json.dumps(settings))
+    run(apk, True, 'APK asset glob matches a file')
+    run(apk, False, 'contest disallows any match for a configured glob', contest=True,
+        error='contest build ships APK asset matching glob assets/synthetic-*.bin')
+    make_apk(payload=False)
+    with zipfile.ZipFile(apk, 'a') as archive:
+        archive.writestr('assets/SYNTHETIC-payload.bin', 'different case')
+        archive.writestr('assets/synthetic-dir.bin/', '')
+    checks['assets'] = [{'glob': 'assets/synthetic-*'}]
+    config.write_text(json.dumps(settings))
+    run(apk, False, 'unmatched APK asset glob names the pattern',
+        error='missing APK asset matching glob assets/synthetic-*')
+    run(apk, True, 'contest allows an unmatched glob', contest=True)
+    checks['assets'] = ['assets/synthetic-*.bin']
+    config.write_text(json.dumps(settings))
+    make_apk()
+    run(apk, False, 'wildcard in string form stays literal', error='missing APK asset assets/synthetic-*.bin')
+    with zipfile.ZipFile(apk, 'a') as archive:
+        archive.writestr('assets/synthetic-*.bin', 'literal wildcard')
+    run(apk, True, 'literal wildcard entry still satisfies an exact requirement')
+    for invalid in ({'glob': '../assets/*'}, {'glob': '/assets/*'}, {'glob': 'assets/*', 'extra': True}, {'glob': None}):
+        checks['assets'] = [invalid]
+        config.write_text(json.dumps(settings))
+        run(apk, False, f'reject invalid asset glob {invalid}', error='launcherChecks.assets')
 
 assert not failures, 'Android launcher regressions:\n' + '\n'.join(failures)
 print('android launcher synthetic source and APK checks passed')

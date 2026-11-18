@@ -14,6 +14,7 @@ check "launch has no consumer-specific boot extras" \
   '! grep -q -- "--es" "$tmp/adb.log"'
 check "launch reports configured fps and E/Unity lines and a live process" \
   'grep -q "launch:      fps 71.9.*E/Unity 1.*fatal 1.*alive yes" "$tmp/out" && out_has "NullReferenceException: boom"'
+check "launch emits no tag counts when quest.launchLogTags is unset" '! out_has "logcat tag \[" && ! grep -Fq "logcat tag [" "$root"/release-logs/"$short"-*/launch-report.txt'
 check "a healthy launch does not warn about the shell interstitial" '! out_has "WARN.*Quest shell"'
 for broadcast in appLaunchFailureBroadcastReceived sendExtendedInterstitialBroadcast; do
   reset_logs; FAKE_LOGCAT="$FAKE_LOGCAT
@@ -35,5 +36,23 @@ reset_logs; FAKE_LOGCAT="$FAKE_LOGCAT
 11-01 12:00:31.000  1234  1234 I VrShell: appLaunchFailureBroadcastReceived packageName=com.example.consumer resolution HEALTHY_INSTALLATION" run launch
 check "both shell broadcasts are counted without converting them into a crash" \
   '[ "$rc" = 0 ] && out_has "shell launch warnings 2" && ! grep -q "launch:      CRASH" "$tmp/out"'
+
+# This case mutates the config, so restore the real loader instead of the fixture's immutable cache.
+unset -f jq qr_config_get
+. "$QR_DIR/quest-release/config.sh"
+jq '.quest.launchLogTags = ["Synthetic.Tag", "Synthetic\\Tag", "Synthetic:Part", "NotSeen"]' "$YETIKIT_CONFIG" > "$tmp/tag-config.json"
+export YETIKIT_CONFIG="$tmp/tag-config.json"
+reset_logs; FAKE_LOGCAT="$FAKE_LOGCAT
+10-31 12:00:33.000  4242  4260 I Synthetic.Tag : synthetic line
+W/Synthetic.Tag( 4242): another line
+10-31 12:00:34.000  4242  4260 I SyntheticXTag : looks like a regex match
+10-31 12:00:35.000  4242  4260 I Synthetic.TagExtra : prefixed tag
+10-31 12:00:36.000  4242  4260 I Synthetic\Tag : backslash is literal
+10-31 12:00:37.000  4242  4260 I Unity : Synthetic.Tag: not its tag
+10-31 12:00:38.000  4242  4260 I Synthetic:Part: a colon within the tag" run launch
+check "launch prints exact tag counts (including zero) without additional adb calls" \
+  '[ "$rc" = 0 ] && [ "$(grep -c "logcat -d" "$tmp/adb.log")" = 1 ] && test "$(grep -F "logcat tag [" "$tmp/out")" = "$(printf "%s\n" "logcat tag [Synthetic.Tag]: 2" "logcat tag [Synthetic\Tag]: 1" "logcat tag [Synthetic:Part]: 1" "logcat tag [NotSeen]: 0")"'
+check "launch saves tag counts in the launch report" \
+  'grep -Fq "logcat tag [Synthetic.Tag]: 2" "$root"/release-logs/"$short"-*/launch-report.txt'
 
 qr_flow_finish
