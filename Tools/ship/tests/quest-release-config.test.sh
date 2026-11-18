@@ -53,6 +53,9 @@ for expression in '.schema = 2' 'del(.quest.package)' '.quest.package = ""' '.qu
   mutate "$expression"; load
   check "rejects invalid config: $expression" '[ "$rc" != 0 ]'
 done
+mutate '.noise.codeRegex = "["'
+load
+check 'Quest config rejects malformed noise regex by key' '[ "$rc" != 0 ] && grep -Fq noise.codeRegex "$tmp/err"'
 mutate 'del(.quest)'
 load
 check 'Quest entry point requires quest block' '[ "$rc" != 0 ]'
