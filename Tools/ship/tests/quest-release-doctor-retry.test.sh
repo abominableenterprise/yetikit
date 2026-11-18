@@ -21,7 +21,7 @@ adb() {
     get-state)
       case "$scenario" in
         unauthorized) echo 'error: device unauthorized' >&2; return 1 ;;
-        wrong-maker) echo device ;;
+        wrong-maker|stdin) echo device ;;
         recover|discover)
           if [ -f "$tmp/waited" ]; then echo device
           else echo 'error: device offline' >&2; return 1; fi ;;
@@ -36,7 +36,14 @@ adb() {
       if [ "$scenario" = persist ]; then qr_test_block_until_term "$tmp/wait"
       elif [ -f "$tmp/reconnected" ]; then touch "$tmp/waited"
       else return 99; fi ;;
-    shell) shift; fake_shell "$*" ;;
+    shell)
+      shift
+      if [ "$scenario" = stdin ] && [ "$*" = 'getprop ro.product.manufacturer' ]; then
+        # adb shell can read stdin. A timed background probe must never read
+        # the terminal (SIGTTIN) or consume the caller's input.
+        if IFS= read -r ignored; then return 99; fi
+      fi
+      fake_shell "$*" ;;
     *) return 99 ;;
   esac
 }
@@ -47,6 +54,10 @@ check_recovered() {
     [ ! -e "$root/release-logs" ]
 }
 device_lock="/tmp/yetikit-quest-device-locks-$UID/$(printf '%s' "$serial" | qr_sha256).lock"
+scenario=stdin run doctor <<< 'caller input'
+check 'the timed manufacturer probe never reads caller stdin' \
+  '[ "$rc" = 0 ] && grep -q "^ok .*device .*manufacturer Oculus" "$tmp/out"'
+rm -f "$tmp/adb.log"
 scenario=recover run doctor
 check 'doctor reconnects only the selected serial and validates it after the wait' 'check_recovered'
 rm -f "$tmp/waited" "$tmp/reconnected" "$tmp/adb.log"

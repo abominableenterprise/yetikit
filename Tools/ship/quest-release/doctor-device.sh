@@ -4,7 +4,7 @@
 qr_doctor_reconnect() {
   local remaining=$((deadline - SECONDS))
   [ "$remaining" -gt 0 ] || return 124
-  ( qr_timebox_supervise "$remaining" 0 qr_doctor_reconnect_probe "$1" )
+  ( qr_timebox_supervise "$remaining" 0 qr_doctor_reconnect_probe "$1" </dev/null )
 }
 
 qr_doctor_reconnect_probe() {
@@ -19,8 +19,9 @@ qr_doctor_device() {
   local why verdict rc=0 deadline result
   command -v adb >/dev/null 2>&1 || { qr_doctor_line FAIL device "no adb on PATH"; qr_doctor_line warn idle "not checked (no device)"; return; }
   deadline=$((SECONDS + QR_DEVICE_CHECK_WAIT))
-  # Use the in-shell supervisor: the timed probe is a shell function.
-  why="$(qr_timebox_supervise "$QR_DEVICE_CHECK_WAIT" 0 qr_device_status doctor)" || rc=$?
+  # The in-shell supervisor runs the probe in a background process group.
+  # Keep adb shell from reading the terminal and stopping on SIGTTIN.
+  why="$(qr_timebox_supervise "$QR_DEVICE_CHECK_WAIT" 0 qr_device_status doctor </dev/null)" || rc=$?
   if [ "$rc" = 2 ]; then
     rc=0
     result="$(qr_device_locked qr_doctor_reconnect "$why")" || rc=$?
