@@ -105,7 +105,8 @@ unity_pids_as_root() {
     elevate=(sudo -n --)
     shift
   fi
-  "${elevate[@]}" env UNITY_ROOT="$UNITY_ROOT" bash -c "$(declare -f unity_pids); unity_pids \"\$@\"" _ "$@"
+  "${elevate[@]}" env UNITY_ROOT="$UNITY_ROOT" LC_REL="$LC_REL" \
+    bash -c "$(declare -f unity_pids); unity_pids \"\$@\"" _ "$@"
 }
 
 refuse_editor_in_use() {
