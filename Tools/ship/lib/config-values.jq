@@ -29,7 +29,6 @@
   [".scene.lightmapDir // empty", ([.scene.lightmapDir // empty] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".scene.steps[]", ([.scene.steps[]?] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".setup.craneArchive // empty", ([.setup.craneArchive // empty] | map(if type == "string" then . else tostring end) | join("\n"))],
-  [".tests.builderFixtures // {} | to_entries[] | .key as $path | .value[] | [$path, .] | @tsv", ([.tests.builderFixtures // {} | to_entries[] | .key as $path | .value[] | [$path, .] | @tsv] | map(if type == "string" then . else tostring end) | join("\n"))],
   [".tests.root // \"Assets/Tests\"", .tests.root // "Assets/Tests"],
   ["(.tests // {}) | has(\"prPure\")", (.tests // {} | has("prPure") | tostring)],
   [".tests.prPure.smokeFixtures[]?", ([.tests.prPure.smokeFixtures[]?] | join("\n"))],

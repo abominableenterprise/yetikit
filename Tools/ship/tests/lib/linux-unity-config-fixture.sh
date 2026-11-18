@@ -19,7 +19,7 @@ invalid() {
 config_test_roots() {
   local key value
   for key in "$@"; do
-    for value in '"/outside"' '"Assets/../outside"' '42' 'null' '""'; do
+    for value in '"/outside"' '"Assets/../outside"' '42' 'null' '""' '"."' '"./"' '"././"'; do
       invalid ".tests.$key = $value" "tests.$key"
     done
   done
