@@ -93,7 +93,6 @@ BIN_DIR="${BIN_DIR:-$HOME/bin}"
 OUT_DIR="${OUT_DIR:-$PROJECT/build}"
 ULF="${ULF:-$HOME/.local/share/unity3d/Unity/Unity_lic.ulf}"
 SHM_DIR="${SHM_DIR:-/dev/shm}"
-LIGHTMAP_DIR="$(ship_config_get '.scene.lightmapDir // empty')"
 # Seconds per editor run (open, scene, the pure pass). The Gfx pass (every run of the Gfx category: test editmode's
 # second pass, a caller's -testCategory naming Gfx, test pr's Gfx pass) gets UNITY_GFX_TIMEOUT instead: 3600 by
 # default (112 Gfx tests took 1,872 s on a 4 vCPU llvmpipe VM on 2026-11-01). A caller's UNITY_GFX_TIMEOUT wins,
@@ -411,6 +410,15 @@ revert_run_noise_after() {
   (cd "$PROJECT" && revert_run_noise "$1" ${RUN_KEEP[@]+"${RUN_KEEP[@]}"})
 }
 
+# Scene and lab arm this only after capturing the pre-run snapshot. Keep the
+# command and its arguments in an array so EXIT can run it even if Bash has
+# already unwound the command's locals. chain_exit_trap retains the exit status.
+finish_interrupted_noise() {
+  [ -n "${NOISE_EXIT_CLEANUP[0]:-}" ] || return 0
+  "${NOISE_EXIT_CLEANUP[@]}"
+}
+NOISE_EXIT_CLEANUP=()
+
 # The editor work succeeded but the noise revert failed with exit $1: save the files dirty before the run ($2) to
 # $OUT_DIR/noise-before.txt, print a distinct line ($3: what succeeded) with the scene-noise.sh command that finishes
 # the job (remaining args: its extra options), and return NOISE_REVERT_RC.
@@ -462,14 +470,14 @@ cmd_scene() {
   done
   mkdir -p "$OUT_DIR"
   cleanup_unity
-  local m step rc=0 dirty_before noise_before steps=()
+  local m step rc=0 noise_before steps=()
   if [ ${#areas[@]} = 0 ]; then
     mapfile -t steps < <(ship_config_get '.scene.steps[]')
   else
     mapfile -t steps < <(ship_config_get '.scene.areaSteps // [.scene.steps[0], .scene.areaStep] | .[]')
   fi
-  dirty_before="$(lightmap_meta_changes)"
-  noise_before="$(cd "$PROJECT" && noise_dirty_files)"
+  noise_before="$(cd "$PROJECT" && noise_dirty_files)" || return
+  NOISE_EXIT_CLEANUP=(revert_scene_noise_after "$noise_before" ${keep[@]+"${keep[@]}"})
   for m in "${steps[@]}"; do
     step="${m%.*}"; step="${step##*.}"
     log "scene: $m${areas[*]:+ ${areas[*]}}"
@@ -478,18 +486,21 @@ cmd_scene() {
     unity -quit -executeMethod "$m" ${extra[@]+"${extra[@]}"} -logFile "$OUT_DIR/scene-$step.log" \
       || { rc=$?; break; }
   done
-  local nrc=0 brc=0
-  noise_lock_checked revert_bake_noise "$dirty_before" ${keep[@]+"${keep[@]}"} || brc=$?
-  (cd "$PROJECT" && revert_editor_noise "$noise_before" ${keep[@]+"${keep[@]}"}) || nrc=$?
-  [ "$nrc" != 0 ] || nrc=$brc
-  [ "$rc" = 0 ] || die "$m failed (exit $rc; see $OUT_DIR/scene-$step.log); noise cleanup exit $nrc"
+  local nrc=0
+  finish_interrupted_noise || nrc=$?
+  NOISE_EXIT_CLEANUP=()
+  if [ "$rc" != 0 ]; then
+    log "error: $m failed (exit $rc; see $OUT_DIR/scene-$step.log); noise cleanup exit $nrc"
+    return "$rc"
+  fi
   log "scene rebuilt"
   if [ "$nrc" != 0 ]; then
-    [ "$brc" = 0 ] || log "the bake revert failed too: check $LIGHTMAP_DIR/Lightmap-*.exr.meta for bake-only platformSettings diffs"
     RUN_KEEP=(${keep[@]+"${keep[@]}"})
-    noise_revert_failed "$nrc" "$(printf '%s\n' "$noise_before" "$dirty_before" | sort -u)" "scene rebuilt"
+    noise_revert_failed "$nrc" "$noise_before" "scene rebuilt"
   fi
 }
+
+revert_scene_noise_after() { (cd "$PROJECT" && revert_scene_noise "$@"); }
 
 cmd_lab() {
   parse_keep "$@"
@@ -499,41 +510,18 @@ cmd_lab() {
   [ -n "$method" ] || die "lab: missing key labMethod in yetikit.json"
   mkdir -p "$OUT_DIR"
   cleanup_unity
-  before="$(run_noise_before)"
+  before="$(run_noise_before)" || return
+  NOISE_EXIT_CLEANUP=(revert_run_noise_after "$before")
   log "lab: $method"
   unity -quit -executeMethod "$method" -logFile "$OUT_DIR/scene-lab.log" || rc=$?
-  revert_run_noise_after "$before" || nrc=$?
-  [ "$rc" = 0 ] || die "$method failed (see $OUT_DIR/scene-lab.log); noise cleanup exit $nrc"
+  finish_interrupted_noise || nrc=$?
+  NOISE_EXIT_CLEANUP=()
+  if [ "$rc" != 0 ]; then
+    log "error: $method failed (exit $rc; see $OUT_DIR/scene-lab.log); noise cleanup exit $nrc"
+    return "$rc"
+  fi
   log "lab rebuilt"
   [ "$nrc" = 0 ] || noise_revert_failed "$nrc" "$before" "lab rebuilt" --run
-}
-
-lightmap_meta_changes() { [ -n "$LIGHTMAP_DIR" ] || return 0; (cd "$PROJECT" && noise_git diff --name-only -- "$LIGHTMAP_DIR/Lightmap-*.exr.meta"); }
-
-# Print a .meta without its `platformSettings:` block (up to the next key at the same indent).
-strip_platform_settings() { awk '/^  platformSettings:/ { skip = 1; next } skip && /^  [^ -]/ { skip = 0 } !skip'; }
-
-# True when the working copy of $1 differs from HEAD only inside its platformSettings block.
-only_platform_settings_changed() {
-  (cd "$PROJECT" && noise_git cat-file -e "HEAD:$1" 2>/dev/null) || return 1
-  cmp -s <(cd "$PROJECT" && noise_git show "HEAD:$1" | strip_platform_settings) \
-    <(strip_platform_settings < "$PROJECT/$1")
-}
-
-# The Linux bake can add platform overrides to Lightmap-*.exr.meta: revert those, but never a .meta the developer had
-# already edited ($1: files dirty before the run), a --keep path (remaining args, normalised by noise_keep_path) or one
-# with changes outside platformSettings. Git calls retry on a held index.lock (noise_git); fails when one never got it.
-revert_bake_noise() {
-  local before="$1" f list; shift
-  NOISE_KEEP=("$@")
-  list="$(lightmap_meta_changes)" || return
-  for f in $list; do
-    if noise_kept "$f"; then log "keeping $f (--keep)"
-    elif grep -qxF -- "$f" <<< "$before"; then log "keeping $f (edited before scene)"
-    elif only_platform_settings_changed "$f"; then
-      log "reverting bake-only $f"; (cd "$PROJECT" && noise_git checkout -- "$f") || return
-    else log "keeping $f (changes outside platformSettings)"; fi
-  done
 }
 
 # One test pass: results in $OUT_DIR/<stem>.xml, log in <stem>.log. When it fails and every failed test is in
@@ -751,6 +739,7 @@ esac
 trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
 arm_seat_exit        # runs after the licence return below, so a returned licence releases the seat first
 arm_return_on_exit
+case "${1:-}" in scene|lab) chain_exit_trap finish_interrupted_noise ;; esac
 case "${1:-}" in
   setup) shift; cmd_setup "$@" ;;
   apk) shift; cmd_apk "$@" ;;

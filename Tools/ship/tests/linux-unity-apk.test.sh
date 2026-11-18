@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-all: slow linux-unity.sh android.sh
+# test-all: slow linux-unity.sh android.sh linux-unity-setup.sh
 # APK build arguments, reports, validation and failures. Uses a fake editor; never runs Unity.
 # Run: bash Tools/ship/tests/linux-unity-apk.test.sh
 set -euo pipefail

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-all: slow linux-unity.sh
+# test-all: slow linux-unity.sh android.sh test-passes.sh
 # Default editor limits: pure passes use 1800 s, Gfx passes use 3600 s.
 # Fake editor and logging timeout only; checks are eval'd when they run.
 # shellcheck disable=SC2016,SC2034

@@ -62,13 +62,16 @@ NOISE_REPACK_RE="$(ship_config_get '.noise.repackRegex // "a^"')"
 NOISE_LIGHTMAP_DIR="$(ship_config_get '.scene.lightmapDir // ""')"
 NOISE_LIGHTMAP_DIR="${NOISE_LIGHTMAP_DIR%/}"
 
-# Tracked files whose working tree or index differs from HEAD, plus untracked files (one path per line).
+# Tracked files whose working tree or index differs from HEAD, plus untracked files. Keep the
+# human-readable --before snapshot format, but use raw Git names instead of C-quoted display names.
+noise_path_lines() { tr '\000' '\n'; }
+
 # Include staged edits even if the working file was restored to HEAD: cleanup validates against HEAD,
 # but `git checkout -- <path>` restores from the index. Never reintroduce a staged setting as editor noise.
 noise_dirty_files() {
-  noise_git diff --name-only HEAD -- || return
-  noise_git diff --cached --name-only HEAD -- || return
-  noise_git ls-files --others --exclude-standard
+  noise_git diff --name-only -z HEAD -- | noise_path_lines || return
+  noise_git diff --cached --name-only -z HEAD -- | noise_path_lines || return
+  noise_git ls-files -z --others --exclude-standard | noise_path_lines
 }
 
 # The merge-base of HEAD and the base branch ($NOISE_BASE, default origin/main); fails when there is none (no such
@@ -78,14 +81,14 @@ noise_merge_base() { noise_git merge-base HEAD "${NOISE_BASE:-origin/main}" 2>/d
 # Every path changed on this branch: working tree and untracked vs HEAD, and HEAD vs the merge-base $1 (when given).
 noise_changed_paths() {
   noise_dirty_files || return
-  if [ -n "${1:-}" ]; then noise_git diff --name-only "$1" HEAD --; fi
+  if [ -n "${1:-}" ]; then noise_git diff --name-only -z "$1" HEAD -- | noise_path_lines; fi
 }
 
 # True when $1's diff against HEAD only adds `_ZTest` entries (and turns `m_Floats: []` into a `m_Floats:` list).
 # A removed or changed `_ZTest` value is a real edit and is kept.
 noise_only_ztest() {
   local lines
-  lines="$(noise_git diff -U0 HEAD -- "$1")" || return 1
+  lines="$(noise_git diff -U0 HEAD -- ":(literal)$1")" || return 1
   lines="$(grep -E '^[+-]' <<< "$lines" | grep -vE '^(\+\+\+|---) ')" || return 1
   [ -n "$lines" ] || return 1
   # Here-strings, not `printf | grep -q`: grep -q exits at the first match, printf then dies of SIGPIPE and, under the
@@ -148,13 +151,29 @@ revert_editor_noise() { noise_lock_checked noise_revert_editor "$@"; }
 noise_revert_editor() {
   local before="$1"; shift
   NOISE_KEEP=("$@")
-  local changed all_changed f prop reason mb="" unknown=""
-  local -a paths=(":(literal)$NOISE_ART_ROOT/" "$NOISE_TIME_MANAGER" "$NOISE_PROPS_DIR")
-  [ -z "$NOISE_ATLAS" ] || paths+=("$NOISE_ATLAS")
-  [ -z "$NOISE_SPECULAR_MATERIAL" ] || paths+=("$NOISE_SPECULAR_MATERIAL")
+  local f
+  local -a paths=(":(literal)$NOISE_ART_ROOT/" ":(literal)$NOISE_TIME_MANAGER" ":(literal)$NOISE_PROPS_DIR")
+  [ -z "$NOISE_ATLAS" ] || paths+=(":(literal)$NOISE_ATLAS")
+  [ -z "$NOISE_SPECULAR_MATERIAL" ] || paths+=(":(literal)$NOISE_SPECULAR_MATERIAL")
   for f in ${NOISE_FONT_PATHS[@]+"${NOISE_FONT_PATHS[@]}"}; do paths+=(":(literal)$f"); done
-  changed="$(noise_git diff --name-only HEAD -- "${paths[@]}")" || return
-  [ -n "$changed" ] || { noise_log "no changes under $NOISE_ART_ROOT or configured noise paths"; return 0; }
+  noise_with_diff_paths noise_revert_editor_paths "$before" "${paths[@]}"
+}
+
+# Buffer and check Git before touching any candidate. The NUL-delimited
+# consumers skip names with newlines, which --before cannot record unambiguously.
+noise_with_diff_paths() (
+  local consume="$1" before="$2" paths; shift 2
+  paths="$(mktemp)" || return
+  trap 'rm -f -- "$paths"' EXIT
+  noise_git diff --name-only -z HEAD -- "$@" > "$paths" || return
+  "$consume" "$before" "$paths"
+)
+
+noise_revert_editor_paths() {
+  local before="$1" paths="$2" all_changed f prop reason mb="" unknown=""
+  if [ ! -s "$paths" ]; then
+    noise_log "no changes under $NOISE_ART_ROOT or configured noise paths"; return 0
+  fi
   if ! mb="$(noise_merge_base)"; then
     mb=""
     unknown="no merge-base with ${NOISE_BASE:-origin/main}, branch changes unknown"
@@ -162,8 +181,8 @@ noise_revert_editor() {
   fi
   all_changed="$(noise_changed_paths "$mb")" || return
   all_changed="$(sort -u <<< "$all_changed")"
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
+  while IFS= read -r -d '' f; do
+    [[ "$f" != *$'\n'* ]] || continue
     reason=""
     if [[ "$f" =~ $NOISE_PROTECTED_RE ]]; then continue
     elif noise_kept "$f"; then noise_log "keeping $f (--keep)"; continue
@@ -190,7 +209,7 @@ noise_revert_editor() {
     fi
     noise_log "reverting $f ($reason)"
     noise_git checkout -q -- ":(literal)$f" || return
-  done <<< "$changed"
+  done < "$paths"
 }
 
 # The editor noise of an `open` or `test` run, anywhere in the repository: tracked *.mat files whose diff only touches
@@ -201,32 +220,40 @@ noise_revert_editor() {
 # (noise_dirty_files); remaining args: --keep paths. Files dirty before the run and kept paths are never touched.
 revert_run_noise() { noise_lock_checked noise_revert_run "$@"; }
 noise_revert_run() {
-  local before="$1" f reason list; shift
+  local before="$1" f; shift
   NOISE_KEEP=("$@")
-  local -a paths=('*.mat' '*.prefab' "$NOISE_TIME_MANAGER")
+  local -a paths=('*.mat' '*.prefab' ":(literal)$NOISE_TIME_MANAGER")
   for f in ${NOISE_FONT_PATHS[@]+"${NOISE_FONT_PATHS[@]}"}; do paths+=(":(literal)$f"); done
-  list="$(noise_git diff --name-only HEAD -- "${paths[@]}")" || return
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
+  noise_with_diff_paths noise_revert_run_paths "$before" "${paths[@]}"
+}
+
+noise_revert_run_paths() {
+  local before="$1" paths="$2" f reason
+  while IFS= read -r -d '' f; do
+    [[ "$f" != *$'\n'* ]] || continue
     if noise_kept "$f"; then noise_log "keeping $f (--keep)"; continue
     elif grep -qxF -- "$f" <<< "$before"; then noise_log "keeping $f (changed before the run)"; continue
     elif ! reason="$(noise_run_reason "$f")"; then noise_log "keeping $f (a real change)"; continue
     fi
     noise_log "reverting $f ($reason)"
     noise_git checkout -q -- ":(literal)$f" || return
-  done <<< "$list"
+  done < "$paths"
 }
 
 # Standalone scene recovery must finish both cleanups, even when the original scene's bake revert ran out of
 # index-lock retries. Use the same pre-run snapshot and --keep protections as editor cleanup; only platformSettings
 # may differ from HEAD. A changed lightmap importer setting, GUID, etc. is real bake output and must survive.
 noise_revert_bake() {
-  local before="$1" f list original head_path; shift
+  local before="$1"; shift
   NOISE_KEEP=("$@")
   [ -n "$NOISE_LIGHTMAP_DIR" ] || return 0
-  list="$(noise_git diff --name-only HEAD -- "$NOISE_LIGHTMAP_DIR/Lightmap-*.exr.meta")" || return
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
+  noise_with_diff_paths noise_revert_bake_paths "$before" "$NOISE_LIGHTMAP_DIR/Lightmap-*.exr.meta"
+}
+
+noise_revert_bake_paths() {
+  local before="$1" paths="$2" f original head_path
+  while IFS= read -r -d '' f; do
+    [[ "$f" != *$'\n'* ]] || continue
     if noise_kept "$f"; then noise_log "keeping $f (--keep)"; continue
     elif grep -qxF -- "$f" <<< "$before"; then noise_log "keeping $f (edited before scene)"; continue; fi
     # ls-tree succeeds with empty output for a new staged meta, but still reports
@@ -238,11 +265,11 @@ noise_revert_bake() {
       if [ -f "$f" ] && cmp -s <(noise_strip_platform_settings < "$original") <(noise_strip_platform_settings < "$f"); then
         rm -f "$original"
         noise_log "reverting bake-only $f"
-        noise_git checkout -q -- "$f" || return
+        noise_git checkout -q -- ":(literal)$f" || return
       else noise_log "keeping $f (changes outside platformSettings)"; fi
       rm -f "$original"
     else rm -f "$original"; return 1; fi
-  done <<< "$list"
+  done < "$paths"
 }
 
 # A platformSettings block ends at the next importer key at the same indentation.

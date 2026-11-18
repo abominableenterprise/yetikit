@@ -15,8 +15,7 @@ cleanup_unity() { :; }
 cmd_cache() { :; }
 run_noise_before() { echo pre-dirty-font; }
 noise_dirty_files() { echo pre-dirty-font; }
-lightmap_meta_changes() { :; }
-revert_bake_noise() { echo bake >> "$trace"; }
+noise_revert_bake() { echo bake >> "$trace"; }
 # Record each cleanup's actual snapshot and protection list. Do not stub cmd_* orchestration.
 record_cleanup() { printf 'cleanup:%s' "$1" >> "$trace"; shift; printf '|%s' "$@" >> "$trace"; echo >> "$trace"; }
 revert_run_noise_after() {
@@ -35,7 +34,10 @@ run_gfx_pass() { unity "$@"; }
 test_pr() { echo pr >> "$trace"; unity pr; }
 unity() {
   calls=$((calls + 1)); echo "editor:$calls" >> "$trace"
-  if [ "$calls" = "$fail_at" ]; then return 42; fi
+  if [ "$calls" = "$fail_at" ]; then
+    if [ "${exit_stage:-0}" = 1 ]; then exit 42; fi
+    return 42
+  fi
   mkdir -p "$PROJECT/Builds/Android"
   printf apk > "$PROJECT/Builds/Android/GeneratedScene-dev.apk"
   return 0
@@ -71,6 +73,31 @@ for fail_at in 2 3; do
   (calls=0; cmd_scene) > "$tmp/output" 2>&1 || rc=$?
   check "scene stage $fail_at failure still cleans and stops" \
     '[ "$rc" != 0 ] && grep -q "^cleanup:pre-dirty-font" "$trace" && [ "$(grep -c "^editor:" "$trace")" = "$fail_at" ]'
+done
+# A licence failure can exit the wrapper from inside unity instead of returning.
+for command in scene lab; do
+  for cleanup_rc in 0 75; do
+    trace="$tmp/$command-exit-$cleanup_rc.trace"; : > "$trace"; rc=0
+    (
+      trap - EXIT
+      unset -f chain_exit_trap
+      . "$PROJECT/Tools/ship/linux-unity-license.sh"
+      chain_exit_trap 'echo outer-exit:"$EXIT_RC" >> "$trace"'
+      chain_exit_trap finish_interrupted_noise
+      record_failure() { record_cleanup "$@"; return "$cleanup_rc"; }
+      revert_editor_noise() { record_failure "$@"; }
+      revert_run_noise_after() { record_failure "$1"; }
+      calls=0; exit_stage=1; fail_at=1
+      if [ "$command" = scene ]; then fail_at=2; fi
+      "cmd_$command"
+    ) > "$tmp/output" 2>&1 || rc=$?
+    expected_calls=1; if [ "$command" = scene ]; then expected_calls=2; fi
+    check "$command exit with cleanup status $cleanup_rc retains stage status and runs both handlers" \
+      '[ "$rc" = 42 ] && [ "$(grep -c "^editor:" "$trace")" = "$expected_calls" ] &&
+        [ "$(grep -c "^cleanup:pre-dirty-font" "$trace")" = 1 ] &&
+        [ "$(tail -n 1 "$trace")" = outer-exit:42 ] &&
+        { [ "$command" != scene ] || grep -qx bake "$trace"; }'
+  done
 done
 font='Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF.asset'
 for command in open test scene lab; do

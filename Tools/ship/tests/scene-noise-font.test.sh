@@ -12,14 +12,18 @@ other='Assets/TextMesh Pro/Resources/Fonts & Materials/Other.asset'
 meta="$font.meta"
 # Multiple consumer-selected paths, including Git pathspec metacharacters, are literal.
 extra='Assets/Fonts/Static [test].asset'
-jq --arg font "$font" --arg extra "$extra" '.noise.fontAssetPaths = [$font, $extra]' yetikit.json > "$tmp/config.json"
+quoted='Assets/Fonts/Café "Static" \[font].asset'
+jq --arg font "./$font" --arg extra "Assets//Fonts/./${extra##*/}" --arg quoted "$quoted" \
+  '.noise.fontAssetPaths = [$font, $extra, $quoted]' yetikit.json > "$tmp/config.json"
 mv "$tmp/config.json" yetikit.json
 . "$PROJECT/Tools/ship/lib/config.sh"
 ship_config_load
 . "$lib"
 git init -q
+git config core.quotePath true
 mkdir -p "$(dirname "$extra")"
 printf 'static font\n' > "$extra"
+printf 'quoted font\n' > "$quoted"
 mkdir -p "$(dirname "$font")"
 printf 'MonoBehaviour:\n  m_AtlasPopulationMode: 0\n  m_UsedGlyphRects: []\n' > "$font"
 printf 'other\n' > "$other"; printf 'guid: font\n' > "$meta"
@@ -66,6 +70,22 @@ for revert in revert_run_noise revert_editor_noise revert_scene_noise; do
   reset_case; printf 'real edit\n' >> "$other"; printf 'real guid edit\n' >> "$meta"
   "$revert" '' >/dev/null 2>&1
   check "$revert touches neither other font assets nor the font meta" '! clean "$other" && ! clean "$meta"'
+done
+# Standalone run and scene recovery must read the same literal names as the wrapper.
+for mode in --run scene; do
+  args=(); if [ "$mode" = --run ]; then args+=(--run); fi
+  reset_case; printf 'serialization\n' >> "$quoted"
+  bash "$lib" "${args[@]}" --keep "$quoted" >/dev/null 2>&1
+  check "$mode honors --keep on a Git-quoted font" '! clean "$quoted"'
+  bash "$lib" "${args[@]}" >/dev/null 2>&1
+  check "$mode reverts a Git-quoted font by its literal path" 'clean "$quoted"'
+
+  reset_case; printf 'my edit\n' >> "$quoted"; git add -- ":(literal)$quoted"
+  git show "HEAD:$quoted" > "$quoted"
+  noise_dirty_files > "$tmp/before"
+  printf 'editor edit\n' >> "$quoted"; expected="$(git hash-object "$quoted")"
+  bash "$lib" "${args[@]}" --before "$tmp/before" >/dev/null 2>&1
+  check "$mode protects a previously staged Git-quoted font" '[ "$(git hash-object "$quoted")" = "$expected" ]'
 done
 # Recovery CLI uses the same backstop and keep protections (spaces and ampersand in the path).
 reset_case; serialize

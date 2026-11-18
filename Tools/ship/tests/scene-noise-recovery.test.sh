@@ -40,6 +40,9 @@ if [ "$m" = ExampleGame.World.Editor.WorldSceneBuilder.Run ]; then
   sed -i 's/m_BounceScale: 1/m_BounceScale: 2/' "$d/GeneratedSceneLighting.lighting"
   printf 'Material:\n  m_Floats:\n  - _ZTest: 4\n' > "$p/Assets/Art/World/Materials/Clean.mat"
 fi
+if [ "${FIXTURE_LOSE_LICENCE:-0}" = 1 ] && [ "$m" = ExampleGame.World.Editor.WorldSceneBuilder.Run ]; then
+  rm -f -- "$ULF"
+fi
 if [ "$m" = ExampleGame.World.Editor.WorldStats.Run ]; then
   : > "$p/.git/index.lock"
 fi
@@ -127,5 +130,18 @@ for fail_command in ls-tree show; do
   check "standalone recovery reports a genuine git $fail_command failure" \
     '[ "$rc" != 0 ] && grep -q "injected Git object read failure" "$tmp/git-failure.out" && ! clean "$dir/Lightmap-Clean.exr.meta"'
 done
+
+# Lose the fake licence after a stage writes both kinds of noise. The next
+# stage's fake activation exits the wrapper, rather than returning from Unity.
+git reset -q --hard HEAD
+rm -f "$OUT_DIR/scene-WorldStats.log"
+client="$UNITY_ROOT/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client"
+mkdir -p "$(dirname "$client")"
+printf '#!/bin/sh\nexit 42\n' > "$client"; chmod +x "$client"
+rc=0; FIXTURE_LOSE_LICENCE=1 bash "$ship/linux-unity.sh" scene > "$tmp/exit.out" 2>&1 || rc=$?
+check 'a later activation exit keeps its status and reverts both kinds of scene noise' \
+  '[ "$rc" = 42 ] && clean "$dir/Lightmap-Clean.exr.meta" && clean Assets/Art/World/Materials/Clean.mat'
+check 'the activation exit still reaches pidfile cleanup and does not run the next editor' \
+  '[ ! -e "$OUT_DIR/linux-unity.pid" ] && [ ! -e "$OUT_DIR/scene-WorldStats.log" ] && [ ! -e .git/index.lock ]'
 
 [ "$fails" = 0 ] && echo 'all passed' || { echo "$fails failed"; exit 1; }
