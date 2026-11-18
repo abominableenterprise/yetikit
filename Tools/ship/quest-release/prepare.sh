@@ -20,6 +20,9 @@ qr_check_disk() {
 # shellcheck source=Tools/ship/quest-release/worktree.sh
 . "$(dirname "${BASH_SOURCE[0]}")/worktree.sh"
 
+# shellcheck source=Tools/ship/quest-release/cleanup-head.sh
+. "$(dirname "${BASH_SOURCE[0]}")/cleanup-head.sh"
+
 # APFS copy-on-write clone: /bin/cp explicitly, as GNU cp (no -c) may shadow it on PATH.
 qr_clone_dir() { /bin/cp -c -R "$1" "$2"; }
 
@@ -221,11 +224,11 @@ qr_cleanup_one() {
     rm -f "$status_file"
   fi
   # Non-forced removal rechecks local changes, not the release commit.
-  qr_cleanup_expected_head "$wt" || { echo "kept (expected detached HEAD not verified)"; return 1; }
-  if qr_git worktree remove "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1; then
+  if qr_with_cleanup_head "$wt" qr_git worktree remove "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1; then
     echo "removed"
   else
-    qr_log "git worktree remove $wt failed (cleanup.log)"; echo "remove failed"; return 1
+    qr_log "cannot lock and verify HEAD or remove $wt (cleanup.log)"
+    echo "kept or removal failed"; return 1
   fi
 }
 

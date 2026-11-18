@@ -21,19 +21,25 @@ moved="$(git -C "$repo" commit-tree "$tree" -p "$sha" -m 'Different commit, iden
 # Inject the move at a completed Git operation, avoiding timing or sleeps.
 # Two commits with the same tree leave status and the HEAD-relative patch unchanged.
 git() {
+  case "${race_at:-}:${1:-}:${3:-}:${4:-}" in
+    apply:-c:apply:--reverse) [ ! "$PWD" -ef "$test_wt" ] || try_head_move ;;
+    remove:-C:worktree:remove) [ "$5" != "$test_wt" ] || try_head_move ;;
+  esac
   command git "$@" || return $?
   [ ! -e "$tmp/head-moved" ] || return 0
   case "${move_at:-}:${1:-}:${3:-}" in
-    diff:-c:diff)
-      [ "$PWD" -ef "$test_wt" ] || return 0
-      # Move after capturing the second (comparison) patch.
-      if [ ! -e "$tmp/patch-captured" ]; then : > "$tmp/patch-captured"; return 0; fi ;;
-    apply:-c:apply) [ "$PWD" -ef "$test_wt" ] || return 0 ;;
+    diff:-c:diff) [ "$PWD" -ef "$test_wt" ] || return 0 ;;
     status:-C:status) [ "$2" = "$test_wt" ] || return 0 ;;
     *) return 0 ;;
   esac
-  command git -C "$test_wt" update-ref --no-deref HEAD "$moved" "$sha" || exit 1
-  : > "$tmp/head-moved"
+  try_head_move
+}
+
+# A separate Git process writes at the hooked command boundary, without sleeps.
+try_head_move() {
+  if command git -C "$test_wt" update-ref --no-deref HEAD "$moved" "$sha" 2> "$tmp/writer.err"; then
+    : > "$tmp/head-moved"
+  fi
 }
 
 reset_test_worktree() {
@@ -53,7 +59,15 @@ check 'HEAD move during noise inspection preserves the detached commit and uncha
 
 reset_test_worktree
 printf '  m_Floats:\n  - _ZTest: 8\n' > "$test_wt/$mat"
-move_at=apply run cleanup --discard-noise
+# The reversal and removal each take their own transaction. Inject the move
+# after releasing the first transaction, before attempting the second.
+eval "$(declare -f qr_discard_noise | awk 'NR == 1 { sub(/^qr_discard_noise/, "original_discard") } { print }')"
+qr_discard_noise() {
+  original_discard "$@" || return $?
+  [ ! "$1" -ef "$test_wt" ] || try_head_move
+}
+run cleanup --discard-noise
+qr_discard_noise() { original_discard "$@"; }
 check 'HEAD move just after noise reversal still prevents removal of the clean worktree' \
   '[ "$rc" != 0 ] && [ -e "$tmp/head-moved" ] && [ "$(git -C "$test_wt" rev-parse HEAD)" = "$moved" ] &&
    git -C "$test_wt" status --porcelain > "$tmp/after-status" && [ ! -s "$tmp/after-status" ]'
@@ -68,5 +82,17 @@ git -C "$test_wt" checkout -qb attached || exit 1
 run cleanup
 check 'plain cleanup preserves a worktree attached to a branch even at the expected commit' \
   '[ "$rc" != 0 ] && [ "$(git -C "$test_wt" symbolic-ref HEAD)" = refs/heads/attached ]'
+
+# Attempt the move after validation but before the destructive Git command.
+reset_test_worktree
+printf '  m_Floats:\n  - _ZTest: 8\n' > "$test_wt/$mat"
+race_at=apply run cleanup --discard-noise
+check 'Git HEAD writer is excluded between validation and patch reversal' \
+  '[ "$rc" = 0 ] && [ ! -e "$tmp/head-moved" ] && grep -qi "cannot lock ref" "$tmp/writer.err" && [ ! -d "$test_wt" ]'
+
+reset_test_worktree
+race_at=remove run cleanup
+check 'Git HEAD writer is excluded before non-forced removal starts' \
+  '[ "$rc" = 0 ] && [ ! -e "$tmp/head-moved" ] && grep -qi "cannot lock ref" "$tmp/writer.err" && [ ! -d "$test_wt" ]'
 
 qr_flow_finish

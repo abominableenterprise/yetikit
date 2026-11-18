@@ -70,14 +70,18 @@ qr_inspect_noise() (
 
   [ "$action" = discard ] || { [ -s "$scratch/patch" ] && qr_expected_worktree_head . "$QR_SHA"; return $?; }
 
-  # Do not overwrite files from the index or force removal. Reverse only the
-  # inspected patch, and let ordinary Git removal reject any remaining edits.
+  qr_with_cleanup_head "$PWD" qr_reverse_noise "$scratch" || return 2
+)
+
+# Under the HEAD lock, recheck the inspected patch and reverse only that patch.
+# Let ordinary Git removal reject any remaining edits.
+qr_reverse_noise() {
+  local scratch="$1"
   qr_noise_status > "$scratch/current-status" && cmp -s "$scratch/status" "$scratch/current-status" &&
     qr_noise_patch > "$scratch/current-patch" && cmp -s "$scratch/patch" "$scratch/current-patch" || return 2
   [ -s "$scratch/patch" ] || return 2
-  qr_cleanup_expected_head . || return 2
-  git -c apply.ignoreWhitespace=no apply --reverse --whitespace=nowarn "$scratch/patch" || return 2
-)
+  git -c apply.ignoreWhitespace=no apply --reverse --whitespace=nowarn "$scratch/patch"
+}
 
 qr_noise_status() {
   git -c core.filemode=true -c core.fsmonitor=false status --porcelain -z --untracked-files=all --ignore-submodules=none --no-renames "$@"
