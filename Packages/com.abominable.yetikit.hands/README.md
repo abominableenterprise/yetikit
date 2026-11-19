@@ -20,7 +20,10 @@ middle-finger extension without assigning it an action.
   Assign the controller's teleport ray to share its arc settings. Configure
   the teleport **interaction** layer (default `Teleport`) in the project and
   use it on XRI `TeleportationArea` surfaces. Anchors and anchor volumes
-  are not freeform landing surfaces.
+  are not freeform landing surfaces. Use stationary landing surfaces only (both
+  the area and its colliders). Hand teleport does not support moving platforms:
+  the preview freezes at a world-space hit during the thumb drop, and the
+  queued destination does not follow the surface.
 - The hands share an aim lease through their tracking-space parent. Assign the
   same `rig` on both components if their parents differ. External aim adapters
   can claim the same lease and supply an optional preemption policy. Set

@@ -46,7 +46,7 @@ namespace YetiKit.Hands
         public int Tick(float now, float dt, bool holding)
         {
             if (!isActiveAndEnabled) return 0;
-            if (GestureSuppressed || !hand || !hand.isActiveAndEnabled)
+            if (GestureSuppressed || !hand || !hand.isActiveAndEnabled || !provider || !provider.isActiveAndEnabled)
             {
                 Gesture.Reset();
                 Input.Pulse(0);

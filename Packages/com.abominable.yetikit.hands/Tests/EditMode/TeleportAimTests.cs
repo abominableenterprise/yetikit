@@ -63,6 +63,45 @@ namespace YetiKit.Hands.Tests
             Assert.That(ArcEnd.z - Offset.z, Is.EqualTo(stop).Within(1e-4f));
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CoplanarUiAcrossAnIntermediateArcSegmentInvalidatesTheLanding(bool duringPreview)
+        {
+            void CastSideways() => aim.Cast(Origin, Vector3.right, null, Layer);
+            if (duringPreview)
+            {
+                CastSideways();
+                Assert.That(aim.HasTarget, Is.True);
+            }
+            // The arc segment spans about x = 2.08 to 3.13 here, with both ends outside the panel.
+            RegisterPanel(Origin + new Vector3(2.5f, -.32f, 0f));
+            panel.sizeDelta = new Vector2(.2f, .4f);
+            Assert.That(HandUiGuard.Near(Origin, TeleportAim.UiReach), Is.False);
+            if (duringPreview)
+            {
+                Assert.That(HandUiGuard.Near(aim.Target.destinationPosition, TeleportAim.UiReach), Is.False);
+                Assert.That(aim.Revalidate(), Is.False);
+            }
+            else
+            {
+                CastSideways();
+                Preview();
+                Assert.That(ArcEnd.x - Offset.x, Is.EqualTo(2.4f).Within(1e-4f));
+            }
+            Assert.That(aim.HasTarget, Is.False);
+        }
+
+        [Test]
+        public void CoplanarIntersectionDoesNotExtendTheSegmentOrAcceptAnOffsetSegment()
+        {
+            RegisterPanel(Origin);
+            Assert.That(HandUiGuard.Intersect(Origin + Vector3.right * 2f, Origin + Vector3.right * 3f, out _), Is.False);
+            var raised = Origin + Vector3.up * 2f;
+            Assert.That(HandUiGuard.Intersect(raised - Vector3.right * 2f, raised + Vector3.right * 2f, out _), Is.False);
+            var offset = Origin + Vector3.forward * .001f;
+            Assert.That(HandUiGuard.Intersect(offset - Vector3.right * 2f, offset + Vector3.right * 2f, out _), Is.False);
+        }
+
         [Test]
         public void UiBeyondTheFirstPhysicsHitDoesNotBlockLanding()
         {
@@ -115,6 +154,23 @@ namespace YetiKit.Hands.Tests
             Assert.That(line.enabled || reticle.activeSelf, Is.False);
             aim.DestroyReticle(reticle);
             Assert.That(!reticle, Is.True);
+        }
+
+        [TestCase(MatchOrientation.TargetUpAndForward)]
+        [TestCase(MatchOrientation.WorldSpaceUp)]
+        public void ReticleMatchesTheRequestOrientationOnASlope(MatchOrientation orientation)
+        {
+            area.transform.rotation = Quaternion.Euler(20f, 65f, 0f);
+            area.matchOrientation = orientation;
+            Physics.SyncTransforms();
+            Cast();
+            Assert.That(aim.HasTarget, Is.True);
+            Assert.That(aim.Target.matchOrientation, Is.EqualTo(orientation));
+            Preview();
+            Assert.That(reticle.activeSelf, Is.True);
+            var expected = orientation == MatchOrientation.TargetUpAndForward
+                ? aim.Target.destinationRotation : Quaternion.identity;
+            Assert.That(Quaternion.Angle(reticle.transform.rotation, expected), Is.LessThan(.05f));
         }
 
         [Test]

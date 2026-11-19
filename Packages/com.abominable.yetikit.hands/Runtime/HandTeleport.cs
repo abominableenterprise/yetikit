@@ -42,9 +42,12 @@ namespace YetiKit.Hands
 
         void OnDisable()
         {
+            var wasAiming = Aiming;
+            var destination = Target.destinationPosition;
             gesture.Reset();
-            EndPreview();
             SetGrabBlocked(false);
+            EndPreview();
+            if (wasAiming) AimEnded?.Invoke(false, destination);
         }
 
         void OnDestroy() => aim.DestroyReticle(reticle);
@@ -63,6 +66,7 @@ namespace YetiKit.Hands
             var confirmed = gesture.Tick(tracked, tracked && hand.Shape == HandShape.Point,
                 Vector3.Dot(dir, fwd) >= HandTeleportGesture.ForwardMin, tracked ? hand.Hammer : 0f,
                 tracked ? hand.Pinch : 0f, holding, now, suppressed);
+            var gestureEnded = wasAiming && !Aiming;
 
             if (Aiming && lease == null)
             {
@@ -85,17 +89,19 @@ namespace YetiKit.Hands
             else EndPreview();
             request.requestTime = now;
             var teleported = shouldQueue && provider && provider.isActiveAndEnabled && provider.QueueTeleportRequest(request);
-            if (wasAiming && !Aiming) AimEnded?.Invoke(teleported, request.destinationPosition);
+            if (gestureEnded) AimEnded?.Invoke(teleported, request.destinationPosition);
             return teleported;
         }
 
         void Preempted()
         {
             var wasAiming = Aiming;
-            gesture.Reset();
+            var destination = Target.destinationPosition;
+            var pinch = hand && hand.isActiveAndEnabled && hand.HandTracked ? hand.Pinch : 0f;
+            gesture.CancelForTakeover(pinch);
+            SetGrabBlocked(gesture.Busy);
             EndPreview();
-            SetGrabBlocked(false);
-            if (wasAiming) AimEnded?.Invoke(false, Target.destinationPosition);
+            if (wasAiming) AimEnded?.Invoke(false, destination);
         }
 
         void SetGrabBlocked(bool blocked)

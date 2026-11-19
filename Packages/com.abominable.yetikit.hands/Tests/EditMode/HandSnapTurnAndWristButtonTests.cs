@@ -47,7 +47,6 @@ namespace YetiKit.Hands.Tests
         public void SnapTurnPulsesTheProviderOncePerPoseAndHonorsCooldown()
         {
             var providerObject = Child("Snap-turn provider");
-            providerObject.SetActive(false); // Exercise its input reader without starting XRI locomotion.
             var provider = providerObject.AddComponent<SnapTurnProvider>();
             var hand = Child("Tracked hand").AddComponent<PlayerHand>();
             var tracking = new FakeTracking { Points = TurnPose(Vector3.right) };
@@ -90,6 +89,43 @@ namespace YetiKit.Hands.Tests
             Assert.That(reader.bypass, Is.Null);
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void DisabledProviderDiscardsPendingAndNewPulses(bool pendingBeforeDisable)
+        {
+            var provider = Child("Snap-turn provider").AddComponent<SnapTurnProvider>();
+            var hand = Child("Tracked hand").AddComponent<PlayerHand>();
+            var tracking = new FakeTracking { Points = TurnPose(Vector3.right) };
+            hand.Tracking = tracking;
+            var turn = hand.gameObject.AddComponent<HandSnapTurn>();
+            turn.hand = hand;
+            turn.provider = provider;
+            var reader = provider.rightHandTurnInput;
+            reader.inputSourceMode = XRInputValueReader.InputSourceMode.ManualValue;
+            turn.Attach();
+
+            int Step(float now)
+            {
+                hand.Tick(now);
+                return turn.Tick(now, 0.02f, false);
+            }
+
+            if (pendingBeforeDisable)
+            {
+                Step(0f);
+                Assert.That(Step(.32f), Is.EqualTo(1));
+                Assert.That(turn.Input.Pending, Is.EqualTo(1));
+                tracking.Points = HandShapeTests.Hand(0f, 0f, 0f, 0f, 0f);
+            }
+            provider.enabled = false;
+            Assert.That(Step(.34f), Is.Zero);
+            Assert.That(Step(.66f), Is.Zero);
+            Assert.That(turn.Input.Pending, Is.Zero);
+            provider.enabled = true;
+            Assert.That(reader.ReadValue(), Is.EqualTo(Vector2.zero));
+            Assert.That(Step(1f), Is.Zero, "disabled frames cannot contribute to dwell");
+        }
+
         [Test]
         public void FrozenTrackedSampleDoesNotAdvanceTurnDwell()
         {
@@ -97,6 +133,7 @@ namespace YetiKit.Hands.Tests
             hand.Tracking = new FakeTracking { Points = TurnPose(Vector3.right) };
             var turn = hand.gameObject.AddComponent<HandSnapTurn>();
             turn.hand = hand;
+            turn.provider = Child("Snap-turn provider").AddComponent<SnapTurnProvider>();
 
             hand.Tick(0f);
             Assert.That(turn.Tick(0f, 0.02f, false), Is.Zero);
@@ -122,6 +159,7 @@ namespace YetiKit.Hands.Tests
             var turn = hand.gameObject.AddComponent<HandSnapTurn>();
             turn.hand = hand;
             turn.teleport = teleport;
+            turn.provider = Child("Snap-turn provider").AddComponent<SnapTurnProvider>();
 
             int Step(float now)
             {
