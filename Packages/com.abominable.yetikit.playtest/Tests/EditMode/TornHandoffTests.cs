@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -281,6 +282,57 @@ namespace YetiKit.Playtest.Tests
                 Assert.AreEqual(hasCommittedRecord, File.Exists(final));
                 if (hasCommittedRecord) Assert.AreEqual(First, TempDir.Gunzip(final));
                 Assert.AreEqual(hasCommittedRecord ? new[] { final } : Array.Empty<string>(), Directory.GetFiles(dir));
+            }
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        [TestCase(true, true)]
+        public void WriterHandoffKeepsRollbackBoundary(bool hasCommittedRecord, bool blockCheckpointRename)
+        {
+            using (var tmp = new TempDir())
+            {
+                var store = new Disk(tmp.Path, "flush", false)
+                {
+                    InJournal = true, Armed = !hasCommittedRecord, BlockRollback = true,
+                    BlockCheckpointRename = blockCheckpointRename
+                };
+                store.CreateSession(Id);
+                var dir = store.SessionOutbox(Id);
+                var first = Path.Combine(dir, FileChunkStore.ChunkName(1));
+                var second = Path.Combine(dir, FileChunkStore.ChunkName(2));
+                var unpublished = new List<(string, string)>();
+                using (var writer = new ChunkWriter(dir, unpublished: unpublished, store: store))
+                {
+                    if (hasCommittedRecord)
+                    {
+                        writer.Append(First.ToCharArray(), First.Length);
+                        store.Armed = true;
+                    }
+                    Assert.Throws<IOException>(() => writer.Append(Second.ToCharArray(), Second.Length));
+                }
+                Assert.AreEqual(1, store.Injected);
+                Assert.AreEqual(1, unpublished.Count);
+                Assert.IsTrue(File.Exists(first + ChunkJournal.Suffix));
+
+                using (var writer = new ChunkWriter(dir, store.NextFree(dir), unpublished, store: store))
+                {
+                    writer.Rotate();
+                    Assert.IsFalse(File.Exists(first), "a replacement writer must not publish while rollback is blocked");
+                    Assert.AreEqual(1, unpublished.Count);
+                    Assert.Throws<IOException>(() => writer.Append(Second.ToCharArray(), Second.Length));
+                    Assert.AreEqual(2, writer.NextIndex, "a retry must not open another journal while rollback is blocked");
+                    store.BlockRollback = store.BlockCheckpointRename = false;
+                    writer.Rotate();
+                    writer.Append(Second.ToCharArray(), Second.Length);
+                }
+
+                Assert.IsEmpty(unpublished);
+                Assert.AreEqual(Second, TempDir.Gunzip(second));
+                if (hasCommittedRecord) Assert.AreEqual(First, TempDir.Gunzip(first));
+                CollectionAssert.AreEquivalent(hasCommittedRecord ? new[] { first, second } : new[] { second },
+                    Directory.GetFiles(dir));
             }
         }
 

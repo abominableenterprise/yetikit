@@ -14,9 +14,15 @@ namespace YetiKit.Playtest
         readonly PendingChunks pending;
         byte[] bytes = new byte[64 * 1024];
         Stream journal;
-        string tmp, final, failedJournal;
+        string tmp, final;
         long committed;
 
+        /// <summary>Open a writer, optionally carrying pending work forward from a previous writer.</summary>
+        /// <param name="sessionDir">The recording directory.</param>
+        /// <param name="firstIndex">The next unused chunk index.</param>
+        /// <param name="unpublished">Reuse the same list instance, without editing its entries, for sequential handoff.</param>
+        /// <param name="openFile">Optional override for opening temporary files.</param>
+        /// <param name="store">Optional recording store.</param>
         public ChunkWriter(string sessionDir, int firstIndex = 1, List<(string, string)> unpublished = null,
             Func<string, Stream> openFile = null, IChunkStore store = null)
             : this(sessionDir, firstIndex, openFile, store ?? FileChunkStore.Default,
@@ -44,11 +50,7 @@ namespace YetiKit.Playtest
             if (journal == null)
             {
                 // Do not write a retry copy while the failed frame might still be recoverable.
-                if (failedJournal != null)
-                {
-                    pending.RollBack(failedJournal);
-                    failedJournal = null;
-                }
+                pending.RollBackIn(dir);
                 var paths = store.ChunkPaths(dir, NextIndex++);
                 journal = store.OpenTemp(paths.final + ChunkJournal.Suffix, openFile);
                 (tmp, final) = paths;
@@ -66,10 +68,8 @@ namespace YetiKit.Playtest
             {
                 // A failed flush can still have written a full frame. Keep its rollback boundary
                 // in the pump's queue before closing, including when it was the first frame.
-                failedJournal = final;
                 Close(committed);
-                pending.RollBack(failedJournal);
-                failedJournal = null;
+                pending.RollBack(final);
                 throw;
             }
             committed += n + 4;
@@ -89,7 +89,7 @@ namespace YetiKit.Playtest
 
         void Close(long? boundary = null)
         {
-            if (committed != 0 || boundary.HasValue) pending.Add(tmp, final, boundary);
+            if (committed != 0 || boundary.HasValue) pending.Add(tmp, final, dir, boundary);
             try { journal.Dispose(); }
             catch (IOException) { } // frame boundaries are determined by explicit flushes
             finally
