@@ -90,10 +90,12 @@ qr_build() {
   esac
   bash "$CANCEL_TMP/worker.sh" build
 }
-qr_verify() { case "$CANCEL_PHASE" in list|list-finished) return 0 ;; esac; echo verify >> "$CANCEL_TMP/later"; }
+qr_verify() { case "$CANCEL_PHASE" in list|list-finished|list-released) return 0 ;; esac; echo verify >> "$CANCEL_TMP/later"; }
 qr_device_locked() { "$@"; }
 qr_install_apk_locked() {
-  if [ "$QUEST_SERIAL" = synthetic-a ] || [ "$CANCEL_PHASE" = list-finished ]; then
+  if [ "$CANCEL_PHASE" = list-released ]; then
+    qr_set install "install ok ($FIXTURE_ATTEMPT)"
+  elif [ "$QUEST_SERIAL" = synthetic-a ] || [ "$CANCEL_PHASE" = list-finished ]; then
     qr_set install 'install ok (synthetic APK)'
   else
     bash "$CANCEL_TMP/worker.sh" install
@@ -120,11 +122,23 @@ if [ "$CANCEL_PHASE" = list-finished ]; then
     fi
   }
 fi
-if [ "$CANCEL_PHASE" = list ] || [ "$CANCEL_PHASE" = list-finished ]; then
-  QUEST_SERIAL=synthetic-a,synthetic-b qr_main install "$CANCEL_TMP/fixture.apk"
-else
-  qr_main "$CANCEL_CMD"
+if [ "$CANCEL_PHASE" = list-released ] && [ "$FIXTURE_ATTEMPT" = first ]; then
+  mv() {
+    command mv "$@" || return
+    # At the real unlock rename, run the successor to completion before
+    # signalling this owner. No polling or scheduling window is needed.
+    if [ "$1" = "$QUEST_LOG_ROOT/run.lock" ]; then
+      printf '%s\n' "$QR_INVOCATION" > "$CANCEL_TMP/first-key"
+      FIXTURE_ATTEMPT=second bash "$0" > "$CANCEL_TMP/second.out" 2>&1 || return 1
+      touch "$CANCEL_TMP/post-release-signal"
+      kill -TERM "$$"
+    fi
+  }
 fi
+case "$CANCEL_PHASE" in
+  list|list-finished|list-released) QUEST_SERIAL=synthetic-a,synthetic-b qr_main install "$CANCEL_TMP/fixture.apk" ;;
+  *) qr_main "$CANCEL_CMD" ;;
+esac
 RUN
 printf apk > "$tmp/fixture.apk"
 
@@ -186,6 +200,31 @@ check 'cancellation after overall success keeps both finished device rows but in
     result="$tmp/logs/last-result" && grep -qx "rc=1" "$result" && grep -qx "verdict=1" "$result" &&
     grep -Fq "install[synthetic-a]: OK: install ok" "$result" && grep -Fq "install[synthetic-b]: OK: install ok" "$result" &&
     ! grep -q "^overall: *OK" "$result" && grep -q "^overall: *INFRA: cancelled$" "$result"'
+rm -rf "$tmp/logs"
+rc=0; ( CANCEL_PHASE=list-released FIXTURE_ATTEMPT=first qr_fixture_bash "$tmp/run.sh" ) > "$tmp/out" 2>&1 || rc=$?
+first_key=''; second_pid=''; second_key=''
+read -r first_key < "$tmp/first-key"
+read -r second_pid second_key < "$tmp/logs/current-invocation"
+first_result="$tmp/logs/invocations/$first_key/result"
+second_result="$tmp/logs/invocations/$second_key/result"
+check 'both invocations freeze their own successful list install and device rows' \
+  '[ -n "$first_key" ] && [ -n "$second_key" ] && [ "$first_key" != "$second_key" ] &&
+    ( for attempt in first second; do
+        case "$attempt" in first) result="$first_result" ;; second) result="$second_result" ;; esac
+        grep -qx "cmd=install" "$result" && grep -qx "rc=0" "$result" && grep -qx "verdict=0" "$result" &&
+        grep -q "^overall: *OK (exit 0)$" "$result" &&
+        for serial in synthetic-a synthetic-b; do
+          grep -Fq "install[$serial]: OK: install ok ($attempt);" "$result" || exit 1
+        done || exit 1
+      done ) && grep -qx "pid=$second_pid" "$second_result"'
+check 'TERM after unlock leaves the successor as the live result' \
+  '[ -f "$tmp/post-release-signal" ] && [ ! -e "$tmp/logs/run.lock" ] &&
+    cmp -s "$second_result" "$tmp/logs/last-result" &&
+    ( . "$tmp/logs/current.env" && grep -Fxq "run=$QR_RUN_DIR" "$first_result" &&
+      grep -Fxq "run=$QR_RUN_DIR" "$second_result" && grep -qx 0 "$QR_RUN_DIR/summary/multi_result" &&
+      grep -Fxq "OK (exit 0)" "$QR_RUN_DIR/summary/overall" &&
+      awk '\''seen {print} /^report:$/ {seen=1}'\'' "$second_result" | cmp -s - "$QR_RUN_DIR/summary.txt" )'
+check 'TERM after unlock does not cancel the completed first invocation' '[ "$rc" = 0 ]'
 # A fake compiler outlives the editor, ignores TERM, and notices if publication happens before it is killed.
 cat > "$tmp/compiler.sh" <<'COMPILER'
 . "$FIXTURE_LIB"

@@ -118,6 +118,7 @@ qr_lock_acquire() {
         rm -rf "$d"
         return 1
       fi
+      QR_CANCEL_DISARMED=""
       QR_LOCK_HELD=1
       return 0
     fi
@@ -262,6 +263,7 @@ qr_lock_drain_step() {
 
 # Cancel and drain before publishing failure. During launch+registration, defer rather than lose the new job.
 qr_cancel() {
+  [ "${QR_CANCEL_DISARMED:-}" != 1 ] || return 0
   local cmd="$1" signal="$2" group="${QR_ACTIVE_STEP:-}"
   if [ "${QR_REGISTERING_STEP:-}" = 1 ]; then QR_PENDING_CANCEL="$signal"; return; fi
   trap '' HUP INT TERM
@@ -293,6 +295,9 @@ qr_lock_release() {
   local d retired; d="$(qr_lock_dir)"
   # A failed/interrupted drain must never drop the only record of a survivor.
   [ -z "${QR_ACTIVE_STEP:-}" ] || [ ! "${QR_ACTIVE_STEP_DIR%/*}" -ef "$d" ] || return 1
+  # The result is final once unlock begins. A successor can change current.env
+  # and the summary as soon as the rename completes, even before mv returns.
+  QR_CANCEL_DISARMED=1
   if [ "$(cat "$d/pid" 2>/dev/null)" = "${1:-$$}" ]; then
     # Unpublish before deleting any fields, so a partial deletion is never
     # visible as an intact but legacy lock.
