@@ -284,12 +284,63 @@ namespace YetiKit.Playtest.Tests
             }
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void RetriedRollbackAfterCheckpointRenameFailureAllowsRecoveryAndPruning(bool hasCommittedRecord)
+        {
+            using (var tmp = new TempDir())
+            {
+                var store = new Disk(tmp.Path, "flush", false)
+                {
+                    InJournal = true, Armed = !hasCommittedRecord, BlockRollback = true, BlockCheckpointRename = true
+                };
+                store.CreateSession(Id);
+                var dir = store.SessionOutbox(Id);
+                var first = Path.Combine(dir, FileChunkStore.ChunkName(1));
+                var second = Path.Combine(dir, FileChunkStore.ChunkName(2));
+                var checkpoint = first + ChunkJournal.Suffix + JournalRollback.Suffix;
+                using (var writer = new ChunkWriter(dir, store: store, openFile: path =>
+                    path == second + FileChunkStore.TmpSuffix ? throw new IOException("chunk publication blocked") :
+                    new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read)))
+                {
+                    if (hasCommittedRecord)
+                    {
+                        writer.Append(First.ToCharArray(), First.Length);
+                        store.Armed = true;
+                    }
+                    Assert.That(Assert.Throws<IOException>(() => writer.Append(Second.ToCharArray(), Second.Length)).Message,
+                        Is.EqualTo("checkpoint rename blocked"));
+                    Assert.IsFalse(File.Exists(checkpoint));
+                    Assert.That(File.ReadAllText(checkpoint + FileChunkStore.TmpSuffix),
+                        Is.EqualTo((hasCommittedRecord ? sizeof(int) + Encoding.UTF8.GetByteCount(First) : 0).ToString()));
+
+                    store.BlockRollback = store.BlockCheckpointRename = false;
+                    writer.Append(Second.ToCharArray(), Second.Length);
+                    Assert.Throws<IOException>(() => writer.Rotate());
+                }
+
+                Assert.IsTrue(File.Exists(second + ChunkJournal.Suffix));
+                File.WriteAllText(Path.Combine(dir, FileChunkStore.MetaFile), new SessionMeta(Id).ToJson(null));
+                var restarted = new FileChunkStore(tmp.Path, pendingDiskBudgetBytes: 0);
+                restarted.RecoverChunks();
+                Assert.IsTrue(File.Exists(second), "the checkpoint temp must not block recovery of the accepted frame");
+                Assert.AreEqual(Second, TempDir.Gunzip(second));
+                Assert.AreEqual(hasCommittedRecord, File.Exists(first));
+                if (hasCommittedRecord) Assert.AreEqual(First, TempDir.Gunzip(first));
+                Assert.IsFalse(File.Exists(checkpoint + FileChunkStore.TmpSuffix));
+
+                File.WriteAllText(Path.Combine(dir, DoneMarker.FileName), new DoneMarker { session = Id }.ToJson());
+                restarted.PrunePending();
+                Assert.IsFalse(Directory.Exists(dir), "completed session is eligible for pruning");
+            }
+        }
+
         sealed class Disk : IChunkStore
         {
             public readonly FileChunkStore Files;
             readonly string step;
             readonly bool diskFull;
-            public bool InJournal, Armed = true, BlockRollback;
+            public bool InJournal, Armed = true, BlockRollback, BlockCheckpointRename;
             public int Injected, RollbackAttempts;
 
             public Disk(string root, string step, bool diskFull)
@@ -344,7 +395,15 @@ namespace YetiKit.Playtest.Tests
                 RollbackAttempts++;
                 throw new IOException("journal rollback blocked");
             }
-            public void PublishFile(string path, byte[] bytes) => Files.PublishFile(path, bytes);
+            public void PublishFile(string path, byte[] bytes)
+            {
+                if (BlockCheckpointRename && path.EndsWith(JournalRollback.Suffix, StringComparison.Ordinal))
+                {
+                    File.WriteAllBytes(path + FileChunkStore.TmpSuffix, bytes);
+                    throw new IOException("checkpoint rename blocked");
+                }
+                Files.PublishFile(path, bytes);
+            }
             public void DeleteDir(string dir)
             {
                 if (Fails(dir, "delete")) Fail();

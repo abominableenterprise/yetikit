@@ -23,7 +23,11 @@ namespace YetiKit.Playtest
         {
             if (boundary == 0) store.DeleteTemp(journal);
             else store.TruncateJournal(journal, boundary);
-            if (store.TempExists(journal + Suffix)) store.DeleteTemp(journal + Suffix);
+            var marker = journal + Suffix;
+            // A failed checkpoint rename can leave a temp. Remove it before the final marker
+            // so an interrupted cleanup does not leave an orphan that blocks startup recovery.
+            store.DeleteTemp(marker + FileChunkStore.TmpSuffix);
+            store.DeleteTemp(marker);
         }
 
         internal static bool Recover(FileChunkStore store, string marker)
