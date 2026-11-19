@@ -21,6 +21,24 @@ namespace Game.Starter
         [SerializeField] InputAction tracked;
         const int FullPose = (int)(UnityEngine.XR.InputTrackingState.Position | UnityEngine.XR.InputTrackingState.Rotation);
 
+        bool uiCapture, pointerOverUi, gripPressed;
+        bool? roomSelect;
+        public bool TriggerPressed { get; private set; }
+
+        // Called after poses update but before the interaction manager processes selection.
+        public void RoutePointer(bool overUi)
+        {
+            pointerOverUi = overUi;
+            if (!direct.isActiveAndEnabled) return;
+            UpdateCapture();
+            SetControllerActive(true);
+        }
+
+        public bool HoldingProp => direct.hasSelection;
+
+        void UpdateCapture() => uiCapture = !direct.hasSelection &&
+            (pointerOverUi || (uiCapture && (gripPressed || TriggerPressed)));
+
         XRInputValueReader<Vector2> TurnInput => hand.RightHand ? turn.rightHandTurnInput : turn.leftHandTurnInput;
 
         public void Configure(PlayerHand playerHand, XRDirectInteractor grab, XRRayInteractor ray,
@@ -51,12 +69,15 @@ namespace Game.Starter
                 if (control is not ButtonControl button || button.ReadValue() < 0.5f ||
                     control.device is not UnityEngine.InputSystem.XR.XRController device ||
                     (device.trackingState.ReadValue() & FullPose) != FullPose ||
-                    InputControlPath.TryFindChild<ButtonControl>(device, "{GripButton}") == null ||
-                    InputControlPath.TryFindChild<ButtonControl>(device, "{TriggerButton}") == null ||
+                    InputControlPath.TryFindChild<ButtonControl>(device, "{GripButton}") is not { } grip ||
+                    InputControlPath.TryFindChild<ButtonControl>(device, "{TriggerButton}") is not { } trigger ||
                     InputControlPath.TryFindChild<Vector2Control>(device, "{Primary2DAxis}") is not { } stick)
                     continue;
 
                 direct.transform.SetLocalPositionAndRotation(device.devicePosition.ReadValue(), device.deviceRotation.ReadValue());
+                gripPressed = grip.isPressed;
+                TriggerPressed = trigger.isPressed;
+                if (!pointerOverUi && !gripPressed && !TriggerPressed) uiCapture = false;
                 SetControllerActive(true);
                 handTurn.Input.Pulse(0); // discard a hand pulse from before takeover
                 var axis = stick.ReadValue();
@@ -70,14 +91,28 @@ namespace Game.Starter
 
         void SetControllerActive(bool active)
         {
+            if (active && uiCapture)
+            {
+                roomSelect ??= direct.allowSelect;
+                direct.allowSelect = false;
+            }
+            else if (roomSelect is { } allowed)
+            {
+                direct.allowSelect = allowed;
+                roomSelect = null;
+            }
             // Disabling the ray cancels selection, which must not confirm a teleport.
-            teleport.gameObject.SetActive(active && !direct.hasSelection);
+            teleport.gameObject.SetActive(active && !direct.hasSelection && !uiCapture);
             if (direct.gameObject.activeSelf != active)
             {
                 direct.gameObject.SetActive(active);
                 if (active) hand.Sync(); // ends a prior hand grab before XRI processes this side
             }
-            if (!active) TurnInput.manualValue = Vector2.zero;
+            if (!active)
+            {
+                gripPressed = TriggerPressed = false;
+                TurnInput.manualValue = Vector2.zero;
+            }
         }
     }
 }

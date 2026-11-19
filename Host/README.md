@@ -69,9 +69,13 @@ and verify one accepted hit per throw using synthetic contacts. It also checks
 serialized rig wiring, controller/hand transitions, teleport landing rules and
 snap turn using synthetic input and the real scene’s locomotion providers. It
 also checks that the saved scene has no dev references, drives the desktop Lab
-controls, and reloads the scene to verify local tuning and reset. No
-headset or physical XR input device is required. Use the same activation/return
-procedure as above.
+controls, and reloads the scene to verify local tuning and reset. A wrist fixture
+uses synthetic controller and hand poses to select experiments, edit and reset,
+and check that UI input does not cause room grabs or teleports. To render its
+start and override states, set `YETIKIT_STARTER_LAB_CAPTURE` to an existing local
+output directory and filter to `WristInputRoutesWithoutRoomActions`. No headset
+or physical XR input device is required. Use the same activation/return procedure
+as above.
 
 The test deletes its bake; to remove staging (including any assets left by an
 interrupted test), close the Host editor and run this from the repository root:

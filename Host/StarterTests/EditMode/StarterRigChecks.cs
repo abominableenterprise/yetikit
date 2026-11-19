@@ -8,6 +8,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.InputSystem.XR;
+using XRController = UnityEngine.InputSystem.XR.XRController;
 using UnityEngine.SceneManagement;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
@@ -72,16 +73,7 @@ namespace YetiKit.Starter.HostTests
             var grab = ComponentOn<XRDirectInteractor>(hand.controller.gameObject);
             var prop = ComponentOn<GrabbableProp>(Root(scene, "Offset Grip"));
             const string layout = "StarterTestController";
-            InputSystem.RegisterLayout(@"{
-                ""name"": ""StarterTestController"",
-                ""extend"": ""XRController"",
-                ""controls"": [
-                    {""name"": ""gripButton"", ""layout"": ""Button"", ""usage"": ""GripButton""},
-                    {""name"": ""triggerButton"", ""layout"": ""Button"", ""usage"": ""TriggerButton""},
-                    {""name"": ""stick"", ""layout"": ""Vector2"", ""usage"": ""Primary2DAxis""}
-                ]
-            }");
-            var device = (UnityEngine.InputSystem.XR.XRController)InputSystem.AddDevice(layout);
+            var device = AddController(layout, "RightHand");
             const string poseOnlyLayout = "StarterTestHandDevice";
             InputSystem.RegisterLayout(@"{
                 ""name"": ""StarterTestHandDevice"", ""extend"": ""XRController"",
@@ -96,7 +88,6 @@ namespace YetiKit.Starter.HostTests
             observed.Enable();
             try
             {
-                InputSystem.SetDeviceUsage(device, "RightHand");
                 Assert.That(hand.Mode, Is.EqualTo(HandMode.None));
                 var tracking = new SyntheticHand();
                 hand.Tracking = tracking;
@@ -220,15 +211,33 @@ namespace YetiKit.Starter.HostTests
             Assert.That(head.y - destination.y, Is.EqualTo(1.6f).Within(0.001f));
         }
 
-        static void SetController(UnityEngine.InputSystem.XR.XRController device, Vector3 position, Quaternion rotation,
-            bool trigger = false, Vector2 stick = default)
+        internal static XRController AddController(string layout, string usage)
+        {
+            InputSystem.RegisterLayout(@"{
+                ""name"": """ + layout + @""",
+                ""extend"": ""XRController"",
+                ""controls"": [
+                    {""name"": ""gripButton"", ""layout"": ""Button"", ""usage"": ""GripButton""},
+                    {""name"": ""triggerButton"", ""layout"": ""Button"", ""usage"": ""TriggerButton""},
+                    {""name"": ""stick"", ""layout"": ""Vector2"", ""usage"": ""Primary2DAxis""}
+                ]
+            }");
+            var device = (XRController)InputSystem.AddDevice(layout);
+            InputSystem.SetDeviceUsage(device, usage);
+            return device;
+        }
+
+        internal static void SetController(XRController device, Vector3 position, Quaternion rotation,
+            bool trigger = false, Vector2 stick = default, bool grip = false, bool tracked = true)
         {
             using (StateEvent.From(device, out var state))
             {
                 device.devicePosition.WriteValueIntoEvent(position, state);
                 device.deviceRotation.WriteValueIntoEvent(rotation, state);
                 device.trackingState.WriteValueIntoEvent(3, state);
-                device.isTracked.WriteValueIntoEvent(1f, state);
+                device.isTracked.WriteValueIntoEvent(tracked ? 1f : 0f, state);
+                device.TryGetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("gripButton")
+                    ?.WriteValueIntoEvent(grip ? 1f : 0f, state);
                 device.TryGetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("triggerButton")
                     ?.WriteValueIntoEvent(trigger ? 1f : 0f, state);
                 device.TryGetChildControl<UnityEngine.InputSystem.Controls.Vector2Control>("stick")
@@ -237,7 +246,7 @@ namespace YetiKit.Starter.HostTests
             }
         }
 
-        static IEnumerator Frames(int count)
+        internal static IEnumerator Frames(int count)
         {
             for (var i = 0; i < count; i++) yield return null;
         }

@@ -23,6 +23,12 @@ In Play Mode, use the start panel to choose Compact (`snap-30`, 30°) or Wide (`
 
 For direct boot, launch the Editor (then enter Play Mode) or a desktop development player with `--starter-experiment snap-45` (or `snap-30`). In the Editor you can start from the open sandbox; to redirect from a different scene, include `Assets/Starter/Sandbox/Sandbox.unity` in the active build profile's scene list. A direct boot does not change the last explicit choice. The controls are created at runtime by `Game.Dev`, which compiles in the Editor or in development players with `YETIKIT_DEV`; the saved room has no dev component references.
 
+### XR Starter Lab
+
+In the Editor or a dev-enabled player, the same controls appear above the tracked left wrist (or left controller). Aim the right controller's short pointer at a button and press and release the trigger on it, or touch it with a straight right index finger and pull back before poking again. The desktop panel and wrist share the active experiment and tuning, including the read-only warning for unreadable saved tuning. F8 still toggles only the desktop panel.
+
+The wrist panel does not take over an existing prop hold. While pointing at it, the right controller cannot start a prop grab or teleport; a held grip or trigger stays captured until released. The tracked hand suppresses room gestures near the panel. These routes are checked with synthetic input; live behavior and placement comfort are pending hardware validation.
+
 ## Remaining day-0 checklist
 
 1. **Clean-cache resolution and smoke/adapter tests:** Host tests cover generated scripts and scene wiring; verify resolution from the generated project’s remote pins and add consumer adapter tests.
@@ -31,8 +37,8 @@ For direct boot, launch the Editor (then enter Play Mode) or a desktop developme
 4. **Hands and controllers:** the rig and per-side switching are wired; configure OpenXR and verify both hands at ≥60 Hz on separately authorized hardware.
 5. **Throw/impact:** starter targets and cue are wired; validate the physical throw/impact event band on hardware.
 6. **Locomotion:** pads and snap turn are wired and motion is checked in the synthetic Host; live inputs and comfort remain unverified.
-7. **Direct experiment boot:** desktop direct selection and the start panel are wired; a wrist panel and XR UI input remain pending.
-8. **Persistent tuning:** desktop snap-angle tuning has per-experiment defaults, local persistence, reset and override visibility; local capture context remains pending.
+7. **Direct experiment boot:** desktop direct selection and desktop/XR start panels are wired; verify XR UI on separately authorized hardware.
+8. **Persistent tuning:** desktop and wrist snap-angle tuning share per-experiment defaults, local persistence, reset and override visibility; local capture context remains pending.
 9. **Local photo:** wire and verify local-only photo snap; no upload or voice by default.
 10. **Release and frame timing:** wire dev stripping and BuildAudit; finish project rendering/comfort defaults, pinned lock, vendored Ship tools, CI and release notes; measure frame time on separately authorized hardware, including the Quest 2 floor.
 

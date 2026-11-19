@@ -15,7 +15,7 @@ namespace YetiKit.Starter.HostTests
 {
     static class StarterLabChecks
     {
-        const string CompactKey = "YetiKit.Lab.Tuning.starter-sandbox.snap-30";
+        internal const string CompactKey = "YetiKit.Lab.Tuning.starter-sandbox.snap-30";
         static readonly string[] PrefKeys = {
             "YetiKit.Lab.Selection.starter-sandbox",
             CompactKey,
@@ -136,7 +136,7 @@ namespace YetiKit.Starter.HostTests
             Assert.That(resetAngle, Is.EqualTo(30f));
         }
 
-        static Scene Load(string path) => EditorSceneManager.LoadSceneInPlayMode(path, new LoadSceneParameters(LoadSceneMode.Single));
+        internal static Scene Load(string path) => EditorSceneManager.LoadSceneInPlayMode(path, new LoadSceneParameters(LoadSceneMode.Single));
         static StarterLab Lab(Scene scene) => StarterSandboxTests.Root(scene, "Sandbox Bindings").GetComponent<StarterLab>();
         static StarterLabPanel Panel(StarterLab lab) => lab.GetComponent<StarterLabPanel>();
         static SnapTurnProvider Turn(Scene scene) => StarterSandboxTests.Root(scene, "XR Origin").GetComponent<SnapTurnProvider>();
@@ -178,7 +178,7 @@ namespace YetiKit.Starter.HostTests
             }
         }
 
-        static void BackupPrefs()
+        internal static void BackupPrefs()
         {
             SessionState.SetBool(BackupKey, true);
             foreach (var key in PrefKeys)
