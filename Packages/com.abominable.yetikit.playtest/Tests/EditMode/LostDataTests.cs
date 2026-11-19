@@ -88,7 +88,7 @@ namespace YetiKit.Playtest.Tests
         }
 
         [Test]
-        public void AChunkTornAtRotationIsCountedAsLost()
+        public void AChunkTornAtRotationKeepsItsJournalForRetry()
         {
             using (var tmp = new TempDir())
             {
@@ -99,8 +99,12 @@ namespace YetiKit.Playtest.Tests
                     writer.Append(line, line.Length);
                     disk.FailWrite = true;
                     Assert.Catch<IOException>(() => writer.Rotate());
-                    Assert.AreEqual(line.Length, writer.Lost);
-                    Assert.AreEqual(0, Directory.GetFiles(tmp.Path).Length, "the torn chunk is gone");
+                    Assert.AreEqual(1, writer.Unpublished);
+                    Assert.AreEqual(1, Directory.GetFiles(tmp.Path, "*.journal").Length);
+                    Assert.IsEmpty(Directory.GetFiles(tmp.Path, "*.jsonl.gz"));
+                    disk.FailWrite = false;
+                    writer.Rotate();
+                    Assert.AreEqual(new string(line), TempDir.Gunzip(Path.Combine(tmp.Path, "chunk-0001.jsonl.gz")));
                 }
             }
         }
@@ -135,8 +139,8 @@ namespace YetiKit.Playtest.Tests
                     var marker = DoneMarker.Parse(File.ReadAllText(Path.Combine(dir, DoneMarker.FileName)));
                     Assert.IsNotNull(marker);
                     Assert.AreEqual(lost, marker.context.lost);
-                    StringAssert.Contains("\"lost\":" + lost + ",", File.ReadAllText(Path.Combine(dir, FileChunkStore.MetaFile)));
-                    StringAssert.Contains("\"k\":\"test_after\"", TempDir.Gunzip(Path.Combine(dir, "chunk-0003.jsonl.gz")), "later lines kept");
+                    StringAssert.Contains("\"lost\":{\"count\":2,\"first\":0,\"last\":0", File.ReadAllText(Path.Combine(dir, FileChunkStore.MetaFile)));
+                    StringAssert.Contains("\"k\":\"test_after\"", TempDir.Gunzip(Path.Combine(dir, "chunk-0005.jsonl.gz")), "later lines kept");
                 }
             }
         }

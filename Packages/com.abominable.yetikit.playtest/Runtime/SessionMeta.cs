@@ -18,7 +18,8 @@ namespace YetiKit.Playtest
         public long Samples;     // f lines
         public double HandSeconds, ControllerSeconds, Seconds;
         public int Throws, Errors, Events;
-        public long Lost;        // recorded text that could not be written (disk errors): 0 = the recording is complete
+        public long Lost;        // legacy done-marker counter (uncompressed chars)
+        public LostRecords LostRange;
 
         public SessionMeta() { }
 
@@ -66,7 +67,7 @@ namespace YetiKit.Playtest
             JsonLine.Field(sb, "events", Events);
             JsonLine.Field(sb, "throws", Throws);
             JsonLine.Field(sb, "errors", Errors);
-            JsonLine.Field(sb, "lost", Lost);
+            LostRange.Write(JsonLine.Key(sb, "lost"));
             JsonLine.Field(sb, "handSeconds", HandSeconds, 1);
             JsonLine.Field(sb, "controllerSeconds", ControllerSeconds, 1);
             JsonLine.Key(sb, "counts");

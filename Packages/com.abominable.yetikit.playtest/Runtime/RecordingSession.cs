@@ -79,15 +79,15 @@ namespace YetiKit.Playtest
             frameOrigin = frameCount;
             Meta.StartUtc = utcNow();
             Meta.EndUtc = null;
-            pump.StartSession(Dir);
+            pump.StartSession(Dir, paths as FileChunkStore);
             lock (log.Gate)
             {
                 log.Restart();
                 WriteMeta();
-                var sb = log.BeginLine("start", EventClass.Bookkeeping);
-                JsonLine.Field(sb, "session", Meta.Session);
-                JsonLine.Field(sb, "scene", Meta.Scene);
-                JsonLine.End(sb);
+                var data = new StringBuilder("{\"session\":");
+                JsonLine.Str(data, Meta.Session);
+                JsonLine.Field(data, "scene", Meta.Scene);
+                log.Append("start", data.Append('}').ToString(), EventClass.Bookkeeping);
             }
             return true;
         }
@@ -115,13 +115,17 @@ namespace YetiKit.Playtest
         }
 
         /// <summary>Hand the buffered lines to the pump thread: a buffer swap, no copy (the pump gzips them).</summary>
-        void Handoff()
+        void Handoff(bool flush = false)
         {
             var start = Stopwatch.GetTimestamp();
-            StringBuilder full = null;
             lock (log.Gate)
-                if (log.Buffer.Length > 0) full = log.Swap(pump.TakeBuilder());
-            pump.Write(full);
+            {
+                if (log.Buffer.Length > 0)
+                {
+                    if (pump.Write(log.Buffer, flush)) log.Swap(pump.TakeBuilder());
+                    else if (flush) log.DropBuffer();
+                }
+            }
             LastHandoffMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
             Handoffs++;
             if (LastHandoffMs > MaxHandoffMs) MaxHandoffMs = LastHandoffMs;
@@ -131,7 +135,7 @@ namespace YetiKit.Playtest
         public void Pause(long frameCount, int drainMs)
         {
             if (!Begun || Ended || Paused) return;
-            lock (log.Gate) JsonLine.End(log.BeginLine("pause", EventClass.Bookkeeping));
+            log.Append("pause", null, EventClass.Bookkeeping);
             Paused = true;
             pausedAt = utcNow();
             pausedSeconds = log.Now;
@@ -150,12 +154,9 @@ namespace YetiKit.Playtest
             Paused = false;
             pausedTotal += Math.Max(0, log.Now - pausedSeconds);
             Meta.EndUtc = null;
-            lock (log.Gate)
-            {
-                var sb = log.BeginLine("resume", EventClass.Bookkeeping);
-                JsonLine.Field(sb, "paused", gap, 1);
-                JsonLine.End(sb);
-            }
+            var data = new StringBuilder("{\"paused\":");
+            JsonLine.Num(data, gap, 1);
+            log.Append("resume", data.Append('}').ToString(), EventClass.Bookkeeping);
             return true;
         }
 
@@ -188,7 +189,7 @@ namespace YetiKit.Playtest
             var m = Meta.Copy();
             pump.Finish(Meta.Session, Path.Combine(Dir, FileChunkStore.MetaFile), meta, Path.Combine(Dir, DoneMarker.FileName), lost =>
             {
-                m.Lost = lost;
+                m.Lost = lost.Chars;
                 return Encoding.UTF8.GetBytes(new DoneMarker { session = m.Session, player = m.Player, build = m.Build, context = m.Context() }.ToJson());
             });
             return true;
@@ -200,7 +201,7 @@ namespace YetiKit.Playtest
         void Flush(long frameCount, DateTime end, bool final = false)
         {
             if (!Paused || Meta.EndUtc == null) Meta.Frames = frameCount - frameOrigin;
-            Handoff();
+            Handoff(flush: true);
             pump.Rotate();
             Meta.EndUtc = end;
             if (!final) WriteMeta();
@@ -210,9 +211,10 @@ namespace YetiKit.Playtest
         void WriteMeta() => pump.WriteFile(Path.Combine(Dir, FileChunkStore.MetaFile), MetaBytes());
 
         // meta.json is made on the pump thread, from a copy, so its lost is exact (see ChunkPump.WriteFile).
-        Func<long, byte[]> MetaBytes()
+        Func<LostRecords, byte[]> MetaBytes()
         {
             var counts = new StringBuilder(256);
+            LostRecords rejected;
             lock (log.Gate)
             {
                 Meta.Seconds = Elapsed;
@@ -221,12 +223,13 @@ namespace YetiKit.Playtest
                 Meta.Throws = log.Throws;
                 Meta.Errors = log.Errors;
                 log.AppendCounts(counts);
+                rejected = log.Rejected;
             }
             var c = counts.ToString();
             var m = Meta.Copy();
             return lost =>
             {
-                m.Lost = lost;
+                m.LostRange = lost.Merge(rejected);
                 return Encoding.UTF8.GetBytes(m.ToJson(sb => sb.Append(c)));
             };
         }

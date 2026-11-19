@@ -16,7 +16,17 @@ namespace YetiKit.Playtest
         internal static readonly FileChunkStore Default = new FileChunkStore(string.Empty);
         public readonly string Outbox;
 
-        public FileChunkStore(string root) => Outbox = Path.Combine(root, OutboxFolder);
+        readonly long pendingDiskBudgetBytes;
+
+        public FileChunkStore(string root, long pendingDiskBudgetBytes = long.MaxValue)
+        {
+            Outbox = Path.Combine(root, OutboxFolder);
+            this.pendingDiskBudgetBytes = pendingDiskBudgetBytes;
+        }
+
+        /// <summary>Best-effort pruning of completed sessions to the configured budget.</summary>
+        public void PrunePending(string activeDir = null, Func<string, bool> owns = null) =>
+            OutboxBudget.Enforce(this, pendingDiskBudgetBytes, activeDir, owns);
 
         public string SessionOutbox(string session)
         {
@@ -53,8 +63,9 @@ namespace YetiKit.Playtest
                 foreach (var f in Directory.GetFiles(dir))
                 {
                     var name = Path.GetFileName(f);
-                    var n = ChunkIndex(name.EndsWith(TmpSuffix, StringComparison.Ordinal)
-                        ? name.Substring(0, name.Length - TmpSuffix.Length) : name);
+                    var suffix = name.EndsWith(ChunkJournal.Suffix, StringComparison.Ordinal) ? ChunkJournal.Suffix : TmpSuffix;
+                    var n = ChunkIndex(name.EndsWith(suffix, StringComparison.Ordinal)
+                        ? name.Substring(0, name.Length - suffix.Length) : name);
                     if (n >= next) next = n + 1;
                 }
             return next;
@@ -70,12 +81,17 @@ namespace YetiKit.Playtest
         {
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            return openFile != null ? openFile(path) : new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024);
+            return openFile != null ? openFile(path) : new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 64 * 1024);
         }
 
         public bool TempExists(string path) => File.Exists(path);
         public long TempLength(string path) => new FileInfo(path).Length;
         public void DeleteTemp(string path) => File.Delete(path);
+
+        public void TruncateJournal(string path, long length)
+        {
+            using (var file = File.OpenWrite(path)) file.SetLength(length);
+        }
 
         public void PublishChunk(string temp, string final) => File.Move(temp, final);
 
@@ -120,6 +136,17 @@ namespace YetiKit.Playtest
             {
                 if (!SessionRules.IsId(Path.GetFileName(dir)) ||
                     !CanRecover(Path.Combine(dir, MetaFile)) || !CanRecover(Path.Combine(dir, MetaFile + TmpSuffix))) continue;
+                var journals = Directory.GetFiles(dir, "*" + ChunkJournal.Suffix);
+                Array.Sort(journals, (a, b) => JournalIndex(a).CompareTo(JournalIndex(b)));
+                foreach (var journal in journals)
+                {
+                    var index = JournalIndex(journal);
+                    if (index < 0) continue;
+                    var final = journal.Substring(0, journal.Length - ChunkJournal.Suffix.Length);
+                    ChunkJournal.Publish(this, final + TmpSuffix, final, null, out _);
+                    if (ChunkJournal.HasTornTail(journal)) RecoveryLoss.Record(this, dir, index);
+                    DeleteTemp(journal);
+                }
                 foreach (var temp in Directory.GetFiles(dir))
                 {
                     if (!temp.EndsWith(TmpSuffix, StringComparison.Ordinal)) continue;
@@ -131,8 +158,11 @@ namespace YetiKit.Playtest
             }
         }
 
+        static int JournalIndex(string path) => ChunkIndex(Path.GetFileName(path).Substring(0,
+            Path.GetFileName(path).Length - ChunkJournal.Suffix.Length));
+
         // Older recordings have no format. Unreadable or explicitly unknown metadata is left untouched.
-        static bool CanRecover(string path)
+        internal static bool CanRecover(string path)
         {
             try
             {

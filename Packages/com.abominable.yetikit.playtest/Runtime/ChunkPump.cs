@@ -24,16 +24,18 @@ namespace YetiKit.Playtest
             public string Path;
             public byte[] Bytes;
             public ManualResetEventSlim Done;
-            public Func<long, byte[]> Make; // File: the bytes, given the session's Lost when the job runs
+            public Func<LostRecords, byte[]> Make;
+            public FileChunkStore Budget;
             public string Path2;            // Finish: the done marker
-            public Func<long, byte[]> Make2;
+            public Func<LostRecords, byte[]> Make2;
             public string Owner;            // Finish, Delete: the session id it owns until it ran
         }
 
         /// <summary>A session's final meta.json and done marker, written in that order; kept and retried until both are.</summary>
         sealed class Ending
         {
-            public string Owner, MetaPath, MarkerPath;
+            public string Owner, Dir, MetaPath, MarkerPath;
+            public FileChunkStore Budget;
             public byte[] Meta, Marker; // Meta: null once it is on disk
             public int Failures;
             public double NextAt;
@@ -41,13 +43,15 @@ namespace YetiKit.Playtest
 
         readonly ConcurrentQueue<Job> jobs = new ConcurrentQueue<Job>();
         readonly ConcurrentBag<System.Text.StringBuilder> pool = new ConcurrentBag<System.Text.StringBuilder>();
-        readonly char[] block = new char[BlockChars]; // pump thread only
+        char[] block = new char[BlockChars]; // pump thread only
+        int pendingBuffers, poolSize = PooledBuilders;
+        FileChunkStore budget;
         readonly AutoResetEvent wake = new AutoResetEvent(false);
         readonly Thread thread;
         volatile bool stopping;
         ChunkWriter writer;
         string sessionDir; // pump thread only: the session a failed writer start is retried for
-        long dropped;               // pump thread only: this session's text that had no writer
+        LostRecords dropped; // pump thread only
         long lost;
         readonly System.Collections.Generic.List<(string, string)> unpublished = new System.Collections.Generic.List<(string, string)>();
         readonly IChunkStore store;
@@ -62,10 +66,9 @@ namespace YetiKit.Playtest
         public event Action<string> ChunkWritten;
         public int Errors;
         public string LastError;
-        /// <summary>Chars queued so far (the uncompressed size, for the budget numbers).</summary>
+        /// <summary>Uncompressed chars accepted by the worker so far.</summary>
         public long RawChars;
-        /// <summary>The current session's text that never reached a whole chunk (uncompressed bytes, about), after the
-        /// jobs run so far (<see cref="Drain"/> first for an exact number). 0 when the recording is complete.</summary>
+        /// <summary>Uncompressed chars lost to worker IO failures in the current session.</summary>
         public long Lost => Interlocked.Read(ref lost);
 
         /// <param name="nextFree">The first chunk number of a session (tests inject a failing one).</param>
@@ -87,20 +90,43 @@ namespace YetiKit.Playtest
         }
 
         /// <summary>Following text goes to chunks in <paramref name="dir"/> (the open chunk is finished first).</summary>
-        public void StartSession(string dir) => Enqueue(new Job { Op = Op.Session, Path = dir });
+        public void StartSession(string dir, FileChunkStore budgetStore = null) =>
+            Enqueue(new Job { Op = Op.Session, Path = dir, Budget = budgetStore ?? store as FileChunkStore });
 
         /// <summary>Hand <paramref name="text"/> to the pump thread (it owns it from now on and returns it emptied to
         /// <see cref="TakeBuilder"/>'s pool): O(1) on the caller's thread.</summary>
-        public void Write(System.Text.StringBuilder text)
+        public bool Write(System.Text.StringBuilder text) => Write(text, false);
+
+        internal bool Write(System.Text.StringBuilder text, bool flush)
         {
-            if (text == null || text.Length == 0) return;
+            if (text == null || text.Length == 0) return true;
+            if (text.Length > FlightLog.InitialChars || text.Capacity > FlightLog.InitialChars * 8) return false;
+            // Leave one slot for Pause/End to hand off the producer buffer before finalizing.
+            if (Interlocked.Increment(ref pendingBuffers) > PooledBuilders + (flush ? 1 : 0))
+            {
+                Interlocked.Decrement(ref pendingBuffers);
+                return false;
+            }
             RawChars += text.Length;
             Enqueue(new Job { Op = Op.Text, Text = text });
+            return true;
         }
 
         /// <summary>An empty builder (pooled: the steady state allocates nothing).</summary>
-        public System.Text.StringBuilder TakeBuilder() =>
-            pool.TryTake(out var sb) ? sb : new System.Text.StringBuilder(FlightLog.InitialChars);
+        public System.Text.StringBuilder TakeBuilder()
+        {
+            if (!pool.TryTake(out var sb)) return new System.Text.StringBuilder(FlightLog.InitialChars);
+            Interlocked.Decrement(ref poolSize);
+            return sb;
+        }
+
+        void ReturnBuilder(System.Text.StringBuilder sb)
+        {
+            sb.Clear();
+            if (sb.Capacity > FlightLog.InitialChars) return;
+            if (Interlocked.Increment(ref poolSize) <= PooledBuilders) pool.Add(sb);
+            else Interlocked.Decrement(ref poolSize);
+        }
 
         /// <summary>Finish the open chunk (it lands in the outbox).</summary>
         public void Rotate() => Enqueue(new Job { Op = Op.Rotate });
@@ -110,7 +136,7 @@ namespace YetiKit.Playtest
 
         /// <summary>Write a small file made on the pump thread from the session's <see cref="Lost"/> as of every text
         /// queued before it (exact: no drain or timeout involved).</summary>
-        public void WriteFile(string path, Func<long, byte[]> make) => Enqueue(new Job { Op = Op.File, Path = path, Make = make });
+        public void WriteFile(string path, Func<LostRecords, byte[]> make) => Enqueue(new Job { Op = Op.File, Path = path, Make = make });
 
         /// <summary>Delete a directory once every job before this one ran (a session too short to keep); the session
         /// <paramref name="owner"/> is <see cref="Owns"/> until then.</summary>
@@ -126,7 +152,7 @@ namespace YetiKit.Playtest
         /// is on disk: a failed write is retried with <see cref="Backoff"/> (and once more when the pump stops).
         /// The pump owns the session until its marker is written.
         /// </summary>
-        public void Finish(string owner, string metaPath, Func<long, byte[]> meta, string markerPath, Func<long, byte[]> marker)
+        public void Finish(string owner, string metaPath, Func<LostRecords, byte[]> meta, string markerPath, Func<LostRecords, byte[]> marker)
         {
             Own(owner);
             Enqueue(new Job { Op = Op.Finish, Owner = owner, Path = metaPath, Make = meta, Path2 = markerPath, Make2 = marker });
@@ -187,7 +213,7 @@ namespace YetiKit.Playtest
                     catch (Exception e) { Count(e); } // never kill the thread: later jobs and barriers still run
                     finally
                     {
-                        Interlocked.Exchange(ref lost, dropped + (writer?.Lost ?? 0));
+                        Interlocked.Exchange(ref lost, dropped.Chars);
                         Release(job.Done);
                     }
                 }
@@ -204,31 +230,40 @@ namespace YetiKit.Playtest
             switch (job.Op)
             {
                 case Op.Text:
-                    Append(job.Text);
-                    job.Text.Length = 0;
-                    pool.Add(job.Text);
+                    try { Append(job.Text); }
+                    finally
+                    {
+                        ReturnBuilder(job.Text);
+                        Interlocked.Decrement(ref pendingBuffers);
+                    }
                     break;
                 case Op.Rotate: RotateNow(); break;
                 case Op.Session:
                     RotateNow();
                     writer = null;
-                    dropped = 0;
+                    dropped = default;
                     sessionDir = job.Path;
+                    budget = job.Budget;
+                    budget?.PrunePending(sessionDir, Owns);
                     OpenWriter();
                     break;
                 case Op.File:
-                    Try(() => writeFile(job.Path, job.Make != null ? job.Make(dropped + (writer?.Lost ?? 0)) : job.Bytes));
+                    Try(() => writeFile(job.Path, job.Make != null ? job.Make(dropped) : job.Bytes));
                     break;
                 case Op.Barrier: RetryEndings(false); break; // Done is set by Run
                 case Op.Delete:
-                    try { Try(() => store.DeleteDir(job.Path)); }
+                    try
+                    {
+                        store.DeleteDir(job.Path);
+                        unpublished.RemoveAll(chunk => System.IO.Path.GetDirectoryName(chunk.Item2) == job.Path);
+                    }
                     finally { Disown(job.Owner); }
                     break;
                 case Op.Finish:
-                    var ending = new Ending { Owner = job.Owner, MetaPath = job.Path, MarkerPath = job.Path2 };
+                    var ending = new Ending { Owner = job.Owner, Dir = sessionDir, MetaPath = job.Path, MarkerPath = job.Path2, Budget = budget };
                     try
                     {
-                        var lostNow = dropped + (writer?.Lost ?? 0);
+                        var lostNow = dropped;
                         ending.Meta = job.Make(lostNow);
                         ending.Marker = job.Make2(lostNow);
                     }
@@ -252,6 +287,9 @@ namespace YetiKit.Playtest
                     writeFile(e.MetaPath, e.Meta);
                     e.Meta = null;
                 }
+                writer?.RetryPending();
+                if (unpublished.Exists(chunk => System.IO.Path.GetDirectoryName(chunk.Item2) == e.Dir))
+                    throw new System.IO.IOException("Session chunks are still pending publication.");
                 writeFile(e.MarkerPath, e.Marker);
             }
             catch (Exception x)
@@ -262,6 +300,7 @@ namespace YetiKit.Playtest
                 return false;
             }
             Disown(e.Owner);
+            e.Budget?.PrunePending(sessionDir == null || System.IO.Path.GetFileName(sessionDir) == e.Owner ? null : sessionDir, Owns);
             return true;
         }
 
@@ -283,37 +322,23 @@ namespace YetiKit.Playtest
                 Try(() => writer = new ChunkWriter(sessionDir, nextFree(sessionDir), unpublished, openFile, store));
         }
 
-        // A failed write tears the open gzip chunk: it is dropped (only its earlier handoffs' text counts in Lost) and
-        // this whole handoff is tried once more from its start in a new chunk, so every chunk starts on a line and holds
-        // whole lines only; if that fails too, the whole handoff is dropped (counted in Lost).
         void Append(System.Text.StringBuilder text)
         {
             OpenWriter();
-            if (writer == null) { dropped += text.Length; return; }
-            for (var attempt = 0; ; attempt++)
+            for (int start = 0, end = 0; end < text.Length; end++)
             {
-                var before = writer.OpenBytes; // the open chunk's earlier handoffs
-                try
+                if (text[end] != '\n' && end + 1 != text.Length) continue;
+                var n = end - start + 1;
+                if (block.Length < n) block = new char[n];
+                text.CopyTo(start, block, 0, n);
+                var kept = false;
+                for (var attempt = 0; writer != null && attempt < 2; attempt++)
                 {
-                    for (var at = 0; at < text.Length;)
-                    {
-                        var n = Math.Min(BlockChars, text.Length - at);
-                        // Append encodes each block independently: keep a UTF-16 pair in the same block.
-                        if (at + n < text.Length && char.IsHighSurrogate(text[at + n - 1]) && char.IsLowSurrogate(text[at + n])) n--;
-                        text.CopyTo(at, block, 0, n);
-                        writer.Append(block, n);
-                        at += n;
-                    }
-                    return;
+                    try { writer.Append(block, n); kept = true; break; }
+                    catch (Exception e) { Count(e); }
                 }
-                catch (Exception e)
-                {
-                    Count(e);
-                    writer.Abandon(writer.OpenBytes - before); // this handoff's part is written again or dropped below
-                    if (attempt == 0) continue;
-                    dropped += text.Length;
-                    return;
-                }
+                if (!kept) dropped.Add(LostRecords.TimeOf(text.ToString(start, n)), n);
+                start = end + 1;
             }
         }
 
@@ -322,6 +347,7 @@ namespace YetiKit.Playtest
             string name = null;
             Try(() => name = writer?.Rotate());
             if (name != null) ChunkWritten?.Invoke(name);
+            budget?.PrunePending(sessionDir, Owns);
         }
 
         void Try(Action a)

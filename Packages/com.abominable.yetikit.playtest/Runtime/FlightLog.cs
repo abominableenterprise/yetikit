@@ -13,15 +13,22 @@ namespace YetiKit.Playtest
 
         internal readonly object Gate = new object();
         /// <summary>The lines not yet handed over; write it only under <see cref="Gate"/>.</summary>
-        public StringBuilder Buffer { get; private set; } = new StringBuilder(InitialChars);
+        public StringBuilder Buffer { get; private set; }
+        readonly int maxBufferedChars;
+        LostRecords rejected;
+        public long BackpressureDrops { get { lock (Gate) return rejected.Count; } }
+        internal LostRecords Rejected => rejected;
         readonly Dictionary<string, int> counts = new Dictionary<string, int>();
         double origin;
         readonly Func<double> clock;
         readonly IEventClassification classification;
         bool accepting = true;
 
-        public FlightLog(Func<double> clock, IEventClassification classification = null)
+        public FlightLog(Func<double> clock, IEventClassification classification = null, int maxBufferedChars = InitialChars)
         {
+            if (maxBufferedChars <= 0 || maxBufferedChars > InitialChars) throw new ArgumentOutOfRangeException(nameof(maxBufferedChars));
+            this.maxBufferedChars = maxBufferedChars;
+            Buffer = new StringBuilder(maxBufferedChars);
             this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
             this.classification = classification;
             origin = clock();
@@ -48,6 +55,7 @@ namespace YetiKit.Playtest
                 origin = clock();
                 counts.Clear();
                 Buffer.Clear();
+                rejected = default;
                 Events = Lines = Meaningful = Samples = Throws = Errors = 0;
                 accepting = true;
             }
@@ -55,10 +63,8 @@ namespace YetiKit.Playtest
 
         internal void Seal() { lock (Gate) accepting = false; }
 
-        // The caller holds Gate and completes the line before releasing it.
-        internal StringBuilder BeginLine(string kind, EventClass role)
+        void CountLine(string kind, EventClass role)
         {
-            var t = Now;
             Lines++;
             if (role == EventClass.Frame) Samples++;
             if (role != EventClass.Sample && role != EventClass.Frame)
@@ -67,10 +73,8 @@ namespace YetiKit.Playtest
                 if (role != EventClass.Bookkeeping) Meaningful++;
                 if (role == EventClass.Throw) Throws++;
                 if (role == EventClass.Error) Errors++;
-                counts.TryGetValue(kind, out var n);
-                counts[kind] = n + 1;
+                if (counts.TryGetValue(kind, out var n) || counts.Count < 1024) counts[kind] = n + 1;
             }
-            return JsonLine.Begin(Buffer, t < 0 ? 0 : t, kind);
         }
 
         /// <summary>Take the buffer and put <paramref name="empty"/> in its place; the caller holds <see cref="Gate"/>.</summary>
@@ -81,17 +85,40 @@ namespace YetiKit.Playtest
             return full;
         }
 
+        internal void DropBuffer()
+        {
+            var text = Buffer.ToString();
+            foreach (var line in text.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                rejected.Add(LostRecords.TimeOf(line), line.Length + 1);
+            Buffer.Clear();
+        }
+
         /// <summary>Append a line. Supply a valid JSON object to merge its fields, or another JSON value
         /// to store under <c>d</c>. Null/empty payload adds no fields.</summary>
-        public void AppendEvent(string kind, string payload)
+        public AppendResult AppendEvent(string kind, string payload) => Append(kind ?? "mark", payload, null);
+
+        internal AppendResult Append(string kind, string payload, EventClass? role)
         {
             lock (Gate)
             {
-                if (!accepting) return;
-                kind = kind ?? "mark";
-                var sb = BeginLine(kind, classification?.Classify(kind) ?? EventClass.Meaningful);
-                AppendData(sb, payload);
-                JsonLine.End(sb);
+                if (!accepting) return AppendResult.Sealed;
+                var time = Math.Max(0, Now);
+                var start = Buffer.Length;
+                // Reject oversized inputs before escaping/normalizing them. Escaping grows by at most 6x.
+                if ((long)kind.Length + (payload?.Length ?? 0) <= maxBufferedChars)
+                {
+                    JsonLine.Begin(Buffer, time, kind);
+                    AppendData(Buffer, payload);
+                    JsonLine.End(Buffer);
+                    if (Buffer.Length <= maxBufferedChars)
+                    {
+                        CountLine(kind, role ?? classification?.Classify(kind) ?? EventClass.Meaningful);
+                        return AppendResult.Appended;
+                    }
+                    Buffer.Length = start;
+                }
+                rejected.Add(time);
+                return AppendResult.BufferFull;
             }
         }
 

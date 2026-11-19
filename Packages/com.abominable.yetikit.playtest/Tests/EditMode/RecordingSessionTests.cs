@@ -85,7 +85,7 @@ namespace YetiKit.Playtest.Tests
                 StringAssert.Contains("\"samples\":1830,", text);
                 StringAssert.Contains("\"throws\":1,", text);
                 StringAssert.Contains("\"errors\":1,", text);
-                StringAssert.Contains("\"lost\":0,", text);
+                StringAssert.Contains("\"lost\":{\"count\":0,\"first\":null,\"last\":null,\"torn\":0}", text);
                 var marker = DoneMarker.Parse(File.ReadAllText(Path.Combine(dir, DoneMarker.FileName)));
                 Assert.IsNotNull(marker);
                 Assert.AreEqual(Id, marker.session);

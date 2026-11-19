@@ -15,6 +15,7 @@ namespace YetiKit.Playtest
         bool TempExists(string path);
         long TempLength(string path);
         void DeleteTemp(string path);
+        void TruncateJournal(string path, long length);
         void PublishChunk(string temp, string final);
         void PublishFile(string path, byte[] bytes);
         void DeleteDir(string dir);
