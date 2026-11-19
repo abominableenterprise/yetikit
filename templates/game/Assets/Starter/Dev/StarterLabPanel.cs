@@ -14,6 +14,7 @@ namespace Game.Dev
         RectTransform card;
         Text compact, wide, status;
         GameObject tuning;
+        Button decrease, increase, reset;
         Font font;
 
         internal static void Build(StarterLab lab)
@@ -42,15 +43,15 @@ namespace Game.Dev
             card.gameObject.AddComponent<Image>().color = new Color(0.07f, 0.10f, 0.13f, 0.95f);
             Label(card, "Starter Lab  |  F8 to toggle", 12, 6, 280, 28);
             Label(card, "Choose a snap-turn experiment", 12, 35, 280, 24);
-            compact = Button(card, "Compact turn", 12, 65, 136, () => lab.Select(StarterLab.Compact));
-            wide = Button(card, "Wide turn", 156, 65, 136, () => lab.Select(StarterLab.Wide));
+            compact = Button(card, "Compact turn", 12, 65, 136, () => lab.Select(StarterLab.Compact)).GetComponentInChildren<Text>();
+            wide = Button(card, "Wide turn", 156, 65, 136, () => lab.Select(StarterLab.Wide)).GetComponentInChildren<Text>();
             var controls = Item("Tuning", card);
             Place(controls, 0, 104, 304, 126);
             tuning = controls.gameObject;
             status = Label(controls, "Tuning status", 12, 4, 280, 58);
-            Button(controls, "−5°", 12, 69, 80, () => Step(-1));
-            Button(controls, "+5°", 102, 69, 80, () => Step(1));
-            Button(controls, "Reset", 192, 69, 100, lab.ResetAngle);
+            decrease = Button(controls, "−5°", 12, 69, 80, () => Step(-1));
+            increase = Button(controls, "+5°", 102, 69, 80, () => Step(1));
+            reset = Button(controls, "Reset", 192, 69, 100, lab.ResetAngle);
             Refresh();
         }
 
@@ -69,15 +70,20 @@ namespace Game.Dev
         {
             compact.text = "Compact turn" + Suffix(StarterLab.Compact);
             wide.text = "Wide turn" + Suffix(StarterLab.Wide);
-            tuning.SetActive(lab.Angle != null);
-            if (lab.Angle is { } angle)
-                status.text = $"Snap turn: {angle.Get():0}° ({(lab.HasOverride ? "override" : "default")})\n" +
-                    $"Experiment default: {angle.Default:0}°";
+            var selected = lab.CurrentId != null;
+            tuning.SetActive(selected);
+            if (!selected) return;
+            var angle = lab.Angle;
+            decrease.interactable = increase.interactable = reset.interactable = angle != null;
+            status.text = angle != null
+                ? $"Snap turn: {angle.Get():0}° ({(lab.HasOverride ? "override" : "default")})\n" +
+                    $"Experiment default: {angle.Default:0}°"
+                : $"Snap turn: {lab.SnapAngle:0}° (default)\nPersistence unavailable\nUnreadable saved tuning was kept.";
         }
 
         string Suffix(string id) => lab.CurrentId == id ? " (active)" : lab.SuggestedId == id ? " (last)" : "";
 
-        Text Button(Transform parent, string caption, float x, float y, float width, UnityAction click)
+        Button Button(Transform parent, string caption, float x, float y, float width, UnityAction click)
         {
             var rect = Item(caption, parent);
             Place(rect, x, y, width, 34);
@@ -89,7 +95,7 @@ namespace Game.Dev
             button.onClick.AddListener(click);
             var text = Label(rect, caption, 0, 0, width, 34);
             text.alignment = TextAnchor.MiddleCenter;
-            return text;
+            return button;
         }
 
         Text Label(Transform parent, string caption, float x, float y, float width, float height)

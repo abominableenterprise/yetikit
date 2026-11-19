@@ -15,9 +15,10 @@ namespace YetiKit.Starter.HostTests
 {
     static class StarterLabChecks
     {
+        const string CompactKey = "YetiKit.Lab.Tuning.starter-sandbox.snap-30";
         static readonly string[] PrefKeys = {
             "YetiKit.Lab.Selection.starter-sandbox",
-            "YetiKit.Lab.Tuning.starter-sandbox.snap-30",
+            CompactKey,
             "YetiKit.Lab.Tuning.starter-sandbox.snap-45"
         };
         const string BackupKey = "StarterLabChecks.Backup";
@@ -86,14 +87,64 @@ namespace YetiKit.Starter.HostTests
             Assert.That(Turn(scene).turnAmount, Is.EqualTo(30f), "Reset survived model recreation.");
         }
 
+        public static IEnumerator DriveUnreadable(string path, string document, string fixture)
+        {
+            BackupPrefs();
+            PlayerPrefs.SetString(CompactKey, document);
+            PlayerPrefs.Save();
+            var scene = Load(path);
+            yield return null;
+            var lab = Lab(scene);
+            Click(lab, "Compact turn");
+            yield return null;
+            Capture(scene, lab, fixture);
+            AssertUnreadable(scene, lab);
+
+            Click(lab, "Wide turn");
+            yield return null;
+            Assert.That(Button(lab, "+5°").interactable, Is.True, "A different experiment remains editable.");
+            Click(lab, "+5°");
+            Assert.That(Turn(scene).turnAmount, Is.EqualTo(50f));
+            Click(lab, "Compact turn");
+            yield return null;
+            AssertUnreadable(scene, lab);
+            Assert.That(PlayerPrefs.GetString(CompactKey, Missing), Is.EqualTo(document), "Switching must not rewrite the saved data.");
+
+            scene = Load(path);
+            yield return null;
+            lab = Lab(scene);
+            Click(lab, "Compact turn");
+            yield return null;
+            AssertUnreadable(scene, lab);
+            Assert.That(PlayerPrefs.GetString(CompactKey, Missing), Is.EqualTo(document), "Reloading must not rewrite the saved data.");
+        }
+
+        static void AssertUnreadable(Scene scene, StarterLab lab)
+        {
+            Assert.That(Turn(scene).turnAmount, Is.EqualTo(30f));
+            var enabled = new[] { "−5°", "+5°", "Reset" }.Where(name => Button(lab, name).interactable).ToArray();
+            var status = Status(lab);
+            // Calling the callbacks directly should not bypass the read-only state.
+            Click(lab, "+5°");
+            var editedAngle = Turn(scene).turnAmount;
+            Click(lab, "Reset");
+            var resetAngle = Turn(scene).turnAmount;
+            Assert.That(editedAngle, Is.EqualTo(30f),
+                $"An unsavable override was applied; Reset returned to {resetAngle}°. Enabled controls: {string.Join(", ", enabled)}. Status: {status}");
+            Assert.That(enabled, Is.Empty);
+            Assert.That(status, Does.Contain("30° (default)").And.Contain("Persistence unavailable"));
+            Assert.That(resetAngle, Is.EqualTo(30f));
+        }
+
         static Scene Load(string path) => EditorSceneManager.LoadSceneInPlayMode(path, new LoadSceneParameters(LoadSceneMode.Single));
         static StarterLab Lab(Scene scene) => StarterSandboxTests.Root(scene, "Sandbox Bindings").GetComponent<StarterLab>();
         static StarterLabPanel Panel(StarterLab lab) => lab.GetComponent<StarterLabPanel>();
         static SnapTurnProvider Turn(Scene scene) => StarterSandboxTests.Root(scene, "XR Origin").GetComponent<SnapTurnProvider>();
         static string Status(StarterLab lab) => Panel(lab).GetComponentsInChildren<Text>()
             .Single(text => text.name == "Tuning status").text;
-        static void Click(StarterLab lab, string name) => Panel(lab).GetComponentsInChildren<Button>()
-            .Single(button => button.name == name).onClick.Invoke();
+        static Button Button(StarterLab lab, string name) => Panel(lab).GetComponentsInChildren<Button>()
+            .Single(button => button.name == name);
+        static void Click(StarterLab lab, string name) => Button(lab, name).onClick.Invoke();
 
         static void Capture(Scene scene, StarterLab lab, string state)
         {
