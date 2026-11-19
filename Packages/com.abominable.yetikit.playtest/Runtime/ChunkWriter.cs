@@ -11,26 +11,36 @@ namespace YetiKit.Playtest
         readonly string dir;
         readonly IChunkStore store;
         readonly Func<string, Stream> openFile;
-        readonly List<(string, string)> unpublished;
+        readonly PendingChunks pending;
         byte[] bytes = new byte[64 * 1024];
         Stream journal;
         string tmp, final;
         long committed;
 
+        /// <summary>Open a writer, optionally carrying pending work forward from a previous writer.</summary>
+        /// <param name="sessionDir">The recording directory.</param>
+        /// <param name="firstIndex">The next unused chunk index.</param>
+        /// <param name="unpublished">Reuse the same list instance, without editing its entries, for sequential handoff.</param>
+        /// <param name="openFile">Optional override for opening temporary files.</param>
+        /// <param name="store">Optional recording store.</param>
         public ChunkWriter(string sessionDir, int firstIndex = 1, List<(string, string)> unpublished = null,
             Func<string, Stream> openFile = null, IChunkStore store = null)
+            : this(sessionDir, firstIndex, openFile, store ?? FileChunkStore.Default,
+                new PendingChunks(store ?? FileChunkStore.Default, openFile, unpublished)) { }
+
+        internal ChunkWriter(string sessionDir, int firstIndex, Func<string, Stream> openFile, IChunkStore store, PendingChunks pending)
         {
             dir = sessionDir;
             NextIndex = firstIndex;
-            this.unpublished = unpublished ?? new List<(string, string)>();
+            this.pending = pending;
             this.openFile = openFile;
-            this.store = store ?? FileChunkStore.Default;
+            this.store = store;
         }
 
         public int NextIndex { get; private set; }
         public long OpenBytes { get; private set; }
         public long WrittenBytes { get; private set; }
-        public int Unpublished => unpublished.Count;
+        public int Unpublished => pending.Count;
 
         /// <summary>Append a record as one length-prefixed UTF-8 block.</summary>
         public void Append(char[] chars, int count)
@@ -39,6 +49,8 @@ namespace YetiKit.Playtest
             if (count > ChunkJournal.MaxFrameBytes / 3) throw new ArgumentOutOfRangeException(nameof(count));
             if (journal == null)
             {
+                // Do not write a retry copy while the failed frame might still be recoverable.
+                pending.RollBackIn(dir);
                 var paths = store.ChunkPaths(dir, NextIndex++);
                 journal = store.OpenTemp(paths.final + ChunkJournal.Suffix, openFile);
                 (tmp, final) = paths;
@@ -54,12 +66,10 @@ namespace YetiKit.Playtest
             }
             catch
             {
-                var path = final + ChunkJournal.Suffix;
-                var length = committed;
-                Close();
-                // A failed flush can still have written a full frame. Roll it back before the pump retries.
-                if (length == 0) store.DeleteTemp(path);
-                else store.TruncateJournal(path, length);
+                // A failed flush can still have written a full frame. Keep its rollback boundary
+                // in the pump's queue before closing, including when it was the first frame.
+                Close(committed);
+                pending.RollBack(final);
                 throw;
             }
             committed += n + 4;
@@ -68,29 +78,18 @@ namespace YetiKit.Playtest
 
         public string Rotate()
         {
-            RetryPending();
+            WrittenBytes += pending.Retry();
             if (journal == null) return null;
             var (temp, targetPath) = (tmp, final);
             Close();
-            return Publish(temp, targetPath) ? Path.GetFileName(targetPath) : null;
+            var published = pending.Publish(temp, targetPath, out var written);
+            WrittenBytes += written;
+            return published ? Path.GetFileName(targetPath) : null;
         }
 
-        internal void RetryPending()
+        void Close(long? boundary = null)
         {
-            for (var i = unpublished.Count - 1; i >= 0; i--)
-            {
-                var (pending, target) = unpublished[i];
-                try
-                {
-                    Publish(pending, target);
-                }
-                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { }
-            }
-        }
-
-        void Close()
-        {
-            if (committed != 0) unpublished.Add((tmp, final));
+            if (committed != 0 || boundary.HasValue) pending.Add(tmp, final, dir, boundary);
             try { journal.Dispose(); }
             catch (IOException) { } // frame boundaries are determined by explicit flushes
             finally
@@ -98,15 +97,6 @@ namespace YetiKit.Playtest
                 journal = null;
                 OpenBytes = committed = 0;
             }
-        }
-
-        bool Publish(string temp, string target)
-        {
-            var exists = ChunkJournal.Publish(store, temp, target, openFile, out var written);
-            WrittenBytes += written;
-            store.DeleteTemp(target + ChunkJournal.Suffix);
-            unpublished.Remove((temp, target));
-            return exists;
         }
 
         public void Dispose() => Rotate();

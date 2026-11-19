@@ -51,7 +51,8 @@ namespace YetiKit.Playtest
         {
             var attributes = File.GetAttributes(path);
             linked = (attributes & FileAttributes.ReparsePoint) != 0;
-            pending = path.EndsWith(".journal", StringComparison.OrdinalIgnoreCase) ||
+            pending = path.EndsWith(ChunkJournal.Suffix, StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(ChunkJournal.Suffix + JournalRollback.Suffix, StringComparison.OrdinalIgnoreCase) ||
                 path.EndsWith(FileChunkStore.TmpSuffix, StringComparison.OrdinalIgnoreCase);
             if (linked) return 0;
             if ((attributes & FileAttributes.Directory) == 0) return new FileInfo(path).Length;

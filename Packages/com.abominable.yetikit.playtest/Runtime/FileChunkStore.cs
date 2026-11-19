@@ -99,7 +99,11 @@ namespace YetiKit.Playtest
 
         public void TruncateJournal(string path, long length)
         {
-            using (var file = File.OpenWrite(path)) file.SetLength(length);
+            using (var file = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
+            {
+                file.SetLength(length);
+                file.Flush(flushToDisk: true);
+            }
         }
 
         public void PublishChunk(string temp, string final) => File.Move(temp, final);
@@ -159,8 +163,8 @@ namespace YetiKit.Playtest
             if (!Directory.Exists(Outbox)) return;
             foreach (var dir in Directory.GetDirectories(Outbox))
             {
-                if (!SessionRules.IsId(Path.GetFileName(dir)) ||
-                    !CanRecover(Path.Combine(dir, MetaFile)) || !CanRecover(Path.Combine(dir, MetaFile + TmpSuffix))) continue;
+                if (!SessionRules.IsId(Path.GetFileName(dir)) || !ReconcileMetadata(dir)) continue;
+                if (!RecoverRollbacks(dir)) continue;
                 var journals = Directory.GetFiles(dir, "*" + ChunkJournal.Suffix);
                 Array.Sort(journals, (a, b) => JournalIndex(a).CompareTo(JournalIndex(b)));
                 foreach (var journal in journals)
@@ -183,33 +187,78 @@ namespace YetiKit.Playtest
             }
         }
 
+        bool RecoverRollbacks(string dir)
+        {
+            var suffix = ChunkJournal.Suffix + JournalRollback.Suffix;
+            foreach (var temp in Directory.GetFiles(dir, "*" + suffix + TmpSuffix))
+            {
+                var marker = temp.Substring(0, temp.Length - TmpSuffix.Length);
+                var name = Path.GetFileName(marker);
+                // A torn rollback marker might contain a shorter, but valid-looking offset.
+                if (ChunkIndex(name.Substring(0, name.Length - suffix.Length)) >= 0 && !File.Exists(marker)) return false;
+                File.Delete(temp);
+            }
+            foreach (var path in Directory.GetFiles(dir, "*" + suffix))
+            {
+                var name = Path.GetFileName(path);
+                if (ChunkIndex(name.Substring(0, name.Length - suffix.Length)) < 0) continue;
+                if (!JournalRollback.Recover(this, path)) return false;
+            }
+            return true;
+        }
+
         static int JournalIndex(string path) => ChunkIndex(Path.GetFileName(path).Substring(0,
             Path.GetFileName(path).Length - ChunkJournal.Suffix.Length));
 
-        // Older recordings have no format. Unreadable or explicitly unknown metadata is left untouched.
-        internal static bool CanRecover(string path)
+        enum Metadata { Missing, Supported, Malformed, UnreadableOrUnsupported }
+
+        static bool IsRecoverable(Metadata state) => state == Metadata.Missing || state == Metadata.Supported;
+
+        static bool ReconcileMetadata(string dir)
+        {
+            var committed = InspectMetadata(Path.Combine(dir, MetaFile));
+            if (!IsRecoverable(committed)) return false;
+            var temp = Path.Combine(dir, MetaFile + TmpSuffix);
+            var candidate = InspectMetadata(temp);
+            if (candidate != Metadata.Malformed || committed != Metadata.Supported) return IsRecoverable(candidate);
+            // Only a readable, supported committed copy can replace a torn temp.
+            File.Delete(temp);
+            return true;
+        }
+
+        // Older recordings have no format. Budget pruning remains conservative for unreadable metadata.
+        internal static bool CanRecover(string path) => IsRecoverable(InspectMetadata(path));
+
+        static Metadata InspectMetadata(string path)
         {
             try
             {
                 using (var file = File.OpenRead(path))
                 using (var json = JsonReaderWriterFactory.CreateJsonReader(file, XmlDictionaryReaderQuotas.Max))
                 {
-                    if (json.MoveToContent() != XmlNodeType.Element || json.GetAttribute("type") != "object") return false;
+                    var root = json.MoveToContent();
+                    if (root == XmlNodeType.None) return Metadata.Malformed;
+                    if (root != XmlNodeType.Element || json.GetAttribute("type") != "object")
+                        return Metadata.UnreadableOrUnsupported;
                     var seen = false;
                     json.ReadStartElement();
                     while (json.MoveToContent() == XmlNodeType.Element)
                     {
                         if (json.LocalName != "format") { json.Skip(); continue; }
-                        if (seen || json.GetAttribute("type") != "number" ||
-                            json.ReadElementContentAsString() != SessionMeta.Format.ToString(System.Globalization.CultureInfo.InvariantCulture)) return false;
+                        if (seen || json.GetAttribute("type") != "number") return Metadata.UnreadableOrUnsupported;
+                        json.ReadStartElement();
+                        if (json.ReadString() != SessionMeta.Format.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                            return Metadata.UnreadableOrUnsupported;
+                        json.ReadEndElement();
                         seen = true;
                     }
                     json.ReadEndElement();
-                    return json.MoveToContent() == XmlNodeType.None;
+                    return json.MoveToContent() == XmlNodeType.None ? Metadata.Supported : Metadata.Malformed;
                 }
             }
-            catch (FileNotFoundException) { return true; }
-            catch (Exception e) when (e is XmlException || e is IOException || e is UnauthorizedAccessException) { return false; }
+            catch (FileNotFoundException) { return Metadata.Missing; }
+            catch (XmlException) { return Metadata.Malformed; }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { return Metadata.UnreadableOrUnsupported; }
         }
 
         /// <summary>A finished gzip: it inflates and its trailer's size matches.</summary>

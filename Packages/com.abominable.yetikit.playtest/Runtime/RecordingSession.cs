@@ -185,11 +185,12 @@ namespace YetiKit.Playtest
                 return false;
             }
             Flush(frameCount, at, true);
-            var meta = MetaBytes();
+            var meta = MetaBytes(out var rejected);
             var m = Meta.Copy();
             pump.Finish(Meta.Session, Path.Combine(Dir, FileChunkStore.MetaFile), meta, Path.Combine(Dir, DoneMarker.FileName), lost =>
             {
                 m.Lost = lost.Chars;
+                m.LostRange = lost.Merge(rejected);
                 return Encoding.UTF8.GetBytes(new DoneMarker { session = m.Session, player = m.Player, build = m.Build, context = m.Context() }.ToJson());
             });
             return true;
@@ -208,13 +209,12 @@ namespace YetiKit.Playtest
             lastRotate = log.Now;
         }
 
-        void WriteMeta() => pump.WriteFile(Path.Combine(Dir, FileChunkStore.MetaFile), MetaBytes());
+        void WriteMeta() => pump.WriteFile(Path.Combine(Dir, FileChunkStore.MetaFile), MetaBytes(out _));
 
         // meta.json is made on the pump thread, from a copy, so its lost is exact (see ChunkPump.WriteFile).
-        Func<LostRecords, byte[]> MetaBytes()
+        Func<LostRecords, byte[]> MetaBytes(out LostRecords rejected)
         {
             var counts = new StringBuilder(256);
-            LostRecords rejected;
             lock (log.Gate)
             {
                 Meta.Seconds = Elapsed;
@@ -227,9 +227,10 @@ namespace YetiKit.Playtest
             }
             var c = counts.ToString();
             var m = Meta.Copy();
+            var producerLoss = rejected;
             return lost =>
             {
-                m.LostRange = lost.Merge(rejected);
+                m.LostRange = lost.Merge(producerLoss);
                 return Encoding.UTF8.GetBytes(m.ToJson(sb => sb.Append(c)));
             };
         }

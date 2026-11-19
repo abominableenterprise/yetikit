@@ -53,7 +53,7 @@ namespace YetiKit.Playtest
         string sessionDir; // pump thread only: the session a failed writer start is retried for
         LostRecords dropped; // pump thread only
         long lost;
-        readonly System.Collections.Generic.List<(string, string)> unpublished = new System.Collections.Generic.List<(string, string)>();
+        readonly PendingChunks pending;
         readonly IChunkStore store;
         readonly Func<string, int> nextFree;
         readonly Func<string, System.IO.Stream> openFile;
@@ -82,6 +82,7 @@ namespace YetiKit.Playtest
         {
             this.store = store ?? FileChunkStore.Default;
             this.openFile = openFile;
+            pending = new PendingChunks(this.store, openFile);
             this.writeFile = writeFile ?? this.store.PublishFile;
             writeFinalFile = writeFile ?? (this.store is FileChunkStore files ? files.PublishFinalFile : this.store.PublishFile);
             this.clock = clock ?? (() => System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
@@ -286,7 +287,7 @@ namespace YetiKit.Playtest
                 if (e.MarkerPath == null)
                 {
                     store.DeleteDir(e.Dir);
-                    unpublished.RemoveAll(chunk => System.IO.Path.GetDirectoryName(chunk.Item2) == e.Dir);
+                    pending.Forget(e.Dir);
                 }
                 else FinishFiles(e);
             }
@@ -304,8 +305,8 @@ namespace YetiKit.Playtest
 
         void FinishFiles(Ending e)
         {
-            writer?.RetryPending();
-            if (unpublished.Exists(chunk => System.IO.Path.GetDirectoryName(chunk.Item2) == e.Dir))
+            pending.Retry();
+            if (pending.Contains(e.Dir))
                 throw new System.IO.IOException("Session chunks are still pending publication.");
             // Persist metadata and the chunk renames before the marker can become visible.
             if (e.Meta != null)
@@ -331,7 +332,7 @@ namespace YetiKit.Playtest
         void OpenWriter()
         {
             if (writer == null && sessionDir != null)
-                Try(() => writer = new ChunkWriter(sessionDir, nextFree(sessionDir), unpublished, openFile, store));
+                Try(() => writer = new ChunkWriter(sessionDir, nextFree(sessionDir), openFile, store, pending));
         }
 
         void Append(System.Text.StringBuilder text)
@@ -357,7 +358,8 @@ namespace YetiKit.Playtest
         void RotateNow()
         {
             string name = null;
-            Try(() => name = writer?.Rotate());
+            if (writer == null) Try(() => pending.Retry());
+            else Try(() => name = writer.Rotate());
             if (name != null) ChunkWritten?.Invoke(name);
             budget?.PrunePending(sessionDir, Owns);
         }

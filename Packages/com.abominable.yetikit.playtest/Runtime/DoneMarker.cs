@@ -11,7 +11,8 @@ namespace YetiKit.Playtest
         public long frames;
         public int throws, errors;
         public float handMinutes, controllerMinutes;
-        public long lost;      // recorded text lost to disk errors (0: complete)
+        public long lost;        // legacy worker-only count of lost uncompressed chars
+        public long lostRecords; // worker and producer losses, in records
         public bool recovered; // the app died before the session ended (no end numbers)
     }
 
