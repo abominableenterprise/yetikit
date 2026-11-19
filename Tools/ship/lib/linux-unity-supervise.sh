@@ -24,6 +24,13 @@ supervised_signal() {
   # Defer cancellation just until the async job's PID has been published.
   if [ -z "$child" ]; then pending="$status"; return; fi
   trap '' TERM INT HUP
+  if [ -n "$control" ]; then
+    printf '%s\n' "$status" > "$control"
+    # Wait for the privileged worker to drain before killing the launcher (or
+    # releasing the setup lock / deleting the stage). A worker still behind
+    # a sudo prompt will see the request before it can start any writes.
+    flock -x "$control" -c :
+  fi
   groups[$child]=1
   # GNU timeout (inside xvfb-run) may create its own group. Snapshot those
   # groups before TERM can orphan any descendants. No pipeline peers belong
@@ -46,16 +53,22 @@ supervised_signal() {
   for group in "${!groups[@]}"; do kill -KILL -- "-$group" 2>/dev/null || :; done
   wait "$child" 2>/dev/null || :
   if [ -n "$terminal_group" ]; then supervised_terminal_group "$terminal_group" || :; fi
+  if [ -n "$control" ]; then rm -rf -- "${control%/*}"; fi
   if [ -n "${supervised_cancel:-}" ]; then "$supervised_cancel" || :; fi
   exit "$status"
 }
 
 supervise() {
-  local child='' pending='' saved rc=0 monitor=0 sig terminal_group=''
-  if [ "${1:-}" = --foreground-terminal ]; then
-    shift
-    terminal_group="$(supervised_terminal_group)" || terminal_group=''
-  fi
+  local child='' pending='' saved rc=0 monitor=0 sig terminal_group='' control='' protect_int=0 dir
+  case "${1:-}" in
+    --setup-write|--setup-packages)
+      dir="$(mktemp -d)" || return
+      control="$dir/cancel"
+      : > "$control"
+      terminal_group="$(supervised_terminal_group)" || terminal_group=''
+      if [ "$1" = --setup-packages ] && [ -n "$terminal_group" ]; then protect_int=1; fi
+      shift ;;
+  esac
   saved="$(trap -p TERM INT HUP)"
   trap 'supervised_signal 143' TERM
   trap 'supervised_signal 130' INT
@@ -73,7 +86,18 @@ supervise() {
   if [ "$monitor" = 1 ]; then set +m; fi
   [ -z "$pending" ] || supervised_signal "$pending"
   wait "$child" || rc=$?
+  if [ -n "$control" ]; then
+    # A terminal signal can end the unprivileged launcher first. Wait for
+    # the privileged worker before restoring terminal control.
+    flock -x "$control" -c :
+  fi
   if [ -n "$terminal_group" ]; then supervised_terminal_group "$terminal_group" || :; fi
+  if [ -n "$control" ]; then
+    local finished_control="$control"
+    control=''
+    rm -f -- "$finished_control"
+    rmdir -- "${finished_control%/*}"
+  fi
   # Replace installed handlers without an intermediate default disposition.
   eval "$saved"
   for sig in TERM INT HUP; do

@@ -90,7 +90,8 @@ if [ -n "${FAKE_LOCK_WAIT:-}" ] && [ "${1:-}" = -x ] && [ "${2:-}" != 9 ]; then
 fi
 exec /usr/bin/flock "$@"
 EOF
-for c in crane dpkg ldd; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$c"; done
+for c in crane ldd; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$c"; done
+printf '#!/bin/sh\necho "install ok installed"\n' > "$tmp/bin/dpkg-query"
 : > "$tmp/unity/.install-complete"   # a finished install, so `all`'s setup trusts it
 chmod +x "$lcdir/Unity.Licensing.Client" "$tmp/bin/"*
 export BIN_DIR="$tmp/bin"

@@ -12,7 +12,13 @@ install_crane() {
 }
 
 fetch_crane() { curl -fsSL "$1" | tar -xz -C "$BIN_DIR" crane; }
-extract_editor() { "$1" export "$UNITY_IMAGE" - | as_root tar -x -C "$2" opt/unity; }
+# Pass the supervisor as code rather than importing from a user checkout.
+setup_write() {
+  local worker
+  worker="$(< "$SHIP_TOOL_DIR/lib/linux-unity-setup-worker.py")" || return
+  as_root /usr/bin/python3 -I -c "$worker" "$control" "$protect_int" "$@"
+}
+extract_editor() { "$1" export "$UNITY_IMAGE" - | setup_write tar -x -C "$2" opt/unity; }
 
 # The image config records the build step that writes /opt/unity/version. Inspect
 # that metadata without downloading layers or trusting a version in a mutable tag.
@@ -84,14 +90,14 @@ install_editor() {
   log "extracting $UNITY_IMAGE:/opt/unity (streamed, ~2-3 min, ~8.7 GB)"
   # Only opt/unity is written, into the stage, and moved into place once complete, so an interrupted extract never
   # leaves a half-installed $UNITY_ROOT that a re-run would trust.
-  supervise --foreground-terminal extract_editor "$crane" "$stage"
+  supervise --setup-write extract_editor "$crane" "$stage"
   [ -x "$stage/opt/unity/$BIN_REL" ] && [ -x "$stage/opt/unity/$LC_REL" ] \
     || die "extract incomplete: editor or licensing client missing in $stage"
   editor_version_ok "$stage/opt/unity/$BIN_REL" || die "editor from $UNITY_IMAGE is not Unity $UNITY_VERSION"
   [ -d "$UNITY_ROOT" ] || as_root mkdir "$UNITY_ROOT"
   as_root touch "$partial"
   # Move the contents, not the directory: `mv dir existing-dir` would make $UNITY_ROOT/unity.
-  supervise --foreground-terminal as_root find "$stage/opt/unity" -mindepth 1 -maxdepth 1 -exec mv -t "$UNITY_ROOT" -- {} +
+  supervise --setup-write setup_write find "$stage/opt/unity" -mindepth 1 -maxdepth 1 -exec mv -t "$UNITY_ROOT" -- {} +
   [ -x "$UNITY_BIN" ] && [ -x "$LC" ] || die "editor or licensing client missing in $UNITY_ROOT after install"
   as_root mv -f "$partial" "$done"
   as_root rm -rf "$stage"
@@ -102,11 +108,16 @@ install_libs() {
   # libGLU and xauth are dlopen'ed / used by xvfb-run, so ldd alone does not list them.
   local pkgs=(libgtk-3-0 libglu1-mesa libnss3 libasound2 libgbm1 libxss1 libxtst6 xvfb xauth libcap2 ca-certificates)
   local missing=()
-  for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
+  local p status
+  for p in "${pkgs[@]}"; do
+    # dpkg -s can succeed for packages left unpacked or half-configured.
+    status="$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null)" || status=''
+    [[ "$status" = *' ok installed' ]] || missing+=("$p")
+  done
   if [ ${#missing[@]} -gt 0 ]; then
     log "apt-get install ${missing[*]}"
-    supervise --foreground-terminal as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    supervise --foreground-terminal as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
+    supervise --setup-packages setup_write env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    supervise --setup-packages setup_write env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
   fi
   if ldd "$UNITY_BIN" | grep -q 'not found'; then
     ldd "$UNITY_BIN" | grep 'not found' >&2
@@ -154,13 +165,18 @@ refuse_editor_in_use() {
 replace_base_editor() {
   [ "$UNITY_MODULES" = android ] && [ -x "$UNITY_BIN" ] && ! has_android || return 0
   as_root test -e "$UNITY_ROOT/$DONE_MARK" || return 0
+  ! as_root test -e "$UNITY_ROOT/$PARTIAL_MARK" || return 0
   refuse_editor_in_use
   preflight_replacement_image
   log "replacing the editor at $UNITY_ROOT (no Android module) with $UNITY_IMAGE"
   cleanup_unity require-idle || die "cleanup did not complete; refusing to replace $UNITY_ROOT. Close any Unity processes and re-run setup."
   # An editor can still start after the cleanup scan; recheck with deletion's privileges.
   refuse_editor_in_use
-  supervise --foreground-terminal as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  # A cancelled removal can leave both binaries and the old completion
+  # marker behind. Keep the partial marker until all other data is gone.
+  as_root touch "$UNITY_ROOT/$PARTIAL_MARK"
+  supervise --setup-write setup_write find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 ! -name "$PARTIAL_MARK" -exec rm -rf -- {} +
+  as_root rm -f -- "$UNITY_ROOT/$PARTIAL_MARK"
 }
 
 cmd_setup() {

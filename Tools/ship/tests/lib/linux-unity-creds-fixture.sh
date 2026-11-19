@@ -29,7 +29,7 @@ creds_error='[linux-unity] error: set UNITY_USERNAME/UNITY_PASSWORD (or pass the
 
 creds_required_cases() {
 # Credentials are required before licence reuse, preflight, setup/downloads, or editor work on every entry point.
-for c in crane curl dpkg ldd apt-get; do
+for c in crane curl dpkg-query ldd apt-get; do
   printf '#!/bin/sh\necho "%s" >> "%s/work-calls"\nexit 99\n' "$c" "$tmp" > "$tmp/bin/$c"
   chmod +x "$tmp/bin/$c"
 done

@@ -40,8 +40,8 @@ case "\$*" in
   *) exit 1 ;;
 esac
 EOF
-printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/dpkg"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/ldd"
-chmod +x "$tmp/bin/crane" "$tmp/bin/dpkg" "$tmp/bin/ldd"
+printf '#!/bin/sh\necho "install ok installed"\n' > "$tmp/bin/dpkg-query"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/ldd"
+chmod +x "$tmp/bin/crane" "$tmp/bin/dpkg-query" "$tmp/bin/ldd"
 ship_fixture_process_view "$tmp/process-view"
 setup() { : > "$tmp/crane-calls"; env -u UNITY_IMAGE -u SHIP_FIXTURE_PIDS PATH="$tmp/process-view:$PATH" UNITY_ROOT="$tmp/root/unity" BIN_DIR="$tmp/bin" "$@" bash "$script" setup ${SETUP_ARGS:-} >"$tmp/setup-out" 2>&1; }
 check "setup (no flag) still installs the base image" \

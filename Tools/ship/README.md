@@ -17,8 +17,10 @@ shared tooling upstream. All relative configuration paths are project-relative.
 `YETIKIT_CONFIG` overrides the config file path.
 
 Requirements: Linux, Bash 4+, `jq`, Git, GNU coreutils, util-linux (`flock`),
-Perl, curl, tar, and Xvfb/xauth plus the editor runtime libraries. `setup` installs
-the runtime libraries. Put `crane` on PATH (or in `$BIN_DIR`, default `$HOME/bin`)
+Perl, curl, tar, and Xvfb/xauth plus the editor runtime libraries. `setup` uses
+`/usr/bin/python3` to supervise privileged writes and installs the runtime libraries.
+During interactive package work, Ctrl-C requests cancellation after the package
+command finishes. Put `crane` on PATH (or in `$BIN_DIR`, default `$HOME/bin`)
 first, or configure `setup.craneArchive` with an archive containing its Linux
 x86-64 executable. If Go is installed, this pinned one-line command installs
 crane into the default location (use your `$BIN_DIR` instead if overridden):

@@ -17,7 +17,9 @@ lu "${creds[@]}" UNITY_RETURN_ON_EXIT=1 FAKE_FAILS=X.Broken
 check "UNITY_RETURN_ON_EXIT=1: a failing test run that activated returns the licence, keeps the test failure" \
   '[ "$rc" = 2 ] && [ "$(returns)" = 1 ]'
 args=(all); rm -f "$ULF"; : > "$tmp/unity/.install-complete"
-for c in crane dpkg ldd; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$c"; chmod +x "$tmp/bin/$c"; done
+for c in crane ldd; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$c"; chmod +x "$tmp/bin/$c"; done
+printf '#!/bin/sh\necho "install ok installed"\n' > "$tmp/bin/dpkg-query"
+chmod +x "$tmp/bin/dpkg-query"
 lu "${creds[@]}" UNITY_RETURN_ON_EXIT=1 BIN_DIR="$tmp/bin"
 check "UNITY_RETURN_ON_EXIT=1 with all: one return, not two" '[ "$rc" = 0 ] && [ "$(returns)" = 1 ]'
 
