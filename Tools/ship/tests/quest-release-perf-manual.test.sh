@@ -37,7 +37,9 @@ adb() {
     'shell dumpsys thermalservice'|'shell pm path '*) return 1 ;;
     'shell pidof '*) printf '4242\nqr_pid_rc=0\n' ;;
     'shell dumpsys activity activities') printf 'mResumedActivity: ActivityRecord{abc u0 %s/.Main t1}\n' "$QR_PKG" ;;
-    'shell date +%s.%N') command cat "$tmp/$id.epoch" ;;
+    'shell date +%s.%N')
+      [ ! -e "$tmp/$id.clock-fails" ] || return 1
+      command cat "$tmp/$id.epoch" ;;
     'shell am broadcast -a com.oculus.vrpowermanager.prox_close')
       : > "$tmp/$id.override"
       if [ "${QR_MANUAL_BLOCK:-}" = start ]; then qr_fixture_block_until_term "$tmp/blocker"; fi ;;
@@ -164,14 +166,14 @@ cancel start
 check 'cancelling start drains the broadcast and restores before clearing ownership' \
   '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && json '\''.message == "capture cancelled"'\'' '
 cancel start committed-start save-fails
-check 'cancelling a committed start still restores under lock when invalidation cannot be written' \
-  '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/unlocked-restore" ] && json '\''.overall == "INFRA" and (.message | contains("could not invalidate manual capture state"))'\'' && ! grep -q "retry perf stop" "$tmp/out"'
+check 'cancelling a committed start still restores under lock without rewriting the reservation' \
+  '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/unlocked-restore" ] && json '\''.overall == "INFRA" and .message == "capture cancelled"'\'' && ! grep -q "retry perf stop" "$tmp/out"'
 run "$b" perf start
 : > "$tmp/a.restore-fails"
 : > "$tmp/events"
 cancel start committed-start save-fails
-check 'a failed write and failed broadcast leave the original reservation pending under its owner' \
-  '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && json '\''has("start")'\'' "$key_a" && [ -e "$tmp/a.override" ] && [ -e "$tmp/b.override" ] && [ ! -e "$tmp/unlocked-restore" ] && grep -q "^a|.*automation_disable" "$tmp/events" && grep -q "could not invalidate manual capture state" "$tmp/out" && grep -q "retry perf stop" "$tmp/out"'
+check 'a failed broadcast leaves the original reservation pending under its owner' \
+  '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && json '\''has("start")'\'' "$key_a" && [ -e "$tmp/a.override" ] && [ -e "$tmp/b.override" ] && [ ! -e "$tmp/unlocked-restore" ] && grep -q "^a|.*automation_disable" "$tmp/events" && grep -q "retry perf stop" "$tmp/out"'
 rm -f "$tmp/a.restore-fails"
 clock a 1700000004.250000000 5000
 sample 1700000003.000000 'App=5ms' > "$tmp/a.samples"
@@ -179,13 +181,13 @@ run "$a" perf stop
 check 'retry stop restores only and never reads the cancelled window, even after the reservation is writable again' \
   '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0'\'' && grep -q "restoring proximity only" "$tmp/out" && ! grep -q "logcat" "$tmp/events" && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ -e "$key_b" ] && [ -e "$tmp/b.override" ]'
 run "$a" perf start
-check 'a new start can replace the cancellation fallback in the same run' \
+check 'a new start can rearm the guard in the same run' \
   '[ "$rc" = 0 ] && json '\''has("start")'\'' "$key_a" && [ -e "$tmp/a.override" ]'
 clock a 1700000006.250000000 7000
 : > "$tmp/a.restore-fails"
 cancel stop
 check 'cancelling stop with adb restoration failure keeps recovery state but not a reusable window' \
-  '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && json '\''has("start") | not'\'' "$key_a" && [ -e "$tmp/a.override" ] && [ -e "$tmp/b.override" ] && grep -q "retry perf stop" "$tmp/out"'
+  '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && [ -f "$key_a" ] && [ ! -s "$run_dir/${key_a##*/}.armed" ] && [ -e "$tmp/a.override" ] && [ -e "$tmp/b.override" ] && grep -q "retry perf stop" "$tmp/out"'
 rm -f "$tmp/a.restore-fails"
 run "$a" perf stop
 check 'retry stop recovers the cancelled device only and does not report stale success' \
@@ -198,23 +200,65 @@ clock a 1700000150.000000000 6000
 run "$a" perf start
 check 'start commits a window before the stop reservation becomes unwritable' \
   '[ "$rc" = 0 ] && json '\''.start == "1700000150.000000000"'\'' "$key_a"'
-# Run stop from a different run. The fallback must follow the reservation, not
-# whichever run happens to receive the stop report.
+# Run stop from a different run. The guard belongs to the original capture,
+# not whichever run happens to receive the stop report.
 ( qr_config && qr_new_run '2222222222222222' synthetic ) || exit 1
 mkdir "$key_a.tmp" || exit 1
 : > "$tmp/a.restore-fails"
 : > "$tmp/events"
 clock a 1700000152.000000000 8000
+: > "$tmp/a.clock-fails"
 run "$a" perf stop
-check 'stop reservation write and fake adb restore both fail, leaving recovery pending' \
+check 'offline stop with an unwritable reservation leaves recovery pending' \
   '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and (.message | contains("adb proximity restoration failed"))'\'' && json '\''has("start")'\'' "$key_a" && [ -e "$tmp/a.override" ] && grep -q "automation_disable" "$tmp/events" && ! grep -q "logcat" "$tmp/events"'
 rmdir "$key_a.tmp" || exit 1
-rm -f "$tmp/a.restore-fails"
+rm -f "$tmp/a.restore-fails" "$tmp/a.clock-fails"
+: > "$tmp/events"
 clock a 1700000154.000000000 10000
 { sample 1700000150.500000 'App=5ms'; sample 1700000153.000000 'App=6ms'; } > "$tmp/a.samples"
 run "$a" perf stop
-check 'retry after both stop failures restores proximity but reports the window as unknown' \
+check 'retry after the offline stop restores proximity but reports the window as unknown' \
   '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0 and (.message | contains("stop boundary unknown"))'\'' && ! grep -Eq "shell date|logcat" "$tmp/events" && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/unlocked-restore" ]'
+clock a 1700000160.000000000 16000
+run "$a" perf start
+start_dir="$run_dir"
+check 'start commits the window for the triple failure' \
+  '[ "$rc" = 0 ] && json '\''.start == "1700000160.000000000"'\'' "$key_a"'
+( qr_config && qr_new_run '3333333333333333' synthetic ) || exit 1
+# Reject both writes, but allow truncating an existing file as on a full disk.
+# A dangling target fails the fallback redirection without leaving a flag that
+# the retry would see (unlike a directory at the fallback path).
+cancelled="$start_dir/${key_a##*/}.cancelled"
+mkdir "$key_a.tmp" || exit 1
+ln -s "$tmp/missing/cancelled" "$cancelled" || exit 1
+: > "$tmp/a.restore-fails"
+: > "$tmp/events"
+clock a 1700000162.000000000 18000
+: > "$tmp/a.clock-fails"
+run "$a" perf stop
+check 'stop leaves recovery pending even when both legacy invalidation writes are blocked' \
+  '[ "$rc" = 3 ] && [ ! -e "$cancelled" ] && json '\''.overall == "INFRA" and .samples == 0 and (.message | contains("adb proximity restoration failed"))'\'' && [ -e "$key_a" ] && [ -e "$tmp/a.override" ] && grep -q "automation_disable" "$tmp/events" && ! grep -q "logcat" "$tmp/events"'
+rmdir "$key_a.tmp" || exit 1
+rm -f "$cancelled" "$tmp/a.restore-fails" "$tmp/a.clock-fails"
+: > "$tmp/events"
+clock a 1700000164.000000000 20000
+{
+  sample 1700000160.500000 'App=5ms'; sample 1700000161.500000 'App=5ms'
+  sample 1700000162.500000 'App=6ms'; sample 1700000163.500000 'App=6ms'
+} > "$tmp/a.samples"
+run "$a" perf stop
+check 'retry after the triple failure restores only, without a new clock edge or post-stop samples' \
+  '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0 and (.message | contains("stop boundary unknown"))'\'' && ! grep -Eq "shell date|logcat" "$tmp/events" && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/unlocked-restore" ]'
+# Start again in the same run and leave the previous capture's samples in the
+# fake dump. Only telemetry from the new window should be eligible for PASS.
+run "$a" perf start
+check 'a fresh start after the triple failure commits a new window' \
+  '[ "$rc" = 0 ] && json '\''.start == "1700000164.000000000"'\'' "$key_a"'
+{ sample 1700000164.500000 'App=5ms'; sample 1700000165.500000 'App=5ms'; } >> "$tmp/a.samples"
+clock a 1700000166.000000000 22000
+run "$a" perf stop
+check 'only the fresh window can publish PASS after the triple failure' \
+  '[ "$rc" = 0 ] && json '\''.overall == "PASS" and .seconds == 2 and .samples == 2 and .p95AppMs == 5'\'' && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ]'
 # A directory at the root report path defeats rm -f even as root, without
 # blocking the per-device reports or the reservation cleanup.
 list="$a,$b"
