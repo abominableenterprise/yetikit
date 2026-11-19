@@ -53,7 +53,10 @@ def run(control, protect_int, command):
 
         def intent():
             request.seek(0)
-            return int(request.read() or 0) or cancelled
+            # TERM/HUP can supersede a deferred INT from either source.
+            statuses = [int(line) for line in request if line.strip()]
+            return next((status for status in statuses if status != 130),
+                        cancelled or (130 if statuses else 0))
 
         status = intent()
         if status:
@@ -74,8 +77,11 @@ def run(control, protect_int, command):
             rc = worker.poll()
             if rc is not None:
                 status = intent()
-                if status and not (protect_int and status == 130):
+                # poll() has reaped only the leader. A failed find can
+                # leave an adopted mv/rm still writing into the stage.
+                if rc or (status and not (protect_int and status == 130)):
                     drain()
+                    status = intent()
                 return status or (rc if rc >= 0 else 128 - rc)
             time.sleep(0.05)
 

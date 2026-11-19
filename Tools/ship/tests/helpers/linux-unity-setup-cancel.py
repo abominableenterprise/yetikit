@@ -29,6 +29,7 @@ chain_exit_trap() { trap "$1" EXIT; }
 UNITY_ROOT="$PWD/editor"
 BIN_REL=Unity LC_REL=Client UNITY_VERSION=fixture UNITY_IMAGE=fixture
 UNITY_BIN="$UNITY_ROOT/$BIN_REL" LC="$UNITY_ROOT/$LC_REL"
+printf '%s\n' "$BASHPID" > wrapper.pid
 if [ "$2" = move ]; then install_editor; else install_libs; fi
 : > next-step
 '''
@@ -46,11 +47,14 @@ def live(pid):
         return False
 
 
-def eventually(predicate):
+def eventually(predicate, description='synthetic setup worker startup'):
     deadline = time.monotonic() + 8
-    while not predicate():
+    while True:
+        result = predicate()
+        if result:
+            return result
         if time.monotonic() >= deadline:
-            raise AssertionError('timed out waiting for synthetic setup worker')
+            raise AssertionError(f'timed out waiting for {description}')
         time.sleep(0.02)
 
 
@@ -70,17 +74,22 @@ def clean_children():
             return
 
 
-def move_case(root, env):
-    # The test never elevates: fake sudo drops to a different UID, and the
-    # caller lacks CAP_KILL. The grandchild escapes the launching group and
-    # ignores TERM. The fixture process retains CAP_KILL solely for teardown.
+def move_case(root, env, leader_failure=False):
+    # The test never elevates. For wrapper cancellation, fake sudo drops UID
+    # and the caller lacks CAP_KILL. In both cases mv escapes the launching
+    # group and ignores TERM.
     script(root / 'sudo', f'''#!{sys.executable}
 import os, sys
 args = sys.argv[1:]
 if 'find' in args and '-exec' in args:
     if args[0] == '/usr/bin/python3':
         os.chmod(os.path.dirname(args[4]), 0o755)
-    args = [*{AS_OTHER_UID!r}, *args]
+    if not {leader_failure!r}:
+        args = [*{AS_OTHER_UID!r}, *args]
+if {leader_failure!r} and args[:2] == ['rm', '-rf'] and '.unity-extract.' in args[-1]:
+    from pathlib import Path
+    worker, _ = Path('move.pid').read_text().split()
+    Path('cleanup-worker-state').write_text(str(Path(f'/proc/{{worker}}').exists()))
 os.execvp(args[0], args)
 ''')
     image = root / 'opt/unity'
@@ -92,28 +101,39 @@ os.execvp(args[0], args)
 import os, signal, time
 os.setsid()
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
-with open('move.pid', 'w') as out:
-    print(os.getpid(), file=out)
+with open('move.starting', 'w') as out:
+    print(os.getpid(), os.getppid(), file=out)
+os.rename('move.starting', 'move.pid')
 while True:
     time.sleep(1)
 ''')
     args = ['bash', '-c', DRIVER, '_', str(SHIP), 'move']
     with (root / 'log').open('w') as log:
-        unrelated = subprocess.Popen([*AS_OTHER_UID, '/bin/sleep', '30'])
-        wrapper = subprocess.Popen([*WITHOUT_KILL, *args], cwd=root, env=env,
+        prefix = [] if leader_failure else WITHOUT_KILL
+        wrapper = subprocess.Popen([*prefix, *args], cwd=root, env=env,
                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                                    start_new_session=True)
         marker = root / 'move.pid'
-        eventually(lambda: marker.exists() and marker.stat().st_size)
-        worker = int(marker.read_text())
-        assert live(worker) and Path(f'/proc/{worker}').stat().st_uid == 65534
-        probe = subprocess.run([*WITHOUT_KILL, '/bin/kill', '-0', str(worker)],
-                               capture_output=True, env=env)
-        assert probe.returncode and os.strerror(errno.EPERM) in probe.stderr.decode()
-        wrapper.terminate()
-        assert wrapper.wait(timeout=8) == 143
-        assert not live(worker), 'cross-UID move worker survived wrapper cancellation'
-        assert unrelated.poll() is None, 'cancellation killed an unrelated process'
+        eventually(marker.exists)
+        worker, find = map(int, marker.read_text().split())
+        assert live(worker)
+        if leader_failure:
+            os.kill(find, signal.SIGKILL)
+            assert wrapper.wait(timeout=8) == 137
+            assert (root / 'cleanup-worker-state').read_text() == 'False', (
+                'stage cleanup ran before the move descendant was reaped'
+            )
+            assert not Path(f'/proc/{worker}').exists()
+        else:
+            unrelated = subprocess.Popen([*AS_OTHER_UID, '/bin/sleep', '30'])
+            assert Path(f'/proc/{worker}').stat().st_uid == 65534
+            probe = subprocess.run([*WITHOUT_KILL, '/bin/kill', '-0', str(worker)],
+                                   capture_output=True, env=env)
+            assert probe.returncode and os.strerror(errno.EPERM) in probe.stderr.decode()
+            wrapper.terminate()
+            assert wrapper.wait(timeout=8) == 143
+            assert not live(worker), 'cross-UID move worker survived wrapper cancellation'
+            assert unrelated.poll() is None, 'cancellation killed an unrelated process'
         assert (root / 'editor/.install-partial').exists()
         assert not (root / 'editor/.install-complete').exists()
         assert not list(root.glob('.unity-extract.*'))
@@ -122,7 +142,9 @@ while True:
         assert retry.returncode and b'exists but is incomplete' in retry.stderr
 
 
-def terminal_case(root, env, interrupt_handler=False):
+def terminal_case(root, env, interrupt_handler=False, escalate=None, signal_worker=False,
+                  signal_group=False):
+    directed = escalate is not None
     script(root / 'sudo', '#!/bin/sh\nexec "$@"\n')
     # dpkg -s returns zero even when a known package is not configured.
     script(root / 'dpkg', '#!/bin/sh\necho "Status: install ok unpacked"\n')
@@ -141,13 +163,25 @@ with open('/dev/tty') as tty:
 # Package commands can install their own SIGINT handler, overriding inheritance.
 if {interrupt_handler!r}:
     signal.signal(signal.SIGINT, lambda *_: sys.exit(97))
-Path('ready').touch()
+if {directed!r}:
+    leader, supervisor = os.getpid(), os.getppid()
+    if os.fork() == 0:
+        os.setsid()
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        Path('package.starting').write_text(f'{{leader}} {{os.getpid()}} {{supervisor}}')
+        Path('package.starting').rename('ready')
+        while True:
+            time.sleep(1)
+else:
+    Path('ready').touch()
 while not Path('release').exists():
     time.sleep(0.02)
 Path('write-completed').touch()
 ''')
     script(root / 'ldd', '#!/bin/sh\ntouch checked-libraries\n')
     driver = r'''
+trap ':' TERM HUP
 rc=0; bash -c "$1" _ "$2" packages || rc=$?
 python3 -c 'import os; assert os.tcgetpgrp(os.open("/dev/tty", os.O_RDONLY)) == os.getpgrp()' || exit 99
 exit "$rc"
@@ -158,8 +192,69 @@ exit "$rc"
         os.execvpe('bash', ['bash', '-c', driver, '_', DRIVER, str(SHIP)], env)
     try:
         eventually((root / 'ready').exists)
-        os.write(tty, b'\x03')
-        (root / 'release').touch()
+        expected = 130
+        if directed:
+            leader, descendant, supervisor = map(int, (root / 'ready').read_text().split())
+            target = int((root / 'wrapper.pid').read_text())
+            os.kill(target, signal.SIGINT)
+
+            def interrupt_published():
+                try:
+                    return any(path.read_text() == '130\n' for path in root.glob('tmp.*/cancel'))
+                except FileNotFoundError:
+                    return False
+
+            eventually(interrupt_published, 'wrapper to publish deferred INT')
+            # Repeated INT must be ignored while the wrapper waits at the
+            # barrier, not recursively enter cancellation or stop the write.
+            ignored = next(line for line in Path(f'/proc/{target}/status').read_text().splitlines()
+                           if line.startswith('SigIgn:'))
+            assert int(ignored.split()[1], 16) & (1 << (signal.SIGINT - 1))
+            os.kill(target, signal.SIGINT)
+            assert live(leader) and live(descendant), 'protected write did not defer INT'
+            if signal_group:
+                # Freeze the polling sleep and supervisor to make the order
+                # independent of scheduling: escalation must survive a failed
+                # sleep while the cleanup barrier is still held.
+                children = Path(f'/proc/{target}/task/{target}/children')
+
+                def poll_sleep(previous=0, stop=False):
+                    try:
+                        pids = children.read_text().split()
+                    except FileNotFoundError:
+                        return 0
+                    for child in map(int, pids):
+                        if child == previous:
+                            continue
+                        try:
+                            if Path(f'/proc/{child}/comm').read_text().strip() == 'sleep':
+                                if stop:
+                                    os.kill(child, signal.SIGSTOP)
+                                return child
+                        except (ProcessLookupError, FileNotFoundError):
+                            continue
+                    return 0
+
+                sleeper = eventually(lambda: poll_sleep(stop=True), 'wrapper barrier polling sleep')
+                os.kill(supervisor, signal.SIGSTOP)
+                try:
+                    os.killpg(os.getpgid(target), escalate)
+                    try:
+                        os.kill(sleeper, signal.SIGCONT)
+                    except ProcessLookupError:
+                        pass
+                    eventually(lambda: not live(target) or poll_sleep(previous=sleeper),
+                               'wrapper to resume polling after escalation')
+                    assert live(target), 'wrapper exited before the cleanup barrier opened'
+                finally:
+                    os.kill(supervisor, signal.SIGCONT)
+            else:
+                os.kill(supervisor if signal_worker else target, escalate)
+            if not signal_worker:
+                expected = 128 + escalate
+        else:
+            os.write(tty, b'\x03')
+            (root / 'release').touch()
         result = []
 
         def exited():
@@ -168,9 +263,15 @@ exit "$rc"
                 result.append(os.waitstatus_to_exitcode(status))
             return pid
 
-        eventually(exited)
-        assert (root / 'write-completed').exists(), 'Ctrl-C interrupted the package write'
-        assert result == [130], f'expected cancellation after package write, got {result}'
+        eventually(exited, 'package cancellation to return')
+        if directed:
+            assert not (root / 'write-completed').exists()
+            assert not any(Path(f'/proc/{pid}').exists() for pid in (leader, descendant)), (
+                'package processes were not reaped before cancellation returned'
+            )
+        else:
+            assert (root / 'write-completed').exists(), 'Ctrl-C interrupted the package write'
+        assert result == [expected], f'expected cancellation status {expected}, got {result}'
         assert not (root / 'checked-libraries').exists()
         assert not (root / 'next-step').exists()
     finally:
@@ -191,8 +292,13 @@ def main():
         raise OSError(ctypes.get_errno(), 'PR_SET_CHILD_SUBREAPER')
     cases = {
         'move': move_case,
+        'move-leader-failure': lambda root, env: move_case(root, env, leader_failure=True),
         'terminal': terminal_case,
         'terminal-handler': lambda root, env: terminal_case(root, env, interrupt_handler=True),
+        'wrapper-int-term': lambda root, env: terminal_case(root, env, True, signal.SIGTERM),
+        'wrapper-int-hup': lambda root, env: terminal_case(root, env, True, signal.SIGHUP),
+        'wrapper-int-worker-term': lambda root, env: terminal_case(root, env, True, signal.SIGTERM, True),
+        'wrapper-int-group-term': lambda root, env: terminal_case(root, env, True, signal.SIGTERM, signal_group=True),
     }
     failed = False
     for name in sys.argv[1:] or cases:
@@ -205,7 +311,7 @@ def main():
             root = Path(tmp)
             if name == 'move':
                 root.chmod(0o1777)  # Permit only the synthetic worker's readiness record.
-            env = {'PATH': f'{root}:{os.defpath}', 'HOME': tmp, 'LC_ALL': 'C'}
+            env = {'PATH': f'{root}:{os.defpath}', 'HOME': tmp, 'TMPDIR': tmp, 'LC_ALL': 'C'}
             try:
                 cases[name](root, env)
                 print(f'ok   setup cancellation ({name})')

@@ -18,19 +18,41 @@ supervised_terminal_group() {
   ' "$@"
 }
 
+supervised_escalate() {
+  trap '' TERM HUP
+  status="$1"
+  printf '%s\n' "$status" >> "$control"
+}
+
 supervised_signal() {
   local status="$1" pid stat group i live
   local -A groups=()
   # Defer cancellation just until the async job's PID has been published.
-  if [ -z "$child" ]; then pending="$status"; return; fi
-  trap '' TERM INT HUP
-  if [ -n "$control" ]; then
-    printf '%s\n' "$status" > "$control"
-    # Wait for the privileged worker to drain before killing the launcher (or
-    # releasing the setup lock / deleting the stage). A worker still behind
-    # a sudo prompt will see the request before it can start any writes.
-    flock -x "$control" -c :
+  if [ -z "$child" ]; then
+    if [ -z "$pending" ] || [ "$pending" = 130 ]; then pending="$status"; fi
+    return
   fi
+  if [ "$protect_int" = 1 ] && [ "$status" = 130 ]; then
+    trap 'supervised_escalate 143' TERM
+    trap 'supervised_escalate 129' HUP
+    trap '' INT
+    printf '130\n' >> "$control"
+    # A foreground blocking flock would defer the escalation traps in Bash.
+    # Keep checking the same barrier while the protected write runs or drains.
+    while ! flock -nx "$control" -c :; do
+      # Group TERM/HUP can also interrupt sleep; still wait for the lock.
+      /bin/sleep 0.05 || :
+    done
+  else
+    trap '' TERM INT HUP
+    if [ -n "$control" ]; then
+      printf '%s\n' "$status" >> "$control"
+      # A worker still behind a sudo prompt will see cancellation before it
+      # can write. An active worker must drain before the launcher is killed.
+      flock -x "$control" -c :
+    fi
+  fi
+  trap '' TERM INT HUP
   groups[$child]=1
   # GNU timeout (inside xvfb-run) may create its own group. Snapshot those
   # groups before TERM can orphan any descendants. No pipeline peers belong
