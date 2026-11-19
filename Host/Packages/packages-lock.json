@@ -24,7 +24,10 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.unity.modules.physics": "1.0.0"
+        "com.abominable.yetikit.hands": "0.0.1",
+        "com.unity.inputsystem": "1.20.0",
+        "com.unity.modules.physics": "1.0.0",
+        "com.unity.xr.interaction.toolkit": "3.6.1"
       }
     },
     "com.abominable.yetikit.quality": {

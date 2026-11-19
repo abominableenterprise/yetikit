@@ -1,5 +1,6 @@
 {
   "name": "YetiKit.Interaction",
   "rootNamespace": "YetiKit.Interaction",
+  "references": ["YetiKit.Hands", "Unity.InputSystem", "Unity.XR.Interaction.Toolkit"],
   "autoReferenced": false
 }
