@@ -1,6 +1,7 @@
 # Starter sandbox
 
 - Bake the scene, prefabs and materials: `Assets/Starter/Editor/SandboxBuilder.cs`.
+- Configure per-build dev defines and audit release players: `Assets/Starter/Editor/StarterPlayerBuild.cs`.
 - Bake the XR Origin, hand/controller interactors and pad locomotion: `Assets/Starter/Editor/SandboxRigBuilder.cs`.
 - Switch each side to controller input only while tracked: `Assets/Starter/Runtime/ControllerTracking.cs`.
 - Route thrown-prop contacts to room targets: `Assets/Starter/Runtime/SandboxBindings.cs`.

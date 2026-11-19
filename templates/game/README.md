@@ -21,7 +21,7 @@ The project uses one pinned kit revision and leaves the existing Unity and XRI v
 
 In Play Mode, use the start panel to choose Compact (`snap-30`, 30°) or Wide (`snap-45`, 45°). The last explicit choice is marked but does not bypass the start panel. Use **−5°**, **+5°**, or **Reset** on the tuning panel. It shows the live snap angle and whether it differs from that experiment's default. Overrides are kept in local PlayerPrefs, separately for each ID, and reloaded when the experiment starts again. If saved tuning cannot be read, the panel reports that persistence is unavailable, uses the experiment default, and disables editing and reset for that experiment without changing its saved data. F8 hides or restores the panel.
 
-For direct boot, launch the Editor (then enter Play Mode) or a desktop development player with `--starter-experiment snap-45` (or `snap-30`). In the Editor you can start from the open sandbox; to redirect from a different scene, include `Assets/Starter/Sandbox/Sandbox.unity` in the active build profile's scene list. A direct boot does not change the last explicit choice. The controls are created at runtime by `Game.Dev`, which compiles in the Editor or in development players with `YETIKIT_DEV`; the saved room has no dev component references.
+For direct boot, launch the Editor (then enter Play Mode) or a desktop development player with `--starter-experiment snap-45` (or `snap-30`). In the Editor you can start from the open sandbox; to redirect from a different scene, include `Assets/Starter/Sandbox/Sandbox.unity` in the active build profile's scene list. A direct boot does not change the last explicit choice. The controls are created at runtime by `Game.Dev`; the saved room has no dev component references.
 
 ### XR Starter Lab
 
@@ -33,17 +33,23 @@ The wrist panel does not take over an existing prop hold. While pointing at it, 
 
 After choosing an experiment, press **Photo snap** on either panel. It takes a still from the sandbox camera and saves a `starter-photo-*.png` with a same-name `.json` sidecar in Unity’s `Application.persistentDataPath`. The sidecar records the active experiment, effective and default snap angles in degrees, whether an override is active, and whether tuning persistence is available. Both panels report success or a capture/storage error. Photos are never queued for upload; only the explicit button takes a still. Keep captures out of source control.
 
-## Remaining day-0 checklist
+## Build a development or release player
 
-1. **Clean-cache resolution and smoke/adapter tests:** Host tests cover generated scripts and scene wiring; verify resolution from the generated project’s remote pins and add consumer adapter tests.
-2. **Doctor and safe install/verify:** pending release tooling and separately authorized hardware validation.
-3. **Title and build stamp:** title and application ID are stamped into settings; runtime stamp and game build entry point remain.
-4. **Hands and controllers:** the rig and per-side switching are wired; configure OpenXR and verify both hands at ≥60 Hz on separately authorized hardware.
-5. **Throw/impact:** starter targets and cue are wired; validate the physical throw/impact event band on hardware.
-6. **Locomotion:** pads and snap turn are wired and motion is checked in the synthetic Host; live inputs and comfort remain unverified.
-7. **Direct experiment boot:** desktop direct selection and desktop/XR start panels are wired; verify XR UI on separately authorized hardware.
-8. **Persistent tuning:** desktop and wrist snap-angle tuning share per-experiment defaults, local persistence, reset and override visibility.
-9. **Local photo:** desktop and wrist photo controls and local storage are checked in the synthetic Host; live XR capture remains unverified. No upload or voice.
-10. **Release and frame timing:** wire dev stripping and BuildAudit; finish project rendering/comfort defaults, pinned lock, vendored Ship tools, CI and release notes; measure frame time on separately authorized hardware, including the Quest 2 floor.
+In **File → Build Profiles**, switch to the desired desktop platform and add the baked `Assets/Starter/Sandbox/Sandbox.unity` to the scene list. Use **Build** with **Development Build** enabled for experiment boot, desktop and wrist tuning, and photo snap; disable it for release. The starter supplies `YETIKIT_DEV` for each development player build only. Do not add it to persistent project or profile defines.
+
+The generated Build Profiles handler uses `StarterPlayerBuild.Build(BuildPlayerOptions)`; call that same entry point from build automation. Release leaves the playable room and authored snap turn, ignores the direct-boot argument, and omits the Lab controls and photo code. BuildAudit rejects forbidden assemblies before stripping and checks the final build report. For Android, it also inspects the packaged APK's permissions and rejects permissions that have not been explicitly allowed by the consumer. AABs and exported Gradle projects are not supported by this audit. The starter does not configure a live XR provider or validate an Android release; the build regression uses Linux desktop players in the synthetic Host.
+
+## Day-0 checklist
+
+1. **Clean-cache resolution and smoke/adapter tests:** the kit Host runs synthetic smoke tests against staged starter assets; the generated project does not ship those tests. Remote package resolution from a cold cache and consumer adapter tests are pending.
+2. **Doctor and safe install/verify:** the starter does not ship doctor or install tooling. Safe install and launch are pending consumer tooling and separate headset validation.
+3. **Title and build stamp:** check the generated title and application ID in Player Settings; a runtime build stamp is still pending.
+4. **Hands and controllers:** verify both hands at ≥60 Hz and per-side switching to controllers. The Host covers synthetic switching; live tracking is pending OpenXR setup and separate headset validation.
+5. **Throw and impact:** throw a prop at a target and check the impact event against the fixture band. Host checks the wiring and synthetic contacts; physical throws are pending separate headset validation.
+6. **Locomotion:** check teleport and snap-turn events on the starter pads. Host uses synthetic input; live input and comfort are pending separate headset validation.
+7. **Direct experiment boot:** launch with an experiment ID and check that it is selected without changing the last explicit choice. XR panel interaction is pending separate headset validation.
+8. **Persistent tuning:** adjust the snap angle, restart, verify the experiment retains its override, then reset; check that capture context shows the effective value and override state. Host covers persistence and synthetic wrist input; live wrist use is pending separate headset validation.
+9. **Local photo:** verify the PNG and context sidecar are saved locally with no upload or voice. Host uses synthetic captures; live XR capture is pending separate headset validation.
+10. **Release and frame timing:** build with Development Build off and verify that BuildAudit passes without the Lab controls. The Host covers the desktop build and a synthetic leak. The consumer still needs rendering and comfort defaults, a pinned lockfile, vendored Ship tools, CI and release notes. Frame-time recording and the Quest 2 floor are pending separate headset validation.
 
 Targets of ≤2 hours to local capture, ≤4 hours including release, and ≤10 minutes of headset verification are unmeasured until real use. Record queue, cold import and device wait separately.

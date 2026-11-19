@@ -6,6 +6,7 @@
     "Game.Starter.Editor",
     "Game.Dev",
     "YetiKit.Lab",
+    "YetiKit.Quality.Editor",
     "UnityEngine.UI",
     "YetiKit.Hands",
     "YetiKit.Interaction",

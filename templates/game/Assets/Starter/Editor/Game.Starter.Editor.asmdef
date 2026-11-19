@@ -4,6 +4,7 @@
     "Game.Starter",
     "YetiKit.Hands",
     "YetiKit.Interaction",
+    "YetiKit.Quality.Editor",
     "Unity.InputSystem",
     "Unity.XR.CoreUtils",
     "Unity.XR.Interaction.Toolkit"

@@ -76,8 +76,11 @@ wrist fixtures also take synthetic photos, check their PNG and tuning sidecar in
 a temporary folder (with no outbox), and verify storage error reporting. To render its
 start and override states, set `YETIKIT_STARTER_LAB_CAPTURE` to an existing local
 output directory and filter to `WristInputRoutesWithoutRoomActions`. No headset
-or physical XR input device is required. Use the same activation/return procedure
-as above.
+or physical XR input device is required. On Linux the staged tests also build the
+baked scene for desktop with the generated build entry point. They inspect the
+release and development player assemblies and run BuildAudit on both the release
+report and a synthetic release input containing the forbidden dev assembly. Use
+the same activation/return procedure as above.
 
 The test deletes its bake; to remove staging (including any assets left by an
 interrupted test), close the Host editor and run this from the repository root:
@@ -90,7 +93,7 @@ rm -rf -- Host/Assets/Starter Host/Assets/Starter.meta \
 Staging refuses to overwrite these paths. Clean and stage again after changes to
 the generator or test source. Do not commit the staged copies.
 
-## No player builds
+## No Android builds
 
 [Ship configuration](yetikit.json) includes schema-required build fields pointing
 to [HostBuild](Assets/Editor/HostBuild.cs). This editor method only logs that no
