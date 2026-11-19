@@ -1,3 +1,4 @@
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
@@ -82,6 +83,48 @@ namespace YetiKit.Hands.Tests
             Assert.That(releasePosition, Is.EqualTo(previousRoot));
             hand.Tick(now + HandGrabGesture.LostGrace + 0.03f);
             Assert.That(releases, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void DisableInSelectExitedDoesNotSnapRootOrReportControllerPresence()
+        {
+            rig = new GameObject("Tracking space");
+            var manager = rig.AddComponent<XRInteractionManager>();
+            var hand = Child("Hand", rig.transform).AddComponent<PlayerHand>();
+            hand.Tracking = new GripTracking();
+            var interactor = Child("Near grab", hand.transform).AddComponent<HandGrabInteractor>();
+            interactor.interactionManager = manager;
+            hand.grabber = interactor;
+            var targetObject = Child("Target", rig.transform);
+            targetObject.AddComponent<BoxCollider>();
+            var target = targetObject.AddComponent<XRSimpleInteractable>();
+            target.interactionManager = manager;
+            manager.RegisterInteractor((IXRInteractor)interactor);
+            manager.RegisterInteractable((IXRInteractable)target);
+            hand.Tick(Time.time);
+            manager.SelectEnter((IXRSelectInteractor)interactor, target);
+            Assert.That(interactor.hasSelection, Is.True);
+
+            var root = new Pose(hand.transform.position, hand.transform.rotation);
+            var controllerNotices = 0;
+            hand.PresenceChanged += () => { if (hand.Mode == HandMode.Controller) controllerNotices++; };
+            var releases = 0;
+            interactor.selectExited.AddListener(_ =>
+            {
+                releases++;
+                hand.enabled = false;
+                // Unity does not invoke this runtime message on PlayerHand in EditMode.
+                typeof(PlayerHand).GetMethod("OnDisable", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(hand, null);
+            });
+            hand.controller = Child("Controller", rig.transform).transform;
+            hand.controller.SetPositionAndRotation(Vector3.right, Quaternion.Euler(10f, 20f, 30f));
+            hand.Sync();
+
+            Assert.That(releases, Is.EqualTo(1));
+            Assert.That(interactor.hasSelection || interactor.enabled || hand.enabled, Is.False);
+            Assert.That((hand.Mode, controllerNotices), Is.EqualTo((HandMode.None, 0)), "no controller presence after disable");
+            Assert.That(hand.transform.position, Is.EqualTo(root.position));
+            Assert.That(hand.transform.rotation, Is.EqualTo(root.rotation));
         }
 
         static GameObject Child(string name, Transform parent)

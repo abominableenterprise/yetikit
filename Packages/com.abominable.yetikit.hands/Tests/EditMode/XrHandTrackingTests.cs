@@ -74,6 +74,40 @@ namespace YetiKit.Hands.Tests
             Assert.That(tracking.TryGetHand(false, points, out _), Is.True, "the other side is still fresh");
         }
 
+        [Test]
+        public void CachedPosesWithAnUnchangedDynamicTimestampGoThroughTrackingLoss()
+        {
+            var root = new GameObject("Hand");
+            try
+            {
+                var hand = root.AddComponent<PlayerHand>();
+                hand.Tracking = tracking;
+                // Hook before the first Dynamic sample, as the runtime adapter does on first use.
+                var points = new Vector3[HandCurls.Points];
+                tracking.TryGetHand(true, points, out _);
+                var sampleAt = Time.unscaledTime;
+                subsystem.TryUpdateHands(Phase.Dynamic);
+                hand.Tick(sampleAt);
+                Assert.That(hand.HandTracked, Is.True);
+                Assert.That(hand.Grab.Selecting, Is.True, "coincident tips start a synthetic pinch");
+                Assert.That(hand.HandSampleAt, Is.EqualTo(sampleAt));
+                hand.Tick(sampleAt + 0.01f);
+                Assert.That(hand.HandTracked, Is.True, "the same sample can cover a short gap between updates");
+
+                // No subsystem updates from here: the provider leaves the last complete poses cached.
+                Assert.That(tracking.TryGetHand(true, points, out _), Is.True);
+                var staleAt = sampleAt + HandGrabGesture.LostGrace;
+                hand.Tick(staleAt);
+                Assert.That(hand.Mode, Is.EqualTo(HandMode.None));
+                Assert.That(hand.HandSampleAt, Is.EqualTo(float.NegativeInfinity));
+                Assert.That(hand.Grab.InGrace, Is.True);
+                hand.Tick(staleAt + HandGrabGesture.LostGrace + 0.01f);
+                Assert.That(hand.Grab.Selecting, Is.False);
+                Assert.That(hand.GrabberActive, Is.False);
+            }
+            finally { Object.DestroyImmediate(root); }
+        }
+
         public sealed class Provider : XRHandSubsystemProvider
         {
             public override void Start() { }
