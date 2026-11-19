@@ -661,7 +661,11 @@ test_pr() {
   fi
   mb="$(git -C "$PROJECT" merge-base "$base" HEAD 2>/dev/null)" \
     || die "test pr: no merge-base between $base and HEAD (fetch $base or pass another base)"
-  fixtures="$(cd "$PROJECT" && pr_gfx_fixtures "$mb")"
+  if ! fixtures="$(cd "$PROJECT" && pr_gfx_fixtures "$mb")"; then
+    test_stage_log '[linux-unity] test pr: could not determine Gfx selection; running full EditMode passes'
+    test_passes editmode "$@"
+    return
+  fi
   local UNITY_GFX_TIMEOUT="$UNITY_GFX_TIMEOUT"
   pr_gfx_budget "$fixtures"
   areas="$(cd "$PROJECT" && pr_changed_paths "$mb" | pr_areas)"
