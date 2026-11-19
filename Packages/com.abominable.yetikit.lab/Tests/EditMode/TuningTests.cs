@@ -145,6 +145,11 @@ namespace YetiKit.Lab.Tests
         [TestCase("{\"v\":1}")]
         [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":3},{\"value\":2}]}")]
         [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":3},{\"id\":\"dial\",\"value\":2}]}")]
+        [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\"}]}")]
+        [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":3},{\"id\":\"other\"}]}")]
+        [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":null}]}")]
+        [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":\"0\"}]}")]
+        [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":false}]}")]
         public void InvalidDocumentsStayUntouchedAfterEdits(string body)
         {
             var store = new MemoryStore();
@@ -167,6 +172,23 @@ namespace YetiKit.Lab.Tests
             Assert.That(live, Is.Zero);
             Assert.That(store.Saves, Is.Zero);
             Assert.That(store.Bodies["sample"], Is.EqualTo(body));
+        }
+
+        [Test]
+        public void ExplicitZeroLoadsAndAllowsOtherBindingsToSave()
+        {
+            var store = new MemoryStore();
+            store.Bodies["sample"] = "{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":0}]}";
+            var tuning = new Tuning("sample", store);
+            float live = 1f;
+            tuning.Float("dial", () => live, x => live = x, 1f, 0f, 4f, 1f);
+            Assert.That(live, Is.Zero);
+
+            Register(tuning, "other").Set(2f);
+            tuning.Flush();
+            Assert.That(store.Saves, Is.EqualTo(1));
+            var reloaded = new Tuning("sample", store);
+            Assert.That(Register(reloaded, "other").Get(), Is.EqualTo(2f));
         }
 
         [Test]
