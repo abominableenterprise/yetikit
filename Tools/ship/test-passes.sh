@@ -14,6 +14,20 @@ cs_classes() {
       BEGIN { tag = "\\[[^]]*Category[[:space:]]*\\([[:space:]]*\"" cat "\"[[:space:]]*\\)" }
       function fq(c) { return ns == "" ? c : ns "." c }
       function braces(s,   o, c) { o = gsub(/\{/, "{", s); c = gsub(/\}/, "}", s); depth += o - c }
+      # End of a leading attribute section, ignoring brackets in strings and
+      # retaining nested brackets (for example typeof(int[]) in a fixture).
+      function attribute_end(s,   i, ch, rest, level) {
+        for (i = 1; i <= length(s); i++) {
+          ch = substr(s, i, 1)
+          if (ch == "[") level++
+          else if (ch == "]" && --level == 0) return i
+          else if (ch == "@" || ch == "\"" || ch == "\047") {
+            rest = substr(s, i)
+            if (match(rest, /^(@"([^"]|"")*"|"([^"\\]|\\.)*"|\047([^\047\\]|\\.)*\047)/)) i += RLENGTH - 1
+          }
+        }
+        return 0
+      }
       /^[[:space:]]*\/\// { next }
       {
         line = $0
@@ -27,6 +41,28 @@ cs_classes() {
           else if (sub(/^[[:space:]]*\{/, "", line)) depth++
           if (line ~ /^[[:space:]]*\/\//) next
         }
+        if (scope == "class") {
+          # Only leading attribute sections at namespace scope can tag the
+          # declaration. Never search its body for class-level categories.
+          if (depth <= nsdepth) {
+            line = attributes line
+            attributes = ""
+            while (line ~ /^[[:space:]]*\[/) {
+              end = attribute_end(line)
+              if (!end) { attributes = line " "; break }
+              if (substr(line, 1, end) ~ tag) pending = 1
+              line = substr(line, end + 1)
+            }
+            if (attributes != "" || line ~ /^[[:space:]]*(\/\/.*)?$/) next
+            if (pending && match(line, /^[[:space:]]*((public|internal|protected|private|file|abstract|sealed|static|unsafe|new|partial|record)[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]+/)) {
+              c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
+              print fq(c)
+            }
+            pending = 0
+          }
+          braces(line)
+          next
+        }
         # Coalesce an attribute section before tagging it. Keep the closing
         # line so a declaration following the closing bracket is still seen.
         if (attributes != "") line = attributes " " line
@@ -37,10 +73,10 @@ cs_classes() {
         if (match(line, /(^|[^A-Za-z0-9_])class[[:space:]]+[A-Za-z0-9_]+/)) {
           c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
           if (depth <= nsdepth) { top = c; if (!gfx) print fq(top) }
-          if (pending && gfx && (scope != "class" || depth <= nsdepth)) print fq(top)
+          if (pending && gfx) print fq(top)
           pending = 0
         } else if (pending && !attr && line ~ /[^[:space:]]/) {
-          if (gfx && scope != "class" && top != "") print fq(top)
+          if (gfx && top != "") print fq(top)
           pending = 0
         }
         braces(line)

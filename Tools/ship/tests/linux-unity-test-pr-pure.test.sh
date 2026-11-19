@@ -34,7 +34,7 @@ TEST_PR_PURE_MAX=bad pr HEAD
 check 'invalid MAX falls back safely' 'full && grep -Fq "invalid TEST_PR_PURE_MAX" "$stages"'
 
 commit initial-selection
-printf 'using NUnit.Framework;\nnamespace ShipFixtures\n{\n [Explicit, Category ( "RenderTool" )]\n public class CaptureTests { [Test] public void Capture() {} }\n}\n' > "$t/Props/CaptureTests.cs"
+printf 'using NUnit.Framework;\nnamespace ShipFixtures { [Explicit, Category ( "RenderTool" )] public class CaptureTests { [Test] public void Capture() {} } }\n' > "$t/Props/CaptureTests.cs"
 pr HEAD
 check 'spaced RenderTool category keeps an explicit fixture out of the headless filter' \
   '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests "* ]] && ! grep -Fq "pure selected ShipFixtures.CaptureTests" "$stages"'
@@ -45,6 +45,18 @@ pr HEAD
 check 'a same-line namespace and class is selected alongside smoke' \
   '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.InlineTests "* ]]'
 rm "$t/Props/InlineTests.cs"
+
+printf 'using NUnit.Framework;\nnamespace ShipFixtures\n{\n [Explicit] [Category(\n   "RenderTool"\n )] public class MultilineCaptureTests { [Test] public void Capture() {} }\n}\n' > "$t/Props/MultilineCaptureTests.cs"
+pr HEAD
+check 'multiline RenderTool category after a complete attribute excludes the explicit fixture' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests "* ]] && ! grep -Fq "pure selected ShipFixtures.MultilineCaptureTests" "$stages"'
+rm "$t/Props/MultilineCaptureTests.cs"
+
+printf 'using NUnit.Framework;\nnamespace ShipFixtures { public class MixedInlineTests { [Test] public void Rule() {} [Test, Category("Gfx")] public void Render() {} } }\n' > "$t/Props/MixedInlineTests.cs"
+pr HEAD
+check 'inline method Gfx category keeps the fixture in both passes, with Gfx excluded headlessly' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-nographics"* && "$(pure_run)" == *"-testCategory !Gfx;!MacOnly"* && "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.MixedInlineTests "* ]] && [ "$(filter)" = ShipFixtures.MixedInlineTests ]'
+rm "$t/Props/MixedInlineTests.cs"
 
 printf '// This changed source declares no class.\n' > "$t/Props/Unresolved.cs"
 echo '// another runtime change' >> "$proj/Assets/Scripts/Props/Spray/Spray.cs"
