@@ -15,6 +15,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
   `HandGrabInteractor`.
 - Add hand teleport with an XRI arc and landing preview, rig-scoped aim
   ownership, hand snap turn, and an event-driven wrist button.
+- Add the interaction package with throw and release math, configurable aim and
+  respawn rules, and grip hand-off and carry helpers.
 
 ### Fixed
 - None.

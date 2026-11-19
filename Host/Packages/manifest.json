@@ -2,6 +2,7 @@
   "dependencies": {
     "com.abominable.yetikit.core": "file:../../Packages/com.abominable.yetikit.core",
     "com.abominable.yetikit.hands": "file:../../Packages/com.abominable.yetikit.hands",
+    "com.abominable.yetikit.interaction": "file:../../Packages/com.abominable.yetikit.interaction",
     "com.abominable.yetikit.quality": "file:../../Packages/com.abominable.yetikit.quality",
     "com.unity.inputsystem": "1.20.0",
     "com.unity.test-framework": "1.8.0",
@@ -13,6 +14,7 @@
   "testables": [
     "com.abominable.yetikit.core",
     "com.abominable.yetikit.hands",
+    "com.abominable.yetikit.interaction",
     "com.abominable.yetikit.quality"
   ]
 }
