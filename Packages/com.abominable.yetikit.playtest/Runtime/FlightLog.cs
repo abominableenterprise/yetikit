@@ -93,8 +93,8 @@ namespace YetiKit.Playtest
             Buffer.Clear();
         }
 
-        /// <summary>Append a line. Supply a valid JSON object to merge its fields, or another JSON value
-        /// to store under <c>d</c>. Null/empty payload adds no fields.</summary>
+        /// <summary>Append a line. Supply a valid JSON object to merge its fields; other values and objects
+        /// with reserved top-level <c>t</c> or <c>k</c> keys are stored under <c>d</c>. Null/empty adds no fields.</summary>
         public AppendResult AppendEvent(string kind, string payload) => Append(kind ?? "mark", payload, null);
 
         internal AppendResult Append(string kind, string payload, EventClass? role)
@@ -122,7 +122,7 @@ namespace YetiKit.Playtest
             }
         }
 
-        /// <summary>Merge a JSON object's fields into the open line (else <c>,"d":value</c>).</summary>
+        /// <summary>Merge an object's fields unless it uses recorder-owned keys (else <c>,"d":value</c>).</summary>
         public static void AppendData(StringBuilder sb, string json)
         {
             if (string.IsNullOrEmpty(json)) return;
@@ -132,8 +132,12 @@ namespace YetiKit.Playtest
                 s = s.Replace('\r', ' ').Replace('\n', ' ');
             if (s.Length >= 2 && s[0] == '{' && s[s.Length - 1] == '}')
             {
-                var inner = s.Substring(1, s.Length - 2).Trim();
-                if (inner.Length > 0) sb.Append(',').Append(inner);
+                if (HasReservedKey(s)) sb.Append(",\"d\":").Append(s);
+                else
+                {
+                    var inner = s.Substring(1, s.Length - 2).Trim();
+                    if (inner.Length > 0) sb.Append(',').Append(inner);
+                }
                 return;
             }
             sb.Append(",\"d\":");
@@ -141,6 +145,34 @@ namespace YetiKit.Playtest
                 sb.Append(s);
             else JsonLine.Str(sb, s);
         }
+
+        // Payloads are valid JSON by contract. Only strings followed by ':' at the outer object level
+        // are keys. Skip escaped characters while scanning; a one-letter key can also use a Unicode escape.
+        static bool HasReservedKey(string json)
+        {
+            var depth = 1;
+            for (var i = 1; i < json.Length - 1; i++)
+            {
+                switch (json[i])
+                {
+                    case '{': case '[': depth++; break;
+                    case '}': case ']': depth--; break;
+                    case '"':
+                        var start = ++i;
+                        while (i < json.Length && json[i] != '"') i += json[i] == '\\' ? 2 : 1;
+                        if (depth != 1 || i >= json.Length || !IsReserved(json.AsSpan(start, i - start))) break;
+                        var next = i + 1;
+                        while (next < json.Length && char.IsWhiteSpace(json[next])) next++;
+                        if (next < json.Length && json[next] == ':') return true;
+                        break;
+                }
+            }
+            return false;
+        }
+
+        static bool IsReserved(ReadOnlySpan<char> key) =>
+            (key.Length == 1 && (key[0] == 't' || key[0] == 'k')) ||
+            key.SequenceEqual("\\u0074".AsSpan()) || key.SequenceEqual("\\u006b".AsSpan()) || key.SequenceEqual("\\u006B".AsSpan());
 
         /// <summary>How many lines of an event kind this session has.</summary>
         public int Count(string kind)

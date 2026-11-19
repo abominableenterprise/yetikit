@@ -1,6 +1,9 @@
 using System;
 using System.IO;
+using System.Text;
+using System.Threading;
 using NUnit.Framework;
+using YetiKit.Core;
 
 namespace YetiKit.Playtest.Tests
 {
@@ -67,6 +70,95 @@ namespace YetiKit.Playtest.Tests
             }
         }
 
+        [TestCase("write")]
+        [TestCase("flush")]
+        public void ShutdownRotationFailureLeavesCommittedRecordsRecoverableAndNotLost(string step)
+        {
+            using (var tmp = new TempDir())
+            {
+                var store = new Disk(tmp.Path, step, false);
+                store.CreateSession(Id);
+                var dir = store.SessionOutbox(Id);
+                using (var pump = new ChunkPump(store: store))
+                {
+                    pump.StartSession(dir);
+                    Assert.IsTrue(pump.Write(new StringBuilder(First + Second)));
+                    Assert.IsTrue(pump.Drain(5000));
+                    Assert.AreEqual(0, store.Injected, "no rotation yet");
+                    Assert.IsTrue(pump.Stop(5000));
+                    Assert.AreEqual(1, store.Injected);
+                    Assert.AreEqual(1, pump.Errors);
+                    Assert.AreEqual(0, pump.Lost, "both records are still recoverable");
+                    Assert.IsEmpty(Directory.GetFiles(dir, "*.jsonl.gz"));
+                }
+                store.Files.RecoverChunks();
+                Assert.AreEqual(First + Second, TempDir.Gunzip(Path.Combine(dir, FileChunkStore.ChunkName(1))));
+            }
+        }
+
+        [Test]
+        public void FailedDiscardKeepsOwnershipUntilTheDirectoryIsDeleted()
+        {
+            using (var tmp = new TempDir())
+            {
+                double retryClock = 0;
+                var store = new Disk(tmp.Path, "delete", false);
+                var log = new FlightLog(() => 0);
+                using (var pump = new ChunkPump(store: store, clock: () => Volatile.Read(ref retryClock)))
+                {
+                    var session = new RecordingSession(log, pump, store, new SessionMeta(Id), () => DateTime.UnixEpoch);
+                    Assert.IsTrue(session.Begin(0));
+                    Assert.IsFalse(session.End(0));
+                    Assert.IsTrue(pump.Drain(5000));
+                    Assert.AreEqual(1, store.Injected);
+                    Assert.IsTrue(Directory.Exists(session.Dir));
+                    Assert.IsTrue(pump.Owns(Id));
+                    Assert.IsFalse(session.End(0), "ending again is not needed for the retry");
+
+                    Volatile.Write(ref retryClock, Backoff.Delay(1));
+                    Assert.IsTrue(pump.Drain(5000));
+                    Assert.IsFalse(Directory.Exists(session.Dir));
+                    Assert.IsFalse(pump.Owns(Id));
+                    Assert.AreEqual(1, pump.Errors);
+                }
+            }
+        }
+
+        [Test]
+        public void FinalChunkRenameIsRetriedBeforePublishingDoneWithoutANewSession()
+        {
+            using (var tmp = new TempDir())
+            {
+                double retryClock = 0;
+                var store = new FileChunkStore(tmp.Path);
+                var log = new FlightLog(() => 0);
+                using (var pump = new ChunkPump(store: store, clock: () => Volatile.Read(ref retryClock)))
+                {
+                    var session = new RecordingSession(log, pump, store, new SessionMeta(Id), () => DateTime.UnixEpoch);
+                    Assert.IsTrue(session.Begin(0));
+                    var final = Path.Combine(session.Dir, FileChunkStore.ChunkName(1));
+                    var marker = Path.Combine(session.Dir, DoneMarker.FileName);
+                    Directory.CreateDirectory(final); // block both the final rename and the immediate retry
+                    log.AppendEvent("test_action", null);
+                    Assert.IsTrue(session.End(1));
+                    Assert.IsTrue(pump.Drain(5000));
+                    var pending = TempDir.Gunzip(final + ".tmp");
+                    StringAssert.Contains("test_action", pending);
+                    Assert.IsTrue(pump.Owns(Id));
+                    Assert.IsFalse(File.Exists(marker));
+
+                    Directory.Delete(final);
+                    Volatile.Write(ref retryClock, Backoff.Delay(1));
+                    Assert.IsTrue(pump.Drain(5000));
+                    Assert.AreEqual(pending, TempDir.Gunzip(final));
+                    Assert.IsFalse(File.Exists(final + ".tmp"));
+                    Assert.AreEqual(Id, DoneMarker.Parse(File.ReadAllText(marker)).session);
+                    Assert.IsFalse(pump.Owns(Id));
+                    Assert.AreEqual(0, pump.Lost);
+                }
+            }
+        }
+
         sealed class Disk : IChunkStore
         {
             public readonly FileChunkStore Files;
@@ -112,7 +204,11 @@ namespace YetiKit.Playtest.Tests
             public void DeleteTemp(string path) => Files.DeleteTemp(path);
             public void TruncateJournal(string path, long length) => Files.TruncateJournal(path, length);
             public void PublishFile(string path, byte[] bytes) => Files.PublishFile(path, bytes);
-            public void DeleteDir(string dir) => Files.DeleteDir(dir);
+            public void DeleteDir(string dir)
+            {
+                if (Fails(dir, "delete")) Fail();
+                Files.DeleteDir(dir);
+            }
 
             sealed class FaultStream : Stream
             {

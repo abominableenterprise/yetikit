@@ -28,10 +28,10 @@ namespace YetiKit.Playtest
             public FileChunkStore Budget;
             public string Path2;            // Finish: the done marker
             public Func<LostRecords, byte[]> Make2;
-            public string Owner;            // Finish, Delete: the session id it owns until it ran
+            public string Owner;            // Finish, Delete: the session id it owns until completion
         }
 
-        /// <summary>A session's final meta.json and done marker, written in that order; kept and retried until both are.</summary>
+        /// <summary>A session's pending completion or discard. A null marker path means discard.</summary>
         sealed class Ending
         {
             public string Owner, Dir, MetaPath, MarkerPath;
@@ -58,6 +58,7 @@ namespace YetiKit.Playtest
         readonly Func<string, int> nextFree;
         readonly Func<string, System.IO.Stream> openFile;
         readonly Action<string, byte[]> writeFile;
+        readonly Action<string, byte[]> writeFinalFile;
         readonly Func<double> clock;
         readonly System.Collections.Generic.List<Ending> endings = new System.Collections.Generic.List<Ending>(); // pump thread only
         readonly System.Collections.Generic.Dictionary<string, int> owned = new System.Collections.Generic.Dictionary<string, int>(); // lock it
@@ -82,6 +83,7 @@ namespace YetiKit.Playtest
             this.store = store ?? FileChunkStore.Default;
             this.openFile = openFile;
             this.writeFile = writeFile ?? this.store.PublishFile;
+            writeFinalFile = writeFile ?? (this.store is FileChunkStore files ? files.PublishFinalFile : this.store.PublishFile);
             this.clock = clock ?? (() => System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
             this.nextFree = nextFree ?? this.store.NextFree;
             for (var i = 0; i < PooledBuilders; i++) pool.Add(new System.Text.StringBuilder(FlightLog.InitialChars));
@@ -139,7 +141,7 @@ namespace YetiKit.Playtest
         public void WriteFile(string path, Func<LostRecords, byte[]> make) => Enqueue(new Job { Op = Op.File, Path = path, Make = make });
 
         /// <summary>Delete a directory once every job before this one ran (a session too short to keep); the session
-        /// <paramref name="owner"/> is <see cref="Owns"/> until then.</summary>
+        /// <paramref name="owner"/> stays owned until deletion succeeds.</summary>
         public void DeleteDir(string path, string owner = null)
         {
             Own(owner);
@@ -252,12 +254,7 @@ namespace YetiKit.Playtest
                     break;
                 case Op.Barrier: RetryEndings(false); break; // Done is set by Run
                 case Op.Delete:
-                    try
-                    {
-                        store.DeleteDir(job.Path);
-                        unpublished.RemoveAll(chunk => System.IO.Path.GetDirectoryName(chunk.Item2) == job.Path);
-                    }
-                    finally { Disown(job.Owner); }
+                    EndOrRetry(new Ending { Owner = job.Owner, Dir = job.Path });
                     break;
                 case Op.Finish:
                     var ending = new Ending { Owner = job.Owner, Dir = sessionDir, MetaPath = job.Path, MarkerPath = job.Path2, Budget = budget };
@@ -272,25 +269,26 @@ namespace YetiKit.Playtest
                         Disown(job.Owner); // no final files to retry
                         throw;
                     }
-                    if (!TryFinish(ending)) endings.Add(ending);
+                    EndOrRetry(ending);
                     break;
             }
         }
 
-        // meta.json first, then the marker: a failed write keeps the ending (and its session owned) for a retry.
-        bool TryFinish(Ending e)
+        void EndOrRetry(Ending ending)
+        {
+            if (!TryEnd(ending)) endings.Add(ending);
+        }
+
+        bool TryEnd(Ending e)
         {
             try
             {
-                if (e.Meta != null)
+                if (e.MarkerPath == null)
                 {
-                    writeFile(e.MetaPath, e.Meta);
-                    e.Meta = null;
+                    store.DeleteDir(e.Dir);
+                    unpublished.RemoveAll(chunk => System.IO.Path.GetDirectoryName(chunk.Item2) == e.Dir);
                 }
-                writer?.RetryPending();
-                if (unpublished.Exists(chunk => System.IO.Path.GetDirectoryName(chunk.Item2) == e.Dir))
-                    throw new System.IO.IOException("Session chunks are still pending publication.");
-                writeFile(e.MarkerPath, e.Marker);
+                else FinishFiles(e);
             }
             catch (Exception x)
             {
@@ -304,13 +302,27 @@ namespace YetiKit.Playtest
             return true;
         }
 
+        void FinishFiles(Ending e)
+        {
+            writer?.RetryPending();
+            if (unpublished.Exists(chunk => System.IO.Path.GetDirectoryName(chunk.Item2) == e.Dir))
+                throw new System.IO.IOException("Session chunks are still pending publication.");
+            // Persist metadata and the chunk renames before the marker can become visible.
+            if (e.Meta != null)
+            {
+                writeFinalFile(e.MetaPath, e.Meta);
+                e.Meta = null;
+            }
+            writeFinalFile(e.MarkerPath, e.Marker);
+        }
+
         void RetryEndings(bool all)
         {
             if (endings.Count == 0) return;
             var now = clock();
             for (var i = 0; i < endings.Count;)
             {
-                if ((all || now >= endings[i].NextAt) && TryFinish(endings[i])) endings.RemoveAt(i);
+                if ((all || now >= endings[i].NextAt) && TryEnd(endings[i])) endings.RemoveAt(i);
                 else i++;
             }
         }

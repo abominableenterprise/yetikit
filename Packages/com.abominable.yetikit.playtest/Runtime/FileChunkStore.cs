@@ -4,6 +4,8 @@ using System.IO.Compression;
 using System.Runtime.Serialization.Json;
 using System.Xml;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("YetiKit.Playtest.Tests")]
+
 namespace YetiKit.Playtest
 {
     /// <summary>Local recordings in <c>&lt;root&gt;/outbox/&lt;session&gt;/</c> (meta.json and gzip chunks).</summary>
@@ -17,11 +19,18 @@ namespace YetiKit.Playtest
         public readonly string Outbox;
 
         readonly long pendingDiskBudgetBytes;
+        readonly Action<FileStream> flushFile;
+        readonly Action<string> syncDirectory;
 
         public FileChunkStore(string root, long pendingDiskBudgetBytes = long.MaxValue)
+            : this(root, pendingDiskBudgetBytes, null, null) { }
+
+        internal FileChunkStore(string root, long pendingDiskBudgetBytes, Action<FileStream> flushFile, Action<string> syncDirectory)
         {
             Outbox = Path.Combine(root, OutboxFolder);
             this.pendingDiskBudgetBytes = pendingDiskBudgetBytes;
+            this.flushFile = flushFile;
+            this.syncDirectory = syncDirectory;
         }
 
         /// <summary>Best-effort pruning of completed sessions to the configured budget.</summary>
@@ -97,28 +106,44 @@ namespace YetiKit.Playtest
 
         public void PublishFile(string path, byte[] bytes) => WriteAtomic(path, bytes);
 
+        internal void PublishFinalFile(string path, byte[] bytes) =>
+            WriteAtomic(path, bytes, flushFile ?? FlushToDisk, syncDirectory ?? DirectoryDurability.Sync);
+
         public void DeleteDir(string dir)
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
 
         /// <summary>Write a small file via a temporary file. On a failed rename, keep a complete temp if the target is gone.</summary>
-        public static void WriteAtomic(string path, byte[] bytes)
+        public static void WriteAtomic(string path, byte[] bytes) => WriteAtomic(path, bytes, null, null);
+
+        static void FlushToDisk(FileStream file) => file.Flush(flushToDisk: true);
+
+        static void WriteAtomic(string path, byte[] bytes, Action<FileStream> flush, Action<string> sync)
         {
             var tmp = path + TmpSuffix;
             try
             {
-                File.WriteAllBytes(tmp, bytes);
+                if (flush == null) File.WriteAllBytes(tmp, bytes);
+                else
+                {
+                    using (var file = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        file.Write(bytes, 0, bytes.Length);
+                        flush(file);
+                    }
+                }
                 for (var i = 1; ; i++)
                 {
                     try
                     {
                         if (File.Exists(path)) File.Replace(tmp, path, null);
                         else File.Move(tmp, path);
-                        return;
+                        break;
                     }
                     catch (IOException) when (i < 20) { System.Threading.Thread.Sleep(50); }
                 }
+                sync?.Invoke(Path.GetDirectoryName(Path.GetFullPath(path)));
             }
             catch (Exception)
             {
