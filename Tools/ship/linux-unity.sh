@@ -314,6 +314,10 @@ write_pidfile() {
     if [ -n "${pid:-}" ] && [ "$(proc_start "$pid" || true)" = "$start" ]; then
       exec {fd}>&-; PID_LINE=""; die "another run (pid $pid, $PIDFILE) is still going: wait for it or run $SHIP_COMMAND stop"
     fi
+    # A dead wrapper can leave workers with its marker and the editor lock.
+    if [[ "${pid:-}" =~ ^[1-9][0-9]*$ && "${start:-}" =~ ^[0-9]+$ ]] && [ -n "$(marked "$pid:$start")" ]; then
+      exec {fd}>&-; PID_LINE=""; die "workers remain from pid $pid ($PIDFILE): run $SHIP_COMMAND stop"
+    fi
     rm -f "$PIDFILE"
   done
   exec {fd}>&-; PID_LINE=""; die "could not create $PIDFILE"
@@ -769,7 +773,7 @@ case "${1:-}" in
   open|test|scene|lab|apk|all|setup|cache-restore|cache-save)
     # Every process this run forks inherits the marker, so `stop` finds it in any process group (timeout's,
     # a foreground run's) and never signals a pipeline peer such as `| tee`.
-    case "$1" in setup|cache-restore|cache-save) ;; *) lock_unity ;; esac
+    case "$1" in setup|cache-save) ;; *) lock_unity ;; esac
     write_pidfile; export LINUX_UNITY_RUN="${PID_LINE/ /:}"; chain_exit_trap release_pidfile
     if [ "${1:-}" = test ]; then test_stages_claim; fi ;;
 esac
