@@ -74,8 +74,6 @@ qr_config || exit 1
 mkdir -p "$QR_LOGS"
 qr_new_run 0123456789012345678901234567890123456789 synthetic
 qr_check_prepared_worktree() { :; } # Covered by the prepared-integrity fixture.
-# all still calls the real preflight and must stop before parallel editors on failure.
-qr_prepare() { qr_load_state; }
 qr_parallel_unity() { echo parallel >> "$tmp/editor"; QR_GATE_RC=0; QR_BUILD_RC=1; }
 run() {
   local label="$1"; shift
@@ -164,6 +162,40 @@ export XDG_CONFIG_HOME="$tmp/xdg"
 run inherited-xdg build
 check 'custom build preserves XDG_CONFIG_HOME in the inherited environment' '[ "$rc" = 0 ]'
 unset XDG_CONFIG_HOME
+# Keep real prepare and verifier dispatch. Git is a stub so even a failed
+# assertion cannot fetch from the network. Never log its environment or argv.
+(
+  fails=0
+  git() {
+    if [ "${3:-}" = fetch ]; then : > "$tmp/fetch"; fi
+    return 1
+  }
+  mkdir -p "$QR_WARM/Library"
+  qr_check_disk() { :; }
+  unset -f python3 # Use the real launcher verifier, with no Android tooling.
+  printf '%s\n' synthetic-apk > "$tmp/override.apk"
+  for variable in AAPT GIT_SSH_COMMAND GIT_SSH GIT_EXEC_PATH GIT_PROXY_COMMAND GIT_ASKPASS SSH_ASKPASS; do
+    for field in storePassEnv keyPassEnv; do
+      jq --arg field "$field" --arg variable "$variable" \
+        '.quest.signing[$field] = $variable' "$tmp/signing.json" > "$YETIKIT_CONFIG"
+      rm -f "$tmp/java-setup" "$tmp/fetch" "$tmp/keytool.argv" "$tmp/editor"
+      export "$variable=$tmp/$SYNTHETIC_STORE_PASS"
+      if [ "$variable" = AAPT ]; then
+        run "$variable-$field" verify "$tmp/override.apk"
+      else
+        run "$variable-$field" all
+      fi
+      unset "$variable"
+      check "rejects $variable as $field before verification or fetch" \
+        '[ "$rc" != 0 ] && grep -Fq "quest.signing.$field (use a dedicated signing variable; this name is reserved)" "$tmp/$variable-$field.err" &&
+          [ ! -e "$tmp/java-setup" ] && [ ! -e "$tmp/fetch" ] && [ ! -e "$tmp/keytool.argv" ] && [ ! -e "$tmp/editor" ]'
+    done
+  done
+  [ "$fails" = 0 ]
+) || fails=$((fails + 1))
+configure
+# all still calls the real preflight and must stop before parallel editors on failure.
+qr_prepare() { qr_load_state; }
 FAKE_KEYTOOL_RC=1 run keytool-failed build
 check 'failed keytool cannot pass using a fingerprint in its failed output' '[ "$rc" != 0 ] && grep -q "could not read" "$tmp/keytool-failed.err"'
 printf '%s\n' "$other" > "$SYNTHETIC_STORE_PATH"

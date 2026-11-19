@@ -18,11 +18,13 @@ def noise_keys: ["artRoot", "atlasPath", "codeRegex", "fixedTimestepCount", "fon
   "generatorsRegex", "propsDir", "protectedRegex", "repackRegex", "sourceRegex",
   "specularMaterialPath", "timeManagerPath"];
 def envname: if nonempty then test("^[A-Za-z_][A-Za-z0-9_]*$") else false end;
-# Names that the release runner reads as settings or assigns itself are not
-# dedicated signing inputs. Bash also manages or interprets its own variables.
+# Settings used by the runner or its tools are not dedicated signing inputs.
+# Bash also manages or interprets its own variables.
 def reserved_signing_env:
   startswith("QR_") or startswith("BASH_") or
-  (. as $name | ["ANDROID_SDK_ROOT", "ANDROID_USER_HOME", "HOME", "JAVA_HOME", "KNOWN_FLAKES",
+  (. as $name | ["AAPT", "ANDROID_SDK_ROOT", "ANDROID_USER_HOME",
+    "GIT_ASKPASS", "GIT_EXEC_PATH", "GIT_PROXY_COMMAND", "GIT_SSH", "GIT_SSH_COMMAND", "SSH_ASKPASS",
+    "HOME", "JAVA_HOME", "KNOWN_FLAKES",
     "LC_ALL", "PATH", "PROJECT", "QUEST_ADB_WAIT", "QUEST_APK_DIR", "QUEST_BACKUP_ROOT", "QUEST_BUILD_TIMEOUT",
     "QUEST_CERT_SHA256", "QUEST_GATE_CATEGORIES", "QUEST_GATE_TIMEOUT", "QUEST_KNOWN_FLAKES", "QUEST_LAUNCH_WAIT",
     "QUEST_LOG_ROOT", "QUEST_MIN_FREE_GB", "QUEST_REPO", "QUEST_SERIAL", "QUEST_WAIT_GRACE", "QUEST_WAIT_POLL",
