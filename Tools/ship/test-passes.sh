@@ -21,38 +21,58 @@ cs_classes() {
       function literal_length(s) {
         return match(s, /^(@"([^"]|"")*"|"([^"\\]|\\.)*"|\047([^\047\\]|\\.)*\047)/) ? RLENGTH : 0
       }
-      # Replace comments with whitespace before scanning attributes, declarations
-      # or braces. Leave quoted arguments intact for category matching.
-      function without_comments(s,   out, token, n) {
+      # Mask verbatim literals and comments before scanning structure. Keep
+      # ordinary quoted arguments intact for category matching.
+      function scan_line(s,   out, token, n, quoted) {
         while (s != "") {
           if (block_comment) {
             if (!match(s, /\*\//)) return out
             s = substr(s, RSTART + RLENGTH)
             block_comment = 0
+          } else if (hole_format) {
+            # Format text is not C# code: comment markers have no effect here.
+            if (!match(s, /\}/)) return out
+            s = substr(s, RSTART + 1)
+            hole_format = hole_depth = 0
+          } else if (hole_depth) {
+            # Only a top-level colon starts a format, not a conditional colon
+            # inside parentheses or the :: of a namespace alias.
+            if (!match(s, /\/\/|\/\*|@"|::|[][(){}:"\047]/)) return out
+            token = substr(s, RSTART, RLENGTH)
+            s = substr(s, RSTART)
+            n = length(token)
+            if (token == "//") return out
+            if (token == "/*") block_comment = 1
+            else if (token == "{" || token == "(" || token == "[") hole_depth++
+            else if (token == "}" || token == ")" || token == "]") hole_depth--
+            else if (token == ":" && hole_depth == 1) hole_format = 1
+            else if ((quoted = literal_length(s))) n = quoted
+            s = substr(s, n + 1)
           } else if (verbatim) {
-            match(s, /^([^"]|"")*/)
-            if (RLENGTH == length(s)) return out s
-            out = out substr(s, 1, RLENGTH + 1)
-            s = substr(s, RLENGTH + 2)
-            verbatim = 0
+            if (verbatim == 2) match(s, /^([^"{}]|""|\{\{|\}\})*/)
+            else match(s, /^([^"]|"")*/)
+            n = RLENGTH
+            if (n == length(s)) return out
+            token = substr(s, n + 1, 1)
+            s = substr(s, n + 2)
+            if (token == "{") hole_depth = 1
+            else if (token == "\"") verbatim = 0
           } else {
             if (!match(s, /\/\/|\/\*|\$@?"|@\$"|@"|["\047]/)) return out s
             out = out substr(s, 1, RSTART - 1)
             token = substr(s, RSTART, RLENGTH)
             s = substr(s, RSTART)
-            # Do not treat quotes or comment markers inside interpolation
-            # expressions as top-level tokens. Keep the rest of the line as
-            # written so its braces are counted as before.
-            if (token ~ /\$/) return out s
+            # Preserve existing handling of ordinary interpolated strings.
+            if (token == "$\"") return out s
             if (token == "//") return out
             if (token == "/*") {
               out = out " "
               s = substr(s, 3)
               block_comment = 1
-            } else if (token == "@\"") {
-              out = out token
-              s = substr(s, 3)
-              verbatim = 1
+            } else if (token ~ /@/) {
+              out = out "\"\""
+              s = substr(s, length(token) + 1)
+              verbatim = (token == "@\"" ? 1 : 2)
             } else {
               n = literal_length(s)
               if (!n) n = 1
@@ -83,7 +103,7 @@ cs_classes() {
         return 0
       }
       {
-        line = without_comments($0)
+        line = scan_line($0)
         if (match(line, /^[[:space:]]*namespace[[:space:]]+[A-Za-z0-9_.]+/)) {
           ns = substr(line, RSTART, RLENGTH)
           line = substr(line, RSTART + RLENGTH)
