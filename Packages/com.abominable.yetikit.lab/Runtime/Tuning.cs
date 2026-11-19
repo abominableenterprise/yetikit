@@ -11,6 +11,7 @@ namespace YetiKit.Lab
         private readonly ITuningStore store;
         private readonly List<ITuningBinding> bindings = new List<ITuningBinding>();
         private readonly Dictionary<string, float> values;
+        private readonly bool rejectedDocument;
         // Null is clean; positive infinity means the next tick should start the debounce.
         private double? saveAt;
         public IReadOnlyList<ITuningBinding> Bindings { get; }
@@ -21,7 +22,10 @@ namespace YetiKit.Lab
             this.experimentId = experimentId;
             this.store = store ?? new PlayerPrefsTuningStore();
             Bindings = bindings.AsReadOnly();
-            values = Load(this.store.Load(experimentId)) ?? new Dictionary<string, float>(StringComparer.Ordinal);
+            var body = this.store.Load(experimentId);
+            var loaded = Load(body);
+            rejectedDocument = body != null && loaded == null;
+            values = loaded ?? new Dictionary<string, float>(StringComparer.Ordinal);
         }
 
         public ITuningBinding Float(string id, Func<float> get, Action<float> set, float defaultValue,
@@ -46,6 +50,7 @@ namespace YetiKit.Lab
                 if (!Finite(value)) throw new ArgumentException("Binding value must be finite.", nameof(value));
                 value = Constrain(value);
                 if (get() != value) set(value);
+                if (rejectedDocument) return; // Live edits only until the store is repaired and the model recreated.
                 if (value == fallback ? !values.Remove(id) : values.TryGetValue(id, out var old) && old == value) return;
                 if (value != fallback) values[id] = value;
                 saveAt = double.PositiveInfinity;

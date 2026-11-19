@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace YetiKit.Lab.Tests
 {
@@ -136,22 +137,61 @@ namespace YetiKit.Lab.Tests
             Assert.That(store.Bodies["sample"], Does.Not.Contain("dial"));
         }
 
+        [TestCase("")]
+        [TestCase("  ")]
         [TestCase("{broken")]
         [TestCase("{\"v\":2,\"values\":[{\"id\":\"dial\",\"value\":3}]}")]
         [TestCase("{\"values\":[{\"id\":\"dial\",\"value\":3}]}")]
         [TestCase("{\"v\":1}")]
         [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":3},{\"value\":2}]}")]
         [TestCase("{\"v\":1,\"values\":[{\"id\":\"dial\",\"value\":3},{\"id\":\"dial\",\"value\":2}]}")]
-        public void InvalidDocumentsDoNotApplyOrWriteBack(string body)
+        public void InvalidDocumentsStayUntouchedAfterEdits(string body)
         {
             var store = new MemoryStore();
             store.Bodies["sample"] = body;
             var tuning = new Tuning("sample", store);
             float live = 1f;
-            tuning.Float("dial", () => live, x => live = x, 0f, 0f, 4f, 1f);
-            tuning.Flush();
+            var dial = tuning.Float("dial", () => live, x => live = x, 0f, 0f, 4f, 1f);
             Assert.That(live, Is.EqualTo(1f));
+
+            dial.Set(2f);
+            Assert.That(live, Is.EqualTo(2f));
+            tuning.Tick(0d);
+            tuning.Tick(1d);
+            Assert.That(store.Saves, Is.Zero, "Debounced save must not overwrite a rejected document.");
+
+            dial.Set(4f);
+            tuning.Flush();
+            tuning.ResetAll();
+            tuning.Flush();
+            Assert.That(live, Is.Zero);
             Assert.That(store.Saves, Is.Zero);
+            Assert.That(store.Bodies["sample"], Is.EqualTo(body));
+        }
+
+        [Test]
+        public void DefaultStoreSavesMissingDocumentsButPreservesStoredEmptyStrings()
+        {
+            var experimentId = Guid.NewGuid().ToString("N");
+            var key = "YetiKit.Lab.Tuning." + experimentId;
+            try
+            {
+                var tuning = new Tuning(experimentId);
+                Register(tuning, "dial").Set(1f);
+                tuning.Flush();
+                Assert.That(Register(new Tuning(experimentId), "dial").Get(), Is.EqualTo(1f));
+
+                PlayerPrefs.SetString(key, "");
+                tuning = new Tuning(experimentId);
+                Register(tuning, "dial").Set(2f);
+                tuning.Flush();
+                Assert.That(PlayerPrefs.GetString(key, "missing"), Is.Empty);
+            }
+            finally
+            {
+                PlayerPrefs.DeleteKey(key);
+                PlayerPrefs.Save();
+            }
         }
 
         private static ITuningBinding Register(Tuning tuning, string id, string group = "")
