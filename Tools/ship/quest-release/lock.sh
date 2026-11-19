@@ -10,6 +10,9 @@
 
 qr_lock_dir() { printf '%s/run.lock\n' "$QR_LOGS"; }
 
+# Portable fractional epoch mtime; empty when missing.
+qr_lock_mtime() { perl -MTime::HiRes=stat -e '@s = stat $ARGV[0]; print "$s[9]\n" if @s' "$1"; }
+
 # The lock's PID and run folder into QR_LOCK_PID / QR_LOCK_RUN. Returns 0 while its owner or worker group lives,
 # 1 when there is no lock, 2 when it is stale. An unknown group status is treated as live.
 # A lock with no PID counts as alive for its first minute
@@ -18,6 +21,7 @@ qr_lock_read() {
   local d group status=0 workers="" metadata attempt; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
   case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
   QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
+  QR_LOCK_PREV_PID=""; QR_LOCK_PREV_INVOCATION=""; QR_LOCK_UNPUBLISHED_AT=""
   for attempt in 1 2; do
     status=0
     metadata="$(qr_lock_snapshot "$d")" || status=$?
@@ -32,6 +36,8 @@ qr_lock_read() {
     IFS= read -r group
     IFS= read -r QR_LOCK_RUN
     IFS= read -r workers || true
+    read -r QR_LOCK_PREV_PID QR_LOCK_PREV_INVOCATION || true
+    IFS= read -r QR_LOCK_UNPUBLISHED_AT || true
   } <<< "$metadata"
   QR_LOCK_RUN="${QR_LOCK_RUN:--}"
   [ "$workers" != busy ] || return 0
@@ -55,7 +61,8 @@ qr_lock_read() {
 # Pin the directory generation while sampling it; status 3 means the lock
 # changed or lost its PID during the snapshot. Never consume that sample.
 qr_lock_snapshot() {
-  local pid group invocation workers=""
+  local pid group invocation workers="" previous="" unpublished_at=""
+  local pointer="${1%/*}/current-invocation"
   cd "$1" 2>/dev/null || return 1
   pid="$(cat pid 2>/dev/null)"
   # Check the owner before sampling the step group: a live owner can still
@@ -67,7 +74,7 @@ qr_lock_snapshot() {
     # Older producers could unlink invocation before removing the directory.
     # A keyed producer publishes its pointer after pid. An older pointer isn't
     # evidence for this lock (a genuine legacy owner may reuse the same PID).
-    local pointer="${1%/*}/current-invocation" published_pid published_key
+    local published_pid published_key
     [ -f pid ] || return 3
     if [ "${1##*/}" = run.lock ] && [ -f "$pointer" ] && [ ! pid -nt "$pointer" ] &&
        read -r published_pid published_key < "$pointer" && [ "$published_pid" = "$pid" ] &&
@@ -76,8 +83,16 @@ qr_lock_snapshot() {
     fi
     [ -f pid ] || return 3
   fi
+  if [ "${QR_WAIT_SAMPLE:-}" = 1 ] && [ -z "$pid" ]; then
+    # Capture the preceding pointer inside the pending lock's generation check.
+    # A producer that publishes after we read pid needs a fresh sample instead.
+    previous="$(cat "$pointer" 2>/dev/null)" || previous=""
+    unpublished_at="$(qr_lock_mtime .)"
+    [ ! -f pid ] || return 3
+  fi
   printf '%s\n' "$pid" "$invocation" "$group" "$(cat run_dir 2>/dev/null)"
-  if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then printf 'busy\n'; fi
+  if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then workers=busy; fi
+  printf '%s\n' "$workers" "$previous" "$unpublished_at"
   [ "$1" -ef . ] || return 3
 }
 
