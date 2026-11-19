@@ -38,6 +38,7 @@ def generate(out, app_id, title):
     for name in ("AGENTS.md", ".checknorris.md", "README.md"):
         text = (TEMPLATE / name).read_text(encoding="utf-8")
         (out / name).write_text(text.replace("{{GAME_NAME}}", title).replace("{{GAME_ID}}", app_id), encoding="utf-8")
+    shutil.copyfile(TEMPLATE / "verify-packages.py", out / "verify-packages.py")
     for folder in ("docs", "routines", "Assets"):
         shutil.copytree(TEMPLATE / folder, out / folder)
     shutil.copyfile(TEMPLATE / "gitignore.txt", out / ".gitignore")
