@@ -126,7 +126,7 @@ qr_install_apk() {
 }
 
 qr_install_apk_locked() {
-  local apk="$1" force="$2" label="$3" flags="${4:-}" after dir out rc=0 f before_file installed_sha
+  local apk="$1" force="$2" label="$3" flags="${4:-}" after dir out failure rc=0 f before_file installed_sha
   local baseline='' recorded before pending="$QR_LOGS/latest-install.pending" was_pending=0
   # This attempt is the step's latest result even when the APK check stops it (any earlier success is stale).
   qr_set install "$label stopped before adb install (see release.log)"
@@ -167,9 +167,15 @@ qr_install_apk_locked() {
   out="$(qr_adb install -r $flags "$apk" 2>&1)" || rc=$?
   printf '%s\n' "$out" > "$QR_RUN_DIR/$label-adb.log"
   if [ "$rc" != 0 ] || ! printf '%s\n' "$out" | grep -q '^Success'; then
-    [ "$was_pending" = 1 ] || rmdir "$pending" || qr_log "$label: cannot clear latest-install guard"
-    qr_set install "$label FAILED: $(printf '%s\n' "$out" | tail -n1)"
-    qr_die "$label: adb install -r${flags:+ $flags} failed: $(printf '%s\n' "$out" | tail -n1)"
+    failure="$(printf '%s\n' "$out" | tail -n1)"
+    # Only a definitive Package Manager rejection can disarm a fresh guard.
+    # A transport error (or missing acknowledgement) can follow a committed install.
+    if [ "$was_pending" = 0 ] && printf '%s\n' "$failure" | grep -Eq \
+      '^(adb: failed to install .*: )?Failure \[INSTALL_(PARSE_)?FAILED_[A-Z0-9_]+(: .*)?\][[:space:]]*$'; then
+      rmdir "$pending" || qr_log "$label: cannot clear latest-install guard"
+    fi
+    qr_set install "$label FAILED: $failure"
+    qr_die "$label: adb install -r${flags:+ $flags} failed: $failure"
   fi
   qr_set install "$label: adb install ok ($apk), provenance publication not finished"
   # Record the installed APK's own commit, even if a later data check fails.

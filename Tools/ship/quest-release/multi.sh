@@ -87,31 +87,40 @@ qr_multi_steps() {
 # Older runs have only the combined view. An existing per-step file, even
 # empty, takes precedence: it may represent a newer attempt with no results.
 qr_multi_migrate() {
-  local step rows combined
-  combined="$(qr_get device_results '')"
+  local step rows combined path="$QR_RUN_DIR/summary/device_results"
+  # Missing is normal; a non-file isn't a readable legacy report.
+  if [ ! -f "$path" ] && { [ -e "$path" ] || [ -L "$path" ]; }; then return 1; fi
+  combined="$(qr_get device_results '')" || return 1
   [ -n "$combined" ] || return 0
   for step in install launch rollback; do
-    [ ! -f "$QR_RUN_DIR/summary/device_results_$step" ] || continue
-    rows="$(grep "^$step\[" <<< "$combined")" || continue
-    qr_set "device_results_$step" "$rows"
+    [ ! -f "${path}_$step" ] || continue
+    # A directory would make qr_set's rename succeed at the wrong path.
+    [ ! -e "${path}_$step" ] && [ ! -L "${path}_$step" ] || return 1
+    rows="$(awk -v prefix="$step[" 'index($0, prefix) == 1' <<< "$combined")" || return 1
+    [ -z "$rows" ] || qr_set "device_results_$step" "$rows" || return 1
   done
 }
 
 qr_multi_begin() {
   local cmd="$1" step
-  qr_multi_migrate
-  qr_set device_results ''
-  qr_set multi_command "$cmd"
-  qr_set multi_result 3
-  qr_set overall 'INFRA: device work did not complete'
+  # A retry can reuse successfully migrated step files, but the old combined
+  # report stays intact until all legacy rows have been read and published.
+  if ! qr_multi_migrate; then
+    qr_log 'error: cannot migrate legacy list device results'
+    return 1
+  fi
+  qr_set device_results '' || return 1
+  qr_set multi_command "$cmd" || return 1
+  qr_set multi_result 3 || return 1
+  qr_set overall 'INFRA: device work did not complete' || return 1
   # Replace only the step results owned by this invocation. In particular,
   # standalone launch must not overwrite the latest list install results.
   while IFS= read -r step; do
-    qr_set "device_results_$step" ''
+    qr_set "device_results_$step" '' || return 1
   done < <(qr_multi_steps "$cmd")
   # Root device fields belong to the old single-device attempt, not this list.
   for step in idle backup install data_hash permissions launch; do
-    qr_set "$step" "not run at root (list $cmd; see per-device results)"
+    qr_set "$step" "not run at root (list $cmd; see per-device results)" || return 1
   done
 }
 

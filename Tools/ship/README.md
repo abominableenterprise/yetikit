@@ -483,12 +483,17 @@ uppercase letters) use `%HH` escapes so case-only serials have separate paths.
 In a reused run, the summary keeps the latest list rows for each step. Its
 `overall` verdict and exit code describe only the current command. A cancelled
 list release reports devices that completed before cancellation and still fails.
+If legacy rows cannot be migrated, the command stops before device work and
+keeps the old combined rows for a retry.
 
-If adb succeeds but the runner cannot publish the latest-install record, the
-install reports a provenance failure, not an adb failure. Automatic release
-notes then use the last-eight-merges fallback rather than an older install.
-After fixing the log storage problem, a successful install or rollback restores
-the automatic baseline. Use `--notes` to supply explicit notes in the meantime.
+A definite install rejection preserves any known baseline. If adb disconnects
+before confirming the outcome, the install fails and the baseline is treated as
+unknown: the APK might already have changed. If adb succeeds but the runner
+cannot publish the latest-install record, the install reports a provenance
+failure, not an adb failure. In both ambiguous cases, automatic release notes
+use the last-eight-merges fallback rather than an older install. A successful
+install or rollback restores the automatic baseline. Use `--notes` to supply
+explicit notes in the meantime.
 
 ### Optional release signing
 
