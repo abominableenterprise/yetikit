@@ -213,12 +213,92 @@ namespace YetiKit.Interaction.Tests
             yield return new ExitPlayMode();
         }
 
-        void Build()
+        [UnityTest]
+        public IEnumerator CompoundPropIgnoresNeighboursWithEverySolidCollider()
+        {
+            yield return new EnterPlayMode();
+            Build(compound: true);
+            var solids = prop.GetComponentsInChildren<BoxCollider>();
+            var neighbour = Child("Neighbour");
+            neighbour.transform.position = Vector3.right * 0.1f;
+            var other = neighbour.AddComponent<BoxCollider>();
+            neighbour.AddComponent<Rigidbody>().useGravity = false;
+            neighbour.AddComponent<GrabbableProp>();
+            Physics.SyncTransforms();
+            Select(Controller(out _));
+            Assert.That(solids.Length, Is.EqualTo(2));
+            foreach (var solid in solids) Assert.That(Physics.GetIgnoreCollision(solid, other), Is.True);
+            prop.enabled = false;
+            foreach (var solid in solids) Assert.That(Physics.GetIgnoreCollision(solid, other), Is.False);
+            yield return new ExitPlayMode();
+        }
+
+        [UnityTest]
+        public IEnumerator HeldLayerRestoresMixedHierarchyAfterGraceAndDisable()
+        {
+            yield return new EnterPlayMode();
+            Build(compound: true);
+            var heldLayer = LayerMask.NameToLayer(HeldLayer.LayerName);
+            Assert.That(heldLayer, Is.GreaterThan(0));
+            var child = prop.transform.GetChild(0).gameObject;
+            var childLayer = LayerMask.NameToLayer("Ignore Raycast");
+            for (var pass = 0; pass < 2; pass++)
+            {
+                var hand = Controller(out _);
+                child.layer = childLayer;
+                Select(hand);
+                Assert.That(prop.Held, Is.True);
+                Assert.That(prop.gameObject.layer, Is.EqualTo(heldLayer));
+                Assert.That(child.layer, Is.EqualTo(heldLayer));
+                if (pass == 0)
+                {
+                    Exit(hand);
+                    ProcessLate();
+                    prop.Tick(Time.time + HeldLayer.Grace + 0.01f, 0f);
+                }
+                else prop.enabled = false;
+                Assert.That(prop.gameObject.layer, Is.Zero);
+                Assert.That(child.layer, Is.EqualTo(childLayer));
+            }
+            yield return new ExitPlayMode();
+        }
+
+        [UnityTest]
+        public IEnumerator ScaledGripAttachMatchesFittedPoseOnGrabAndRefit()
+        {
+            yield return new EnterPlayMode();
+            Build();
+            prop.transform.localScale = new Vector3(2f, 3f, 0.5f);
+            prop.transform.rotation = Quaternion.Euler(15f, 30f, 45f);
+            var hand = Controller(out _);
+            var visual = hand.gameObject.AddComponent<FittedGripVisual>();
+            Select(hand);
+            AssertFittedAttach();
+            visual.Offset *= 2f;
+            visual.Refit();
+            AssertFittedAttach();
+            yield return new ExitPlayMode();
+
+            void AssertFittedAttach()
+            {
+                var attach = hand.GetAttachTransform(grab);
+                var pose = visual.Held;
+                var offset = Quaternion.Inverse(prop.transform.rotation) * (grab.attachTransform.position - prop.transform.position);
+                Assert.That(Vector3.Distance(pose.position + pose.rotation * offset, attach.position), Is.LessThan(0.0001f));
+            }
+        }
+
+        void Build(bool compound = false)
         {
             scene = new GameObject("Synthetic interaction");
             manager = scene.AddComponent<XRInteractionManager>();
             var body = Child("Prop");
-            body.AddComponent<BoxCollider>();
+            if (compound)
+            {
+                Child("First solid", body.transform).AddComponent<BoxCollider>().size = Vector3.one * 0.05f;
+                Child("Second solid", body.transform).AddComponent<BoxCollider>().size = Vector3.one * 0.05f;
+            }
+            else body.AddComponent<BoxCollider>();
             body.AddComponent<Rigidbody>().useGravity = false;
             grab = body.AddComponent<PropGrabInteractable>();
             grab.interactionManager = manager;
@@ -253,6 +333,24 @@ namespace YetiKit.Interaction.Tests
             var child = new GameObject(name);
             child.transform.SetParent(parent ? parent : scene.transform, false);
             return child;
+        }
+
+        public sealed class FittedGripVisual : MonoBehaviour, IHeldVisual
+        {
+            public Pose Held;
+            public Vector3 Offset = new Vector3(0.1f, 0.2f, 0.05f);
+            public event System.Action GripChanged;
+            public void Refit() => GripChanged?.Invoke();
+            public bool TryGetGripFrame(out Transform model, out Vector3 knuckles)
+            {
+                model = transform;
+                knuckles = Vector3.zero;
+                return true;
+            }
+            public Pose FitGrip(PropGrabInteractable prop, GripSpec grip, Pose authoredPose) =>
+                new Pose(transform.position + Offset, Quaternion.Euler(10f, 20f, 35f));
+            public void Hold(PropGrabInteractable prop, GripSpec grip, Pose heldPose) => Held = heldPose;
+            public void Release(PropGrabInteractable prop) { }
         }
 
         sealed class PalmTracking : IHandTracking, IHandJointPoses

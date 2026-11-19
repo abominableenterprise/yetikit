@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using YetiKit.Hands;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
@@ -75,6 +76,8 @@ namespace YetiKit.Interaction
         Rigidbody body;
         Vector3 velocityBefore; // m/s: FixedUpdate's sample, valid only until the first contact (enter or stay)
         HeldLayer layer;
+        int heldLayer;
+        readonly Dictionary<GameObject, int> originalLayers = new Dictionary<GameObject, int>();
         HeldNeighbours neighbours;
         HeldPairs pairs;
         PropGrabInteractable grab;
@@ -117,10 +120,11 @@ namespace YetiKit.Interaction
             homePosition = transform.position;
             homeRotation = transform.rotation;
             nextCheck = Random.value * CheckInterval; // spread the checks over frames
-            var heldLayer = LayerMask.NameToLayer(HeldLayer.LayerName);
+            heldLayer = LayerMask.NameToLayer(HeldLayer.LayerName);
             layer = new HeldLayer(gameObject.layer, heldLayer >= 0 ? heldLayer : gameObject.layer);
-            neighbours = new HeldNeighbours(GetComponent<Collider>());
-            pairs = new HeldPairs(HeldPairs.SolidOf(body), () => Held, () => layer.Active(Time.time));
+            var solids = HeldPairs.SolidOf(body);
+            neighbours = new HeldNeighbours(body, solids);
+            pairs = new HeldPairs(solids, () => Held, () => layer.Active(Time.time));
             if (!grab)
             {
                 Debug.LogError("GrabbableProp requires PropGrabInteractable; replace the incompatible XRGrabInteractable.", this);
@@ -147,7 +151,7 @@ namespace YetiKit.Interaction
             hits.Reset();
             inFlight = false;
             layer.Release(float.NegativeInfinity);
-            SetLayer(layer.Layer(Time.time));
+            SetHeldLayer(false);
             if (!grab) return;
             grab.selectEntered.RemoveListener(OnGrabbed);
             grab.selectExited.RemoveListener(OnReleased);
@@ -162,7 +166,7 @@ namespace YetiKit.Interaction
             hits.Reset();
             inFlight = false;
             layer.Grab();
-            SetLayer(layer.Layer(Time.time));
+            SetHeldLayer(true);
             neighbours.Grab(body.worldCenterOfMass);
             pairs.Grab();
         }
@@ -186,10 +190,21 @@ namespace YetiKit.Interaction
             idle = 0f;
         }
 
-        void SetLayer(int l)
+        void SetHeldLayer(bool active)
         {
-            if (gameObject.layer == l) return;
-            foreach (var t in GetComponentsInChildren<Transform>(true)) t.gameObject.layer = l;
+            if (!active)
+            {
+                foreach (var entry in originalLayers)
+                    if (entry.Key) entry.Key.layer = entry.Value;
+                originalLayers.Clear();
+                return;
+            }
+            if (heldLayer < 0 || originalLayers.Count > 0) return;
+            foreach (var t in GetComponentsInChildren<Transform>(true))
+            {
+                originalLayers.Add(t.gameObject, t.gameObject.layer);
+                t.gameObject.layer = heldLayer;
+            }
         }
 
         void OnCollisionEnter(Collision c)
@@ -242,7 +257,7 @@ namespace YetiKit.Interaction
         /// <summary>Advance the respawn and collision policy with the supplied gameplay clock.</summary>
         public void Tick(float now, float dt)
         {
-            SetLayer(layer.Layer(now));
+            SetHeldLayer(layer.Active(now));
             neighbours.Tick(layer.Active(now));
             pairs.Tick();
             if (Held || Stuck || (!body.IsSleeping() && body.linearVelocity.sqrMagnitude > RestSpeed * RestSpeed)) idle = 0f;

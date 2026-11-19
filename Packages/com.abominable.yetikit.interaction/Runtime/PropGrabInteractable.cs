@@ -268,7 +268,8 @@ namespace YetiKit.Interaction
             held = GripAdjustmentMath.Apply(held, GripAdjustmentMath.WorldFrame(model), spec.center, GripAdjustment, right);
             // The prop's pose relative to the interactor's attach point, expressed as the prop's own attach point.
             var inv = Quaternion.Inverse(held.rotation);
-            gripAttach.localPosition = inv * (interactorAttach.position - held.position);
+            // Undo the scale XRI sees at grab/refit, after rotating the fitted offset into the current prop frame.
+            gripAttach.localPosition = transform.InverseTransformVector(transform.rotation * inv * (interactorAttach.position - held.position));
             gripAttach.localRotation = inv * interactorAttach.rotation;
             attachTransform = gripAttach;
             useDynamicAttach = false;

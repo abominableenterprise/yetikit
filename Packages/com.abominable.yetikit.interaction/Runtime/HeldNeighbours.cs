@@ -17,9 +17,10 @@ namespace YetiKit.Interaction
 
         static readonly Collider[] Hits = new Collider[MaxNeighbours * 2];
         readonly List<Collider> ignored = new List<Collider>(MaxNeighbours);
-        readonly Collider self;
+        readonly Collider[] solids;
+        readonly Rigidbody body;
 
-        public HeldNeighbours(Collider self) => this.self = self;
+        public HeldNeighbours(Rigidbody body, Collider[] solids) { this.body = body; this.solids = solids; }
 
         public int Count => ignored.Count;
         public IReadOnlyList<Collider> Ignored => ignored;
@@ -27,23 +28,23 @@ namespace YetiKit.Interaction
         /// <summary>The player grabbed the prop: ignore the other grabbable props within <see cref="Radius"/>.</summary>
         public void Grab(Vector3 centre)
         {
-            if (!self) return;
+            if (solids.Length == 0) return;
             var n = Physics.OverlapSphereNonAlloc(centre, Radius, Hits, Physics.AllLayers, QueryTriggerInteraction.Ignore);
             for (var i = 0; i < n && ignored.Count < MaxNeighbours; i++)
             {
                 var c = Hits[i];
-                if (!IsNeighbour(self, c) || ignored.Contains(c)) continue;
-                HeldCollisionIgnores.Acquire(self, c);
+                var other = c.attachedRigidbody;
+                if (!other || other == body || !other.GetComponent<GrabbableProp>() || ignored.Contains(c)) continue;
+                foreach (var solid in solids) HeldCollisionIgnores.Acquire(solid, c);
                 ignored.Add(c);
             }
         }
 
-        /// <summary>Another loose prop (a collider on a different body that carries a <see cref="GrabbableProp"/>)?</summary>
-        public static bool IsNeighbour(Collider self, Collider other)
+        bool Overlaps(Collider other)
         {
-            if (!other || other == self) return false;
-            var body = other.attachedRigidbody;
-            return body && body != self.attachedRigidbody && body.GetComponent<GrabbableProp>();
+            foreach (var solid in solids)
+                if (solid && other && solid.bounds.Intersects(other.bounds)) return true;
+            return false;
         }
 
         /// <summary>
@@ -56,8 +57,8 @@ namespace YetiKit.Interaction
             for (var i = ignored.Count - 1; i >= 0; i--)
             {
                 var c = ignored[i];
-                if (c && self && self.bounds.Intersects(c.bounds)) continue;
-                HeldCollisionIgnores.Release(self, c);
+                if (Overlaps(c)) continue;
+                foreach (var solid in solids) HeldCollisionIgnores.Release(solid, c);
                 ignored.RemoveAt(i);
             }
         }
@@ -65,7 +66,8 @@ namespace YetiKit.Interaction
         /// <summary>Restore every pair now (a respawn).</summary>
         public void Clear()
         {
-            foreach (var c in ignored) HeldCollisionIgnores.Release(self, c);
+            foreach (var c in ignored)
+            foreach (var solid in solids) HeldCollisionIgnores.Release(solid, c);
             ignored.Clear();
         }
     }
