@@ -46,6 +46,45 @@ check 'a same-line namespace and class is selected alongside smoke' \
   '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.InlineTests "* ]]'
 rm "$t/Props/InlineTests.cs"
 
+cat > "$t/Props/NestedNamespaceTests.cs" <<'CS'
+using NUnit.Framework;
+namespace Outer { namespace Inner { public class NestedTests {
+    [Test] public void Rule() {}
+    [Test, Category("Gfx")] public void Render() {}
+} [Explicit, Category("RenderTool")] public class CaptureTests { [Test] public void Capture() {} }
+} namespace Sibling.Deep { public class SiblingTests { [Test] public void Rule() {} }
+} public class OuterTests { [Test] public void Rule() {} }
+} namespace Other
+{ public class OtherTests { [Test] public void Rule() {} } }
+public class GlobalTests { [Test] public void Rule() {} }
+CS
+pr HEAD
+check 'inline namespace opens and closes qualify each pure fixture and its class-level exclusions' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;GlobalTests;Other.OtherTests;Outer.Inner.NestedTests;Outer.OuterTests;Outer.Sibling.Deep.SiblingTests "* ]]'
+check 'the inline nested fixture keeps its method-level Gfx tag under the same qualified name' \
+  '[ "$rc" = 0 ] && [ "$(filter)" = Outer.Inner.NestedTests ]'
+rm "$t/Props/NestedNamespaceTests.cs"
+
+cat > "$t/Props/FileScopedTests.cs" <<'CS'
+using NUnit.Framework;
+namespace FileScoped . Deep;
+public class FirstTests { private class Helper {} [Test] public void Rule() {} } public class SecondTests { [Test] public void Rule() {} }
+CS
+pr HEAD
+check 'file-scoped namespace survives nested class and same-line sibling closings' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;FileScoped.Deep.FirstTests;FileScoped.Deep.SecondTests "* ]]'
+rm "$t/Props/FileScopedTests.cs"
+
+cat > "$t/Props/UncertainNamespaceTests.cs" <<'CS'
+using NUnit.Framework;
+public class KnownTests { [Test] public void Rule() {} }
+namespace @Escaped { public class UncertainTests { [Test, Category("Gfx")] public void Render() {} } }
+CS
+pr HEAD
+check 'an unsupported namespace name forces full category passes even after finding a fixture' \
+  'full && [[ "$(gfx_run)" == *"-testCategory Gfx"* && "$(gfx_run)" != *-testFilter* ]] && grep -Fq "could not scan Assets/Tests/EditMode/Props/UncertainNamespaceTests.cs reliably" "$tmp/err"'
+rm "$t/Props/UncertainNamespaceTests.cs"
+
 printf 'using NUnit.Framework;\nnamespace ShipFixtures\n{\n [Explicit] [Category(\n   "RenderTool"\n )] public class MultilineCaptureTests { [Test] public void Capture() {} }\n}\n' > "$t/Props/MultilineCaptureTests.cs"
 pr HEAD
 check 'multiline RenderTool category after a complete attribute excludes the explicit fixture' \
