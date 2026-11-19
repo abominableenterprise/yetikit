@@ -105,6 +105,7 @@ qr_wait_result() {
 qr_wait() {
   local minutes="${1:-45}" poll="${QUEST_WAIT_POLL:-5}" grace="${QUEST_WAIT_GRACE:-15}" t0 now deadline
   local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict
+  local pointer_pid pointer_key superseded_pid="" superseded_key=""
   case "$minutes" in ''|*[!0-9]*) qr_wait_say "usage: wait [minutes]"; return 2 ;; esac
   minutes=$((10#$minutes))
   t0="$(qr_wait_now)"; deadline=$((t0 + minutes * 60)); last_line="$t0"
@@ -118,13 +119,19 @@ qr_wait() {
           # A short-lived invocation can finish before our first poll, without ever preparing a run folder.
           # Its published identity, not historical current.env, selects the required terminal result.
           if [ "$st" != 0 ] && [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$QR_LOGS/current-invocation" ]; then
-            read -r wpid key < "$QR_LOGS/current-invocation"
-            case "$wpid" in ''|*[!0-9]*) qr_wait_say "invalid invocation identity"; return 1 ;; esac
-            seen=1; run=""; start="$(qr_wait_mtime "$QR_LOGS/current-invocation")"
-            # The pointer may have been published after the no-lock sample.
-            # Reconcile liveness; the identity check below keeps this waiter
-            # pinned even if the new sample sees a different invocation.
-            st=0; qr_lock_read || st=$?
+            read -r pointer_pid pointer_key < "$QR_LOGS/current-invocation"
+            case "$pointer_pid" in ''|*[!0-9]*) qr_wait_say "invalid invocation identity"; return 1 ;; esac
+            if [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
+              start="$(qr_wait_mtime "$QR_LOGS/current-invocation")"
+              # The lock may have appeared after the no-lock sample. A live
+              # mismatch (including an unpublished owner) supersedes the pointer.
+              st=0; qr_lock_read || st=$?
+              if [ "$st" = 0 ] && { [ "$QR_LOCK_PID" != "$pointer_pid" ] || [ "$QR_LOCK_INVOCATION" != "$pointer_key" ]; }; then
+                superseded_pid="$pointer_pid"; superseded_key="$pointer_key"
+              else
+                wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
+              fi
+            fi
           fi ;;
         *) wpid="$QR_LOCK_PID"; key="$QR_LOCK_INVOCATION"; seen=1; run=""
            if [ -z "$key" ]; then
@@ -143,7 +150,7 @@ qr_wait() {
       run="$QR_LOCK_RUN"
     fi
     now="$(qr_wait_now)"
-    if [ "$st" != 0 ]; then
+    if [ "$st" != 0 ] && { [ "$seen" = 1 ] || [ -z "$superseded_pid" ]; }; then
       # No lock at all: the run is over, or (just after a nohup start) not locked yet; after a short grace the run's
       # start is when prepare wrote current.env.
       if [ "$seen" = 0 ] && [ $((now - t0)) -ge "$grace" ]; then

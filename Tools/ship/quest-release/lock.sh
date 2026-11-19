@@ -52,17 +52,31 @@ qr_lock_read() {
   return 2
 }
 
-# Pin the directory generation while sampling it; status 3 means it vanished
-# or was replaced during the snapshot. Never consume metadata from that read.
+# Pin the directory generation while sampling it; status 3 means the lock
+# changed or lost its PID during the snapshot. Never consume that sample.
 qr_lock_snapshot() {
-  local pid group workers=""
+  local pid group invocation workers=""
   cd "$1" 2>/dev/null || return 1
   pid="$(cat pid 2>/dev/null)"
   # Check the owner before sampling the step group: a live owner can still
   # publish a new step. Then check the step before walking its worker slots.
   if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then workers=busy; fi
   group="$(cat group 2>/dev/null)"
-  printf '%s\n' "$pid" "$(cat invocation 2>/dev/null)" "$group" "$(cat run_dir 2>/dev/null)"
+  invocation="$(cat invocation 2>/dev/null)"
+  if [ -z "$invocation" ] && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    # Older producers could unlink invocation before removing the directory.
+    # A keyed producer publishes its pointer after pid. An older pointer isn't
+    # evidence for this lock (a genuine legacy owner may reuse the same PID).
+    local pointer="${1%/*}/current-invocation" published_pid published_key
+    [ -f pid ] || return 3
+    if [ "${1##*/}" = run.lock ] && [ -f "$pointer" ] && [ ! pid -nt "$pointer" ] &&
+       read -r published_pid published_key < "$pointer" && [ "$published_pid" = "$pid" ] &&
+       [[ "$published_key" =~ ^run\.[a-zA-Z0-9]{10}$ ]]; then
+      invocation="$published_key"
+    fi
+    [ -f pid ] || return 3
+  fi
+  printf '%s\n' "$pid" "$invocation" "$group" "$(cat run_dir 2>/dev/null)"
   if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then printf 'busy\n'; fi
   [ "$1" -ef . ] || return 3
 }
