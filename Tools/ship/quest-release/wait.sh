@@ -115,11 +115,30 @@ qr_wait_result() {
 }
 
 # Open before sampling so a directory that vanishes during the read cannot
-# be confused with a replacement that reuses its inode.
+# be confused with a replacement that reuses its inode. Retry once if a
+# pending snapshot came from a directory other than the one we opened.
 qr_wait_read_lock() {
-  sample_open=0
-  if { exec 18< "$(qr_lock_dir)"; } 2>/dev/null; then sample_open=1; fi
-  qr_lock_read
+  local attempt status stamp
+  for attempt in 1 2; do
+    exec 18<&-
+    { exec 18< "$(qr_lock_dir)"; } 2>/dev/null || true
+    status=0; qr_lock_read || status=$?
+    sample_pinned=0
+    [ -z "$wpid" ] && [ -n "$QR_LOCK_UNPUBLISHED_ID" ] &&
+      { [ "$status" = 0 ] || [ "$pending" = 1 ]; } || break
+    stamp="$(qr_lock_stamp 2>/dev/null <&18)" || stamp=""
+    if [ "${stamp#* }" = "$QR_LOCK_UNPUBLISHED_ID" ]; then
+      sample_pinned=1
+      break
+    fi
+    # Suppress the old pointer even if the retry sees no lock, but no
+    # legacy result can be attributed to this unpinned generation.
+    pending=1
+    superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
+    legacy_start=""; legacy_lock=""
+    exec 19<&-
+  done
+  return "$status"
 }
 
 qr_wait() (
@@ -127,7 +146,7 @@ qr_wait() (
   local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict
   local pointer="$QR_LOGS/current-invocation" pointer_pid pointer_key sampled_pid sampled_key
   local pending=0 superseded_pid="" superseded_key="" retry_pointer legacy_start="" legacy_lock=""
-  local sample_open=0 stamp QR_WAIT_SAMPLE=1
+  local sample_pinned=0 QR_WAIT_SAMPLE=1
   case "$minutes" in ''|*[!0-9]*) qr_wait_say "usage: wait [minutes]"; return 2 ;; esac
   minutes=$((10#$minutes))
   t0="$(qr_wait_now)"; deadline=$((t0 + minutes * 60)); last_line="$t0"
@@ -155,7 +174,9 @@ qr_wait() (
                 st=0; qr_wait_read_lock || st=$?
               fi
               if [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
-                wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
+                if [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
+                  wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
+                fi
               fi
             else
               retry_pointer=1
@@ -175,17 +196,14 @@ qr_wait() (
     elif [ -z "$wpid" ] && { [ "$st" = 0 ] || { [ "$pending" = 1 ] && [ -n "$QR_LOCK_UNPUBLISHED_ID" ]; }; }; then
       pending=1
       superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
-      # Directory mtime changes when legacy teardown unlinks the PID. Keep
-      # the first timestamp only while sampling the same pinned directory.
-      # Holding it open prevents inode reuse from disguising a replacement.
-      if [ -z "$legacy_lock" ] || [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ]; then
-        legacy_start="$QR_LOCK_UNPUBLISHED_AT"; legacy_lock=""
-        if [ "$sample_open" = 1 ]; then
-          stamp="$(qr_lock_stamp <&18)"
-          if [ -n "$QR_LOCK_UNPUBLISHED_ID" ] && [ "${stamp#* }" = "$QR_LOCK_UNPUBLISHED_ID" ]; then
-            exec 19<&18
-            legacy_lock="$QR_LOCK_UNPUBLISHED_ID"
-          fi
+      # Teardown unlinks the PID and advances mtime. Keep the startup cutoff
+      # for this generation until a different lock is observed.
+      if [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ]; then
+        legacy_start=""; legacy_lock=""
+        exec 19<&-
+        if [ "$sample_pinned" = 1 ]; then
+          exec 19<&18
+          legacy_lock="$QR_LOCK_UNPUBLISHED_ID"; legacy_start="$QR_LOCK_UNPUBLISHED_AT"
         fi
       fi
       # Older keyed producers removed their lock files in place. A retained
