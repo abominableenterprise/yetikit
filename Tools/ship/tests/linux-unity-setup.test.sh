@@ -52,7 +52,7 @@ if [ "\${FAKE_CUT:-0}" = 1 ]; then tar -c -C "$img" opt/unity/Editor/Unity; exit
 if [ "\$2" = fixture:wrong ]; then exec tar -c -C "$wrong_img" opt/unity; fi
 tar -c -C "$img" opt/unity
 EOF
-printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/dpkg"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/ldd"
+printf '#!/bin/sh\necho "install ok installed"\n' > "$tmp/bin/dpkg-query"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/ldd"
 # Never download or start a detached idle watcher, even if setup regresses.
 printf '#!/bin/sh\necho curl >> "%s/download-calls"\nexit 99\n' "$tmp" > "$tmp/bin/curl"
 printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/nohup"
@@ -340,7 +340,7 @@ with open(os.environ['SUDO_CALLS'], 'a') as log:
     print(' '.join(args), file=log)
 os.execvp(sys.argv[1], sys.argv[1:])
 EOF
-printf '#!/bin/sh\n[ "$2" != xvfb ]\n' > "$tmp/bin/dpkg"
+printf '#!/bin/sh\n[ "$3" != xvfb ] && echo "install ok installed"\n' > "$tmp/bin/dpkg-query"
 cat > "$tmp/bin/apt-get" <<'EOF'
 #!/bin/bash
 case "${INSTALL_MODE:-}:$1" in

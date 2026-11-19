@@ -48,7 +48,8 @@ case "\$1" in
   *) exit 1 ;;
 esac
 EOF
-for command in dpkg ldd nohup; do
+printf '#!/bin/sh\necho "install ok installed"\n' > "$tmp/bin/dpkg-query"
+for command in ldd nohup; do
   printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$command"
 done
 

@@ -122,9 +122,11 @@ while True:
         assert retry.returncode and b'exists but is incomplete' in retry.stderr
 
 
-def terminal_case(root, env):
+def terminal_case(root, env, interrupt_handler=False):
     script(root / 'sudo', '#!/bin/sh\nexec "$@"\n')
-    script(root / 'dpkg', '#!/bin/sh\nexit 1\n')
+    # dpkg -s returns zero even when a known package is not configured.
+    script(root / 'dpkg', '#!/bin/sh\necho "Status: install ok unpacked"\n')
+    script(root / 'dpkg-query', '#!/bin/sh\necho "install ok unpacked"\n')
     script(root / 'apt-get', f'''#!{sys.executable}
 import os, signal, sys, time
 from pathlib import Path
@@ -132,7 +134,13 @@ if 'update' in sys.argv:
     sys.exit(0)
 signal.signal(signal.SIGINT, signal.SIG_IGN)
 with open('/dev/tty') as tty:
-    assert os.tcgetpgrp(tty.fileno()) == os.getpgrp()
+    # Either the original worker or its supervisor holds terminal control.
+    with open(f'/proc/{{os.getppid()}}/stat') as parent:
+        group = int(parent.read().rsplit(') ', 1)[1].split()[2])
+    assert os.tcgetpgrp(tty.fileno()) in (os.getpgrp(), group)
+# Package commands can install their own SIGINT handler, overriding inheritance.
+if {interrupt_handler!r}:
+    signal.signal(signal.SIGINT, lambda *_: sys.exit(97))
 Path('ready').touch()
 while not Path('release').exists():
     time.sleep(0.02)
@@ -181,7 +189,11 @@ def main():
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
         raise OSError(ctypes.get_errno(), 'PR_SET_CHILD_SUBREAPER')
-    cases = {'move': move_case, 'terminal': terminal_case}
+    cases = {
+        'move': move_case,
+        'terminal': terminal_case,
+        'terminal-handler': lambda root, env: terminal_case(root, env, interrupt_handler=True),
+    }
     failed = False
     for name in sys.argv[1:] or cases:
         if name == 'move' and os.geteuid() != 0:

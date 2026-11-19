@@ -47,7 +47,8 @@ EOF
 chmod +x "$root/Editor/Unity" "$lcdir/Unity.Licensing.Client"
 : > "$root/.install-complete"   # a finished install, so `all`'s setup trusts it (#145)
 printf '#!/usr/bin/env bash\n[ "$1" = -a ] && shift\n[ "$1" = -s ] && shift 2\nexec "$@"\n' > "$tmp/bin/xvfb-run"
-for c in crane dpkg ldd nohup; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$c"; done
+for c in crane ldd nohup; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$c"; done
+printf '#!/bin/sh\necho "install ok installed"\n' > "$tmp/bin/dpkg-query"
 chmod +x "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH" PROJECT="$proj" UNITY_ROOT="$root" ULF="$tmp/ulf/Unity_lic.ulf" OUT_DIR="$tmp/out" \
   SHM_DIR="$tmp/shm" TASK_CACHE=no-task-cache BIN_DIR="$tmp/bin"

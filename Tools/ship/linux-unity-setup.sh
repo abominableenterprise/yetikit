@@ -108,7 +108,12 @@ install_libs() {
   # libGLU and xauth are dlopen'ed / used by xvfb-run, so ldd alone does not list them.
   local pkgs=(libgtk-3-0 libglu1-mesa libnss3 libasound2 libgbm1 libxss1 libxtst6 xvfb xauth libcap2 ca-certificates)
   local missing=()
-  for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
+  local p status
+  for p in "${pkgs[@]}"; do
+    # dpkg -s can succeed for packages left unpacked or half-configured.
+    status="$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null)" || status=''
+    [[ "$status" = *' ok installed' ]] || missing+=("$p")
+  done
   if [ ${#missing[@]} -gt 0 ]; then
     log "apt-get install ${missing[*]}"
     supervise --setup-packages setup_write env DEBIAN_FRONTEND=noninteractive apt-get update -qq

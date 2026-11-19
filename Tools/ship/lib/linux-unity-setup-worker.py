@@ -39,9 +39,6 @@ def run(control, protect_int, command):
         if not cancelled or (cancelled == 130 and signum != signal.SIGINT):
             cancelled = 128 + signum
 
-    def ignore_interrupt():
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, remember)
 
@@ -61,7 +58,14 @@ def run(control, protect_int, command):
         status = intent()
         if status:
             return status
-        worker = subprocess.Popen(command, preexec_fn=ignore_interrupt if protect_int else None)
+        # Keep the supervisor in the foreground to receive the terminal's
+        # SIGINT. Noninteractive apt must not receive it, even if apt installs
+        # its own handler or passes it on to dpkg.
+        worker = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL if protect_int else None,
+            preexec_fn=os.setpgrp if protect_int else None,
+        )
         while True:
             status = intent()
             if status and not (protect_int and status == 130):
