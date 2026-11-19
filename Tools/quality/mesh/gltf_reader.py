@@ -49,29 +49,45 @@ def load_meshes(path, *, inputs=None):
     binary = None
     if path.suffix.lower() == ".glb":
         magic, version, size = struct.unpack_from("<4sII", blob)
+        error = None
         if magic != b"glTF" or version != 2 or size != len(blob):
-            raise ValueError("invalid GLB header")
-        text, offset, chunk = None, 12, 0
-        while offset < size:
-            if size - offset < 8:
-                raise ValueError("truncated GLB chunk header")
+            error = "invalid GLB header"
+        # Retain the first validation error, but walk chunk boundaries within
+        # the actual file so malformed containers cannot hide input paths.
+        text, offset, chunk, json_spans = None, 12, 0, []
+        while offset < len(blob):
+            if len(blob) - offset < 8:
+                error = error or "truncated GLB chunk header"
+                break
             length, kind = struct.unpack_from("<II", blob, offset)
             offset += 8
-            if offset + length > size or length % 4:
-                raise ValueError("invalid GLB chunk")
+            end = offset + length
+            if kind == JSON_CHUNK and inputs is not None:
+                json_spans.append((offset, end))
+            if end > len(blob) or length % 4:
+                error = error or "invalid GLB chunk"
             if chunk == 0 and kind != JSON_CHUNK:
-                raise ValueError("GLB JSON chunk must be first")
+                error = error or "GLB JSON chunk must be first"
             if kind == JSON_CHUNK:
                 if chunk != 0:
-                    raise ValueError("duplicate GLB JSON chunk")
-                text = blob[offset:offset + length]
+                    error = error or "duplicate GLB JSON chunk"
+                elif not error:
+                    text = blob[offset:end]
             elif kind == BIN_CHUNK:
                 if chunk != 1:
-                    raise ValueError("GLB BIN chunk must occur at most once, immediately after JSON")
-                binary = blob[offset:offset + length]
+                    error = error or "GLB BIN chunk must occur at most once, immediately after JSON"
+                elif not error:
+                    binary = blob[offset:end]
             # glTF requires clients to ignore unknown chunk types.
-            offset += length
+            offset = end
             chunk += 1
+        if error:
+            for start, end in json_spans:
+                try:
+                    _protect_buffer_paths(json.loads(blob[start:end]), path.parent, inputs)
+                except (ValueError, RecursionError):
+                    continue  # Unreadable JSON must not hide paths in another chunk.
+            raise ValueError(error)
         if text is None:
             raise ValueError("missing GLB JSON chunk")
         doc = json.loads(text)

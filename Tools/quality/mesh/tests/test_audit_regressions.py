@@ -177,6 +177,47 @@ class AuditRegressionTest(unittest.TestCase):
                 self.assertIn("aliases an input", errors.getvalue())
                 self.assertEqual(buffer.read_bytes(), binary)
 
+    def test_report_protects_external_buffers_in_malformed_glbs(self):
+        text, binary = cube_parts()
+        doc = json.loads(text)
+        doc["buffers"][0]["uri"] = "cube%2Ebin"
+        external = json.dumps(doc).encode()
+        external += b" " * (-len(external) % 4)
+        valid = container((JSON, external))
+        buffer = self.asset.with_suffix(".bin")
+        self.asset.write_bytes(valid)
+        buffer.write_bytes(binary)
+        self.assertEqual(self.audit(self.asset)["status"], "PASS")
+        for label, malformed in {
+            "wrong magic": b"BAD!" + valid[4:],
+            "wrong version": valid[:4] + struct.pack("<I", 1) + valid[8:],
+            "wrong size": valid + b"extra",
+            "duplicate JSON after reference": container((JSON, external), (JSON, text)),
+            "duplicate JSON with reference": container((JSON, text), (JSON, external)),
+            "unreadable JSON before reference": container((JSON, b"nope"), (JSON, external)),
+            "misordered JSON": container((BIN, binary), (JSON, external)),
+            "misaligned JSON": container((JSON, external + b" ")),
+            "truncated JSON padding": container((JSON, external + b"    "))[:-1],
+            "misaligned trailing chunk": container((JSON, external), (BIN, b"x")),
+            "truncated trailing chunk header": (valid[:8] + struct.pack("<I", len(valid) + 4)
+                                               + valid[12:] + b"test"),
+            "truncated trailing chunk payload": container((JSON, external), (BIN, b"1234"))[:-1],
+        }.items():
+            with self.subTest(label=label):
+                self.asset.write_bytes(malformed)
+                buffer.write_bytes(binary)
+                report = self.root / "out.json"
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as errors:
+                    self.assertEqual(main(["--json", str(report), str(self.asset)]), 1)
+                    row, = json.loads(report.read_text())["files"]
+                    self.assertEqual(row["status"], "FAIL")
+                    self.assertIn("GLB", row["message"])
+                    with self.assertRaises(SystemExit) as exit_code:
+                        main(["--json", str(buffer), str(self.asset)])
+                self.assertEqual(exit_code.exception.code, 2)
+                self.assertIn("aliases an input", errors.getvalue())
+                self.assertEqual(buffer.read_bytes(), binary)
+
     def test_looping_buffer_and_asset_are_reported_without_aborting_batch(self):
         text, binary = cube_parts()
         split = self.write_split_cube(json.loads(text), binary, uri="loop")
