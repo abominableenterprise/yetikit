@@ -41,12 +41,24 @@ class NestedShellTest(unittest.TestCase):
         tris[4:] = [t[::-1] for t in tris[4:]]
         self.assertEqual(measure(verts, tris)["inside_out"], 12)
 
+    def test_intersecting_shell_is_not_a_cavity(self):
+        # The cube crosses the tetrahedron's sloped face, although its first
+        # vertex is inside and its bounds are strictly nested.
+        verts = [(0, 0, 0), (4, 0, 0), (0, 4, 0), (0, 0, 4)]
+        tris = [(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)]
+        for center in ((1.3, 1.3, 1.3), (1, 1, 1.25)):
+            with self.subTest(center=center):
+                v, t = list(verts), list(tris)
+                cube(v, t, .25, False, center=center)
+                self.assertEqual(measure(v, t)["inside_out"], 0)
+
     @unittest.skipUnless(BLENDER, "no Blender (set BLENDER=path/to/blender)")
     def test_repair_preserves_correct_cavity_and_reverses_wrong_one(self):
         script = """
 import sys, bmesh
 sys.path.insert(0, sys.argv[-1])
 from watertight import pieces, signed_volume, wind_outward
+from mathutils import Matrix
 for inward in (True, False):
     bm = bmesh.new()
     for size in (2, 1, .5):
@@ -58,6 +70,14 @@ for inward in (True, False):
     assert [signed_volume(s) > 0 for s in shells] == [True, False, True]
     assert wind_outward(bm) == 0
     bm.free()
+bm = bmesh.new()
+verts = [bm.verts.new(v) for v in ((0, 0, 0), (4, 0, 0), (0, 4, 0), (0, 0, 4))]
+for face in ((0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)):
+    bm.faces.new([verts[i] for i in face])
+bmesh.ops.create_cube(bm, size=.5, matrix=Matrix.Translation((1.3, 1.3, 1.3)))
+assert wind_outward(bm) == 0
+assert all(signed_volume(s) > 0 for s in pieces(bm))
+bm.free()
 print('RESULT OK')
 """
         result, line = run_blender(script)

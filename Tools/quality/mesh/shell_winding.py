@@ -1,6 +1,8 @@
 """Winding of closed, consistently oriented, non-intersecting triangle shells."""
 import numpy as np
 
+from shell_intersection import surfaces_touch
+
 
 class Shell:
     def __init__(self, triangles):
@@ -24,7 +26,12 @@ class Shell:
                        + np.einsum("ij,ij->i", c, a))
         # The sum of the half-angles is +/- 2*pi inside and zero outside;
         # ignore its sign so an inverted container still contributes to depth.
-        return abs(np.arctan2(numerator, denominator).sum()) > np.pi
+        if abs(np.arctan2(numerator, denominator).sum()) <= np.pi:
+            return False
+        # Strictly nested bounds and an interior sample do not rule out an
+        # intersection (e.g. a part protruding through a sloped surface).
+        tolerance = 32 * np.finfo(float).eps * np.max(self.hi - self.lo)
+        return not surfaces_touch(self.points, other.points, tolerance)
 
 
 def wrong_winding(shells):
