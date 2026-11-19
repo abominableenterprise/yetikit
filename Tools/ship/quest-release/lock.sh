@@ -24,7 +24,22 @@ qr_lock_read() {
   QR_LOCK_PREV_PID=""; QR_LOCK_PREV_INVOCATION=""; QR_LOCK_UNPUBLISHED_AT=""; QR_LOCK_UNPUBLISHED_ID=""
   for attempt in 1 2; do
     status=0
-    metadata="$(qr_lock_snapshot "$d")" || status=$?
+    if [ "${QR_WAIT_SAMPLE:-}" = 1 ]; then
+      # Pin the working directory before opening the descriptor. The snapshot
+      # inherits that same directory even if the lock path is replaced.
+      local saved_pwd="$PWD" saved_oldpwd="${OLDPWD-}"
+      exec 18<&-
+      cd "$d" 2>/dev/null || return 1
+      if { exec 18< .; } 2>/dev/null; then
+        metadata="$(qr_lock_snapshot "$d" pinned)" || status=$?
+      else
+        status=1
+      fi
+      cd "$saved_pwd" || return 1
+      OLDPWD="$saved_oldpwd"
+    else
+      metadata="$(qr_lock_snapshot "$d")" || status=$?
+    fi
     # A generation removed during the read may have lost some of its files.
     # Retry it instead of interpreting a missing key as a legacy lock.
     [ "$status" = 3 ] || break
@@ -68,7 +83,11 @@ qr_lock_stamp() {
 qr_lock_snapshot() {
   local pid group invocation workers="" previous="" unpublished_at=""
   local pointer="${1%/*}/current-invocation"
-  cd "$1" 2>/dev/null || return 1
+  if [ "${2:-}" = pinned ]; then
+    [ "$1" -ef . ] || return 3
+  else
+    cd "$1" 2>/dev/null || return 1
+  fi
   pid="$(cat pid 2>/dev/null)"
   # Check the owner before sampling the step group: a live owner can still
   # publish a new step. Then check the step before walking its worker slots.

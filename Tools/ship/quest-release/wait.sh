@@ -114,26 +114,18 @@ qr_wait_result() {
   if [ "$header" != "$record" ]; then printf '%s' "${record#*"$marker"}"; fi
 }
 
-# Open before sampling so a directory that vanishes during the read cannot
-# be confused with a replacement that reuses its inode.
-qr_wait_read_lock() {
-  sample_open=0
-  if { exec 18< "$(qr_lock_dir)"; } 2>/dev/null; then sample_open=1; fi
-  qr_lock_read
-}
-
 qr_wait() (
   local minutes="${1:-45}" poll="${QUEST_WAIT_POLL:-5}" grace="${QUEST_WAIT_GRACE:-15}" t0 now deadline
   local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict
   local pointer="$QR_LOGS/current-invocation" pointer_pid pointer_key sampled_pid sampled_key
   local pending=0 superseded_pid="" superseded_key="" retry_pointer legacy_start="" legacy_lock=""
-  local sample_open=0 stamp QR_WAIT_SAMPLE=1
+  local QR_WAIT_SAMPLE=1
   case "$minutes" in ''|*[!0-9]*) qr_wait_say "usage: wait [minutes]"; return 2 ;; esac
   minutes=$((10#$minutes))
   t0="$(qr_wait_now)"; deadline=$((t0 + minutes * 60)); last_line="$t0"
   while :; do
     retry_pointer=0; res=""
-    st=0; qr_wait_read_lock || st=$?
+    st=0; qr_lock_read || st=$?
     if [ -z "$wpid" ] && [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
       if [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$pointer" ]; then
         # A run can finish between samples, without ever preparing a folder. Use its
@@ -144,7 +136,7 @@ qr_wait() (
           qr_wait_say "invalid invocation identity"; return 1
         elif [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
           sampled_pid="$pointer_pid"; sampled_key="$pointer_key"
-          st=0; qr_wait_read_lock || st=$?
+          st=0; qr_lock_read || st=$?
           if [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
             # A successor may have started or finished during reconciliation.
             # Recheck a changed pointer's lock, but keep the final poll bounded.
@@ -152,7 +144,7 @@ qr_wait() (
             if read -r pointer_pid pointer_key 2>/dev/null < "$pointer" && [[ "$pointer_pid" =~ ^[0-9]+$ ]] &&
                { [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; }; then
               if [ "$pointer_pid" != "$sampled_pid" ] || [ "$pointer_key" != "$sampled_key" ]; then
-                st=0; qr_wait_read_lock || st=$?
+                st=0; qr_lock_read || st=$?
               fi
               if [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
                 wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
@@ -175,17 +167,14 @@ qr_wait() (
     elif [ -z "$wpid" ] && { [ "$st" = 0 ] || { [ "$pending" = 1 ] && [ -n "$QR_LOCK_UNPUBLISHED_ID" ]; }; }; then
       pending=1
       superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
-      # Directory mtime changes when legacy teardown unlinks the PID. Keep
-      # the first timestamp only while sampling the same pinned directory.
-      # Holding it open prevents inode reuse from disguising a replacement.
-      if [ -z "$legacy_lock" ] || [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ]; then
-        legacy_start="$QR_LOCK_UNPUBLISHED_AT"; legacy_lock=""
-        if [ "$sample_open" = 1 ]; then
-          stamp="$(qr_lock_stamp <&18)"
-          if [ -n "$QR_LOCK_UNPUBLISHED_ID" ] && [ "${stamp#* }" = "$QR_LOCK_UNPUBLISHED_ID" ]; then
-            exec 19<&18
-            legacy_lock="$QR_LOCK_UNPUBLISHED_ID"
-          fi
+      # Teardown unlinks the PID and advances mtime. Keep the startup cutoff
+      # for this generation until a different lock is observed.
+      if [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ]; then
+        legacy_start=""; legacy_lock=""
+        exec 19<&-
+        if [ -n "$QR_LOCK_UNPUBLISHED_ID" ]; then
+          exec 19<&18
+          legacy_lock="$QR_LOCK_UNPUBLISHED_ID"; legacy_start="$QR_LOCK_UNPUBLISHED_AT"
         fi
       fi
       # Older keyed producers removed their lock files in place. A retained
