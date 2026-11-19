@@ -116,18 +116,22 @@ namespace Game.Dev
             // Crossing the UI boundary while still pinching must not turn a press into a room grab.
             handCapture = nearCard || (handCapture && pointer.Grab.Selecting);
             pointer.FarInteraction.Hover(this, pointer.HandTracked && handCapture);
-            if (nearCard && pointer.TryIndexTip(out var tip))
+            if (visible && pointer.TryIndexTip(out var tip) && !HandTeleport.Holding(pointer))
             {
-                var distance = HandUiGuard.Distance(controls.Card, tip);
-                if (distance > PokeDepth + HandPoke.ExitMargin) pokeArmed = true;
-                if (distance <= PokeDepth)
+                var card = controls.Card;
+                // The canvas faces the user along -forward. Only withdrawal on that side rearms,
+                // even when the fingertip leaves the guard's unsigned reach.
+                var frontDepth = Vector3.Dot(tip - card.position, -card.forward);
+                if (frontDepth > PokeDepth + HandPoke.ExitMargin) pokeArmed = true;
+                else if (nearCard && HandUiGuard.Distance(card, tip) <= PokeDepth)
                 {
                     hover = ButtonAt(tip);
                     if (pokeArmed) Activate(hover);
                     pokeArmed = false;
                 }
+                else if (frontDepth <= 0f) pokeArmed = false; // A fast poke can skip the contact band.
             }
-            else pokeArmed = visible && pointer.TryIndexTip(out _) && !HandTeleport.Holding(pointer);
+            else pokeArmed = false;
             Highlight(hover);
         }
 
