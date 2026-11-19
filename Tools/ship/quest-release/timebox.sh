@@ -58,14 +58,15 @@ qr_timebox_drain() {
 }
 
 qr_timebox_supervise() {
-  local secs="$1" grace="$2" group timer='' supervisor slot rc=0 timed_out=0 cancelled=0
+  local secs="$1" grace="$2" group timer='' supervisor slot device_slot rc=0 timed_out=0 cancelled=0
   shift 2
   # Latch signals during launch and registration. In particular, a release
   # cancel must not lose the new group between fork and the $! assignment.
   trap 'timed_out=1' ALRM
   trap 'cancelled=1' HUP INT TERM
   slot="$(qr_worker_slot "${QR_TIMEBOX_WORKERS:-}")" || exit 1
-  if [ -n "$slot" ] || [ -n "$secs" ]; then
+  device_slot="$(qr_worker_slot "${QR_DEVICE_WORKER_ROOT:-}")" || exit 1
+  if [ -n "$slot$device_slot$secs" ]; then
     # $$ is the release owner in subshells (and Bash 3.2 has no BASHPID).
     supervisor="$(exec sh -c 'printf "%s\n" "$PPID"')" || exit 1
   else supervisor=""; fi
@@ -73,7 +74,16 @@ qr_timebox_supervise() {
   (
     set +m
     unset QR_TIMEBOX_WORKERS # Nested timeboxes use their own registered parent.
+    # Publish in both locks before running. Nest each registry under its own
+    # published group so either tree can account for isolated descendants.
+    qr_worker_await "$device_slot" "$supervisor" || exit 1
+    QR_DEVICE_WORKER_ROOT="$QR_WORKER_ROOT"
     qr_worker_await "$slot" "$supervisor" || exit 1
+    # A supervisor can survive the wrapper that launched it. A late
+    # publication after wrapper death must not authorize a device command.
+    if [ -n "$device_slot" ]; then
+      qr_lock_process_busy "$QR_DEVICE_SUPERVISOR" || exit 1
+    fi
     case "$(type -t -- "$1")" in
       function|builtin) "$@" ;;
       *) exec "$@" ;;
@@ -81,7 +91,8 @@ qr_timebox_supervise() {
   ) <&0 &
   group=$!
   set +m
-  if [ "$timed_out$cancelled" = 00 ] && ! qr_worker_publish "$slot" "$group"; then
+  if [ "$timed_out$cancelled" = 00 ] &&
+     ! { qr_worker_publish "$slot" "$group" && qr_worker_publish "$device_slot" "$group"; }; then
     rc=1; qr_timebox_finish
   fi
   if [ -n "$secs" ]; then
@@ -113,7 +124,10 @@ qr_timebox_finish() {
   wait "$group" 2>/dev/null || true
   if [ -n "$slot" ]; then
     qr_workers_drain "$slot/group.$group" && rm -rf "$slot" || exit 1
+  elif [ -n "$device_slot" ]; then
+    qr_workers_drain "$device_slot/group.$group" || exit 1
   fi
+  [ -z "$device_slot" ] || rm -rf "$device_slot" || exit 1
   if [ "$timed_out" = 1 ]; then exit 124; fi
   if [ "$cancelled" = 1 ]; then exit 143; fi
   exit "$rc"
@@ -127,8 +141,8 @@ qr_timebox() {
   if command -v gtimeout >/dev/null 2>&1; then
     # GNU timeout signals the supervisor, which owns TERM/CONT/KILL and reaping.
     # Keep the supervisor's verdict: it returns 124 on timeout only if cleanup succeeds.
-    QR_TIMEBOX_WORKERS="$QR_TIMEBOX_WORKERS" \
-      gtimeout --foreground --preserve-status -s ALRM "$secs" bash "$QR_SHIP_DIR/quest-release/timebox.sh" '' "$grace" "$@" || rc=$?
+    QR_TIMEBOX_WORKERS="$QR_TIMEBOX_WORKERS" QR_DEVICE_WORKER_ROOT="${QR_DEVICE_WORKER_ROOT:-}" \
+      QR_DEVICE_SUPERVISOR="${QR_DEVICE_SUPERVISOR:-}" gtimeout --foreground --preserve-status -s ALRM "$secs" bash "$QR_SHIP_DIR/quest-release/timebox.sh" '' "$grace" "$@" || rc=$?
   else
     ( qr_timebox_supervise "$secs" "$grace" "$@" ) || rc=$?
   fi

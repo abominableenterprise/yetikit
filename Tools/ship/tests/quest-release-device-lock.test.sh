@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# One headset lock across independent consumer log roots. No adb/editor execution.
+# One headset lock across independent consumer log roots. Synthetic adb only.
 # shellcheck disable=SC2016 # assertions are evaluated by check.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
-tmp="$(mktemp -d)"; owner=''; cancel_owner=''; cancel_group=''
+tmp="$(mktemp -d)"; owner=''; cancel_owner=''; cancel_group=''; adb_group=''
 cleanup() {
+  if [ -n "$adb_group" ]; then kill -KILL -- "-$adb_group" 2>/dev/null || true; fi
   if [ -n "$owner" ]; then kill -TERM "$owner" 2>/dev/null || true; wait "$owner" 2>/dev/null || true; fi
   if [ -n "$cancel_group" ]; then kill -KILL -- "-$cancel_group" 2>/dev/null || true; fi
   if [ -n "$cancel_owner" ]; then kill -KILL "$cancel_owner" 2>/dev/null || true; wait "$cancel_owner" 2>/dev/null || true; fi
@@ -125,6 +126,110 @@ rc=0
 check 'cancelled headset lock becomes reclaimable only after owner and worker group drain' \
   '[ "$cancel_rc" != 0 ] && ! qr_group_alive "$cancel_group" && [ "$rc" = 0 ] && [ -f "$tmp/after-drain-mutation" ]'
 exec 7>&- 9>&-
+
+# Kill the release owner and its step while isolated fake adb is still
+# running. The other checkout must neither enter nor signal that group.
+cat > "$tmp/isolated-owner.sh" <<'OWNER'
+. "$QR_TEST_RELEASE"
+. "${QR_TEST_RELEASE%/*}/tests/lib/quest-release-fixture.sh"
+command() {
+  if [ "${1:-}" = -v ] && [ "${2:-}" = gtimeout ]; then return 1; fi
+  builtin command "$@"
+}
+QR_LOGS="$QR_TEST_LOCK_TMP/isolated-consumer/logs"
+mkdir -p "$QR_LOGS"
+adb() {
+  [ "$1" = -s ] && [ "$2" = "$QUEST_SERIAL" ] && [ "$3" = wait-for-device ] || return 99
+  local group
+  group="$(exec sh -c 'printf "%s\n" "$PPID"')"
+  if [ "$scenario" = failed-drain ]; then
+    hold_adb "$group" &
+    # Do not leave the wrapper until its child has started.
+    qr_fixture_wait_ready "$QR_TEST_LOCK_TMP/adb-ready" "$!"
+  else
+    hold_adb "$group"
+  fi
+}
+hold_adb() {
+  trap 'touch "$QR_TEST_LOCK_TMP/adb-signalled"; exit 1' TERM
+  qr_fixture_ready "$QR_TEST_LOCK_TMP/adb-ready" "$1"
+  if read -r -t 20 _ <&8; then touch "$QR_TEST_LOCK_TMP/adb-finished"; fi
+}
+mutate() { qr_timebox '' adb -s "$QUEST_SERIAL" wait-for-device; }
+scenario="${1:-}"
+if [ "$scenario" = failed-drain ]; then
+  # Inject the failed drain, not lock or registration behavior.
+  qr_timebox_drain() { return 1; }
+  qr_device_locked mutate
+else
+  qr_lock_acquire && qr_run_step qr_device_locked mutate
+fi
+OWNER
+exec 8<> "$tmp/release"
+qr_fixture_bash "$tmp/isolated-owner.sh" > "$tmp/isolated.out" 2>&1 & cancel_owner=$!
+qr_fixture_wait_ready "$tmp/adb-ready" "$cancel_owner" || { cat "$tmp/isolated.out"; exit 1; }
+read -r adb_group < "$tmp/adb-ready"
+read -r cancel_group < "$tmp/isolated-consumer/logs/run.lock/group"
+[[ "$adb_group" =~ ^[1-9][0-9]*$ && "$cancel_group" =~ ^[1-9][0-9]*$ && "$adb_group" != "$cancel_group" ]] || exit 1
+kill -KILL "$cancel_owner" && kill -KILL -- "-$cancel_group" || exit 1
+wait "$cancel_owner" 2>/dev/null || true
+cancel_owner=''
+await_group_exit() {
+  local deadline=$((SECONDS + 8)) status
+  while :; do
+    status=0; qr_group_alive "$1" || status=$?
+    [ "$status" != 1 ] || return 0
+    [ "$SECONDS" -lt "$deadline" ] || return 1
+    sleep 0.05
+  done
+}
+await_group_exit "$cancel_group" || exit 1
+cancel_group=''
+rc=0
+(
+  QR_LOGS="$tmp/isolated-successor/logs"
+  qr_device_locked touch "$tmp/during-adb-mutation"
+) > "$tmp/out" 2>&1 || rc=$?
+check 'another checkout cannot reclaim the headset while isolated adb lives without its owner or step' \
+  '[ "$rc" != 0 ] && [ ! -f "$tmp/during-adb-mutation" ] && qr_group_alive "$adb_group" && [ ! -f "$tmp/adb-signalled" ] && grep -q "another quest-release run is active" "$tmp/out"'
+printf 'finish\n' >&8; exec 8>&-
+await_group_exit "$adb_group" || exit 1
+adb_group=''
+rc=0
+(
+  QR_LOGS="$tmp/isolated-successor/logs"
+  qr_device_locked touch "$tmp/after-adb-mutation"
+) > "$tmp/out" 2>&1 || rc=$?
+check 'dead isolated adb does not make the abandoned headset lock unreclaimable' \
+  '[ "$rc" = 0 ] && [ -f "$tmp/adb-finished" ] && [ -f "$tmp/after-adb-mutation" ]'
+
+# A normal EXIT after an unconfirmed drain must also retain the headset
+# lock. Run without a step, as performance cancellation recovery can do.
+rm -f "$tmp/adb-ready" "$tmp/adb-finished"
+exec 8<> "$tmp/release"
+qr_fixture_bash "$tmp/isolated-owner.sh" failed-drain > "$tmp/isolated.out" 2>&1 & cancel_owner=$!
+qr_fixture_wait_ready "$tmp/adb-ready" "$cancel_owner" || { cat "$tmp/isolated.out"; exit 1; }
+read -r adb_group < "$tmp/adb-ready"
+[[ "$adb_group" =~ ^[1-9][0-9]*$ ]] || exit 1
+owner_rc=0; wait "$cancel_owner" || owner_rc=$?
+cancel_owner=''
+rc=0
+(
+  QR_LOGS="$tmp/isolated-successor/logs"
+  qr_device_locked touch "$tmp/during-failed-drain"
+) > "$tmp/out" 2>&1 || rc=$?
+check 'failed drain retains the headset lock after its wrapper exits, without signalling adb' \
+  '[ "$owner_rc" = 1 ] && [ "$rc" != 0 ] && [ ! -f "$tmp/during-failed-drain" ] && qr_group_alive "$adb_group" && [ ! -f "$tmp/adb-signalled" ] && grep -q "another quest-release run is active" "$tmp/out"'
+printf 'finish\n' >&8; exec 8>&-
+await_group_exit "$adb_group" || exit 1
+adb_group=''
+rc=0
+(
+  QR_LOGS="$tmp/isolated-successor/logs"
+  qr_device_locked touch "$tmp/after-failed-drain"
+) > "$tmp/out" 2>&1 || rc=$?
+check 'a retained record from a failed drain can be reclaimed after adb exits' \
+  '[ "$rc" = 0 ] && [ -f "$tmp/adb-finished" ] && [ -f "$tmp/after-failed-drain" ]'
 
 # Doctor has no release run lock. Kill its real shell PID after the fake adb
 # reconnect starts, leaving the isolated recovery worker in flight.

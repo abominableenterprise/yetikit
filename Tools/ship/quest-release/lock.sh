@@ -92,7 +92,7 @@ qr_lock_read() {
       [ "${QR_LOCK_STALE_AGE:-}" = 1 ] || [ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ] || return 0
       return 2 ;;
   esac
-  kill -0 "$QR_LOCK_PID" 2>/dev/null && return 0
+  qr_lock_owner_busy "$QR_LOCK_PID" && return 0
   return 2
 }
 
@@ -141,7 +141,8 @@ qr_lock_snapshot() {
   [ -z "$replaced" ] || [ -z "$pid" ] || return 3
   # Check the owner before sampling the step group: a live owner can still
   # publish a new step. Then check the step before walking its worker slots.
-  if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then workers=busy; fi
+  if qr_lock_owner_busy "$pid" ||
+     { [ -f supervisor ] && qr_lock_process_busy "$(cat supervisor 2>/dev/null)"; }; then workers=busy; fi
   group="$(cat group 2>/dev/null)"
   invocation="$(cat invocation 2>/dev/null)"
   if [ -z "$invocation" ] && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
@@ -186,6 +187,14 @@ qr_lock_snapshot() {
   printf '%s\n' "$pid" "$invocation" "$group" "$run_dir" "$workers" "$previous" "$unpublished_at"
 }
 
+qr_lock_owner_busy() {
+  if [ "${QR_DEVICE_LOCK_READ:-}" = 1 ]; then
+    qr_lock_process_busy "$1"
+  else
+    [[ "$1" =~ ^[1-9][0-9]*$ ]] && kill -0 "$1" 2>/dev/null
+  fi
+}
+
 # Only look at the worker tree in this pinned generation. Probe the step
 # before expanding its slots; a worker could be authorized right up to exit.
 qr_lock_workers_busy() {
@@ -204,6 +213,7 @@ qr_lock_workers_busy() {
 # Take the lock for the caller (normally $$), or refuse at once when a live run holds it. A stale lock is removed (logged).
 qr_lock_acquire() {
   local d st _ publish="${1:-1}" owner_pid="${2:-$$}" invocation_dir
+  local supervisor="${3:-}" step_group="${4:-}"
   d="$(qr_lock_dir)"
   for _ in 1 2; do
     if mkdir "$d" 2>/dev/null; then
@@ -214,6 +224,8 @@ qr_lock_acquire() {
                  QR_INVOCATION="${invocation_dir##*/}" &&
                  printf '%s\n' "$QR_INVOCATION" > "$d/invocation"; }; } &&
              printf '%s\n' "${QR_RUN_DIR:-pending}" > "$d/run_dir" &&
+             { [ -z "$supervisor" ] || printf '%s\n' "$supervisor" > "$d/supervisor"; } &&
+             { [ -z "$step_group" ] || printf '%s\n' "$step_group" > "$d/group"; } &&
              # Publish pid last, atomically: wait must not pin a partial PID or miss its invocation key.
              [ ! -d "$d/pid" ] && printf '%s\n' "$owner_pid" > "$d/pid.tmp" && mv -f "$d/pid.tmp" "$d/pid" &&
              { [ "$publish" = 0 ] ||
