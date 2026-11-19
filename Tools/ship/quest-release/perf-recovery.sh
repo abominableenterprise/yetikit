@@ -57,16 +57,16 @@ qr_perf_cancel_report() (
   [ "$perf_reported" = 1 ]
 )
 
-# The owner runs this only after draining the worker group. Even with no pending
-# sensor restoration, replace the previous invocation's outcome with cancellation.
+# Only recover and replace reports after the drain. If exit is unconfirmed,
+# the journals are advisory: warn without touching the device or recovery state.
 qr_perf_cancel() {
-  local QR_PERF_RUN_ROOT="$QR_RUN_DIR" cursor marker warning warnings='' active_warning=''
+  local mode="${1:-recover}" cursor marker warning warnings='' active_warning=''
   local serial='' dir="$QR_RUN_DIR" sha=unavailable summary='INFRA: capture cancelled'
   cursor="$(qr_lock_dir)/perf-device"
-  if [ -f "$cursor" ]; then
+  if [ "$mode" = recover ] && [ -f "$cursor" ]; then
     { IFS= read -r serial && IFS= read -r dir && IFS= read -r sha; } < "$cursor"
   fi
-  local recovery_dir="$QR_PERF_RUN_ROOT/perf-pending" recovery=qr_perf_recover_device entry_serial
+  local recovery_dir="$QR_RUN_DIR/perf-pending" recovery=qr_perf_recover_device entry_serial
   if [ "${QR_PERF_ACTION:-scripted}" != scripted ]; then
     recovery_dir="${cursor%/*}/perf-manual"
     recovery=qr_perf_manual_cancel_device
@@ -74,12 +74,22 @@ qr_perf_cancel() {
   for marker in "$recovery_dir"/*; do
     case "${marker##*/}" in *.tmp) continue ;; esac
     [ -f "$marker" ] || continue
+    if [ "$mode" = warn-only ]; then
+      IFS= read -r entry_serial < "$marker" && [ -n "$entry_serial" ] || continue
+      if [ "$recovery" = qr_perf_recover_device ]; then
+        qr_log "WARN: proximity sensor may still be disabled; once the workers have exited, run: adb -s $entry_serial shell am broadcast -a com.oculus.vrpowermanager.automation_disable"
+      else
+        qr_log "WARN: proximity sensor may still be disabled; once the workers have exited, retry perf stop for $entry_serial from the owning checkout and log root"
+      fi
+      continue
+    fi
     warning="$("$recovery" "$marker")"
     [ -n "$warning" ] || continue
     warnings="${warnings:+$warnings$'\n'}$warning"
     IFS= read -r entry_serial < "$marker"
     if [ "$entry_serial" = "$serial" ]; then active_warning="$warning"; fi
   done
+  [ "$mode" != warn-only ] || return 0
   if ! qr_perf_cancel_report "$dir" "$sha" "$active_warning"; then
     summary="$summary (per-device performance summary could not be published)"
   fi

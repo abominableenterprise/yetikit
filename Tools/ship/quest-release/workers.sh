@@ -69,16 +69,20 @@ qr_workers_busy() {
 
 # Drain only after the enclosing group is gone; it can no longer authorize a
 # child. An unpublished slot can be discarded without signalling any process.
+# Keep an unconfirmed slot intact, but it cannot authorize work in a sibling.
 qr_workers_drain() {
-  local slot entry pgid
+  local slot entry pgid slot_failed rc=0
   for slot in "$1"/worker.*; do
     [ -d "$slot" ] || continue
+    slot_failed=0
     for entry in "$slot"/group.*; do
       [ -d "$entry" ] || continue
       pgid="${entry##*.}"
-      [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || return 1
-      qr_worker_drain_group "$pgid" && qr_workers_drain "$entry" || return 1
+      if ! { [[ "$pgid" =~ ^[1-9][0-9]*$ ]] && qr_worker_drain_group "$pgid" && qr_workers_drain "$entry"; }; then
+        slot_failed=1
+      fi
     done
-    rm -rf "$slot" || return 1
+    if [ "$slot_failed" = 1 ] || ! rm -rf "$slot"; then rc=1; fi
   done
+  return "$rc"
 }
