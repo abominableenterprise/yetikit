@@ -106,15 +106,19 @@ rm "$t/Props/MethodCaptureTests.cs"
 
 # Run each literal form on its own so a successful FirstTests selection cannot
 # conceal a dropped sibling. Both fixtures have headless tests and Gfx methods.
-for form in verbatim dollar-at at-dollar dollar-at-format at-dollar-format; do
+for form in verbatim dollar-at at-dollar dollar-at-format at-dollar-format nested-verbatim nested-interpolated at-dollar-nested; do
   case "$form" in
     verbatim) prefix='@'; text='// {' ;;
-    dollar-at*) prefix='$@' ;;
+    dollar-at*|nested-*) prefix='$@' ;;
     at-dollar*) prefix='@$' ;;
   esac
   case "$form" in
     *-format) text='{42:/*} {(value != null ? 1 : 2) /* expression comment: } */:/*} {global::System.Int32.MaxValue,12:/*}' ;;
     dollar-at|at-dollar) text='/* {{ {value ?? "/*"} ""quoted""' ;;
+    nested-verbatim) text='{value ?? @"inner
+/* } [Category(""Gfx"")] class Decoy
+end"}' ;;
+    nested-interpolated|at-dollar-nested) text='{($"{value ?? "/*"}" + $@"{value ?? "//"}"):/*}' ;;
   esac
   {
     cat <<'CS'
@@ -149,6 +153,27 @@ CS
     '[ "$rc" = 0 ] && [ "$(filter)" = "ShipFixtures.FirstTests;ShipFixtures.SiblingTests" ]'
 done
 rm "$t/Props/LiteralTests.cs"
+
+cat > "$t/Props/AmbiguousTests.cs" <<'CS'
+using NUnit.Framework;
+namespace ShipFixtures;
+public class BeforeRawTests
+{
+    [Test, Category("Gfx")] public void Render() {}
+    [Test] public void Rule()
+    {
+        var label = $@"{ """/* } ]""" }";
+        Assert.IsNotEmpty(label);
+    }
+}
+public class AfterRawTests { [Test, Category("Gfx")] public void Render() {} }
+CS
+pr HEAD
+check 'unsupported raw literal after a discovered fixture forces both full category passes' \
+  'full && [[ "$(pure_run)" == *"-testCategory !Gfx;!MacOnly"* && "$(gfx_run)" == *"-testCategory Gfx"* && "$(gfx_run)" != *-testFilter* ]] && grep -Fq "could not scan Assets/Tests/EditMode/Props/AmbiguousTests.cs reliably" "$tmp/err" && grep -Fq "running full EditMode passes" "$stages"'
+EDITMODE_GFX=0 pr HEAD
+check 'full-pass fallback still respects disabled Gfx' 'full && [ "$(wc -l < "$tmp/runs")" = 1 ]'
+rm "$t/Props/AmbiguousTests.cs"
 
 printf 'using NUnit.Framework;\nnamespace ShipFixtures { public class MixedInlineTests { [Test] public void Rule() {} [Test, Category("Gfx")] public void Render() {} } }\n' > "$t/Props/MixedInlineTests.cs"
 pr HEAD

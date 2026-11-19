@@ -5,7 +5,9 @@
 # With a category $1 (1 means Gfx), print only the classes carrying [Category("$1")], on the class or on one of its
 # members (a method-level Gfx test runs in the render pass too, and -testFilter <class> reaches it). Nested classes
 # count as their outer one. Pass `class` as $2 to match only class-level tags.
-cs_classes() {
+# A failed scan invalidates the whole selection, even if some names were printed.
+cs_classes() (
+  set -o pipefail
   local f cat="${1:-0}"
   [ "$cat" = 1 ] && cat=Gfx
   while IFS= read -r f; do
@@ -21,66 +23,69 @@ cs_classes() {
       function literal_length(s) {
         return match(s, /^(@"([^"]|"")*"|"([^"\\]|\\.)*"|\047([^\047\\]|\\.)*\047)/) ? RLENGTH : 0
       }
-      # Mask verbatim literals and comments before scanning structure. Keep
-      # ordinary quoted arguments intact for category matching.
-      function scan_line(s,   out, token, n, quoted) {
+      # The stack alternates literal text and interpolation code. Expression
+      # delimiters have their own frames so only a hole-level colon starts a format.
+      # Emit a placeholder for the whole literal, except ordinary quoted arguments
+      # (needed for category matching). None of the hole code is fixture structure.
+      function scan_line(s,   out, mode, token, n, verbatim, hole) {
+        # Directives inside hole code can change which delimiters are active.
+        if (!block_comment && frame[level] ~ /^(hole|\{|\(|\[)$/ && s ~ /^[[:space:]]*#/) exit 2
         while (s != "") {
+          mode = frame[level]
           if (block_comment) {
             if (!match(s, /\*\//)) return out
             s = substr(s, RSTART + RLENGTH)
             block_comment = 0
-          } else if (hole_format) {
-            # Format text is not C# code: comment markers have no effect here.
-            if (!match(s, /\}/)) return out
-            s = substr(s, RSTART + 1)
-            hole_format = hole_depth = 0
-          } else if (hole_depth) {
-            # Only a top-level colon starts a format, not a conditional colon
-            # inside parentheses or the :: of a namespace alias.
-            if (!match(s, /\/\/|\/\*|@"|::|[][(){}:"\047]/)) return out
+          } else if (mode == "verbatim" || mode ~ /^interpolated/ || mode == "format") {
+            verbatim = mode == "format" ? frame[level - 1] == "interpolated-verbatim" : mode ~ /verbatim$/
+            # Format text is not code: comment markers have no effect. Unlike
+            # literal text, its first unescaped closing brace ends the hole.
+            if (mode == "verbatim") match(s, /^([^"]|"")*/)
+            else if (mode == "format" && verbatim) match(s, /^([^"{}]|"")*/)
+            else if (mode == "format") match(s, /^([^"{}\\]|\\.)*/)
+            else if (verbatim) match(s, /^([^"{}]|""|\{\{|\}\})*/)
+            else match(s, /^([^"{}\\]|\\.|\{\{|\}\})*/)
+            n = RLENGTH
+            if (n == length(s)) break
+            token = substr(s, n + 1, 1)
+            s = substr(s, n + 2)
+            if (mode == "format" && token == "}") level--
+            else if (mode != "format" && token == "\"") level--
+            else if (mode != "format" && token == "{") frame[++level] = "hole"
+            else exit 2
+          } else {
+            hole = level > 0
+            if (hole) n = match(s, /\/\/|\/\*|\$*"""|\$@?"|@\$"|@"|::|[][(){}:"\047]/)
+            else n = match(s, /\/\/|\/\*|\$*"""|\$@?"|@\$"|@"|["\047]/)
+            if (!n) return hole ? out : out s
+            if (!hole) out = out substr(s, 1, RSTART - 1)
             token = substr(s, RSTART, RLENGTH)
             s = substr(s, RSTART)
             n = length(token)
             if (token == "//") return out
-            if (token == "/*") block_comment = 1
-            else if (token == "{" || token == "(" || token == "[") hole_depth++
-            else if (token == "}" || token == ")" || token == "]") hole_depth--
-            else if (token == ":" && hole_depth == 1) hole_format = 1
-            else if ((quoted = literal_length(s))) n = quoted
-            s = substr(s, n + 1)
-          } else if (verbatim) {
-            if (verbatim == 2) match(s, /^([^"{}]|""|\{\{|\}\})*/)
-            else match(s, /^([^"]|"")*/)
-            n = RLENGTH
-            if (n == length(s)) return out
-            token = substr(s, n + 1, 1)
-            s = substr(s, n + 2)
-            if (token == "{") hole_depth = 1
-            else if (token == "\"") verbatim = 0
-          } else {
-            if (!match(s, /\/\/|\/\*|\$@?"|@\$"|@"|["\047]/)) return out s
-            out = out substr(s, 1, RSTART - 1)
-            token = substr(s, RSTART, RLENGTH)
-            s = substr(s, RSTART)
-            # Preserve existing handling of ordinary interpolated strings.
-            if (token == "$\"") return out s
-            if (token == "//") return out
             if (token == "/*") {
-              out = out " "
-              s = substr(s, 3)
+              if (!hole) out = out " "
               block_comment = 1
-            } else if (token ~ /@/) {
-              out = out "\"\""
-              s = substr(s, length(token) + 1)
-              verbatim = (token == "@\"" ? 1 : 2)
-            } else {
+            } else if (token ~ /"""$/) {
+              # Raw strings have different quote and brace rules.
+              exit 2
+            } else if (token == "@\"" || token ~ /\$/) {
+              if (!hole) out = out "\"\""
+              frame[++level] = token == "@\"" ? "verbatim" : (token == "$\"" ? "interpolated" : "interpolated-verbatim")
+            } else if (token == "\"" || token == "\047") {
               n = literal_length(s)
-              if (!n) n = 1
-              out = out substr(s, 1, n)
-              s = substr(s, n + 1)
-            }
+              if (!n) exit 2
+              if (!hole) out = out substr(s, 1, n)
+            } else if (token == "{" || token == "(" || token == "[") frame[++level] = token
+            else if (token == "}" || token == ")" || token == "]") {
+              if ((token == "}" && (mode == "{" || mode == "hole")) ||
+                  (token == ")" && mode == "(") || (token == "]" && mode == "[")) level--
+              else exit 2
+            } else if (token == ":" && mode == "hole") frame[level] = "format"
+            s = substr(s, n + 1)
           }
         }
+        if (frame[level] == "interpolated" || (frame[level] == "format" && frame[level - 1] == "interpolated")) exit 2
         return out
       }
       # Consume one leading attribute section, ignoring brackets in literals
@@ -149,9 +154,11 @@ cs_classes() {
           pending = 0
         }
         braces(line)
-      }' "$f" || return 1
+      }
+      END { if (level || block_comment) exit 2 }
+    ' "$f" || { printf 'test selection: could not scan %s reliably\n' "$f" >&2; return 1; }
   done | sort -u
-}
+)
 
 # Declared runtime type identifiers, including multiple/nested types and record
 # class/struct forms. Ignore comments and literals rather than inventing types
@@ -211,7 +218,7 @@ pr_builder_tests() {
 # area's test folder; editor builders search all tests for references to their filename's class. Neither builders
 # nor scene assets expand to whole areas. Resolve Gfx tags globally so partial classes retain their eligibility.
 pr_gfx_fixtures() {
-  local tagged rows selected p name area files f fixture reason count max="${TEST_PR_GFX_MAX:-12}"
+  local tagged rows selected p name area files f classes fixture reason count max="${TEST_PR_GFX_MAX:-12}"
   local ranked stamp dirty newest latest_dirty source rest tests_root edit_root scripts_root editor_root
   tests_root="$(ship_config_get '.tests.root // "Assets/Tests"')" || return
   edit_root="$(ship_config_get '.tests.editModeRoot // ((.tests.root // "Assets/Tests") + "/EditMode")')" || return
@@ -220,7 +227,8 @@ pr_gfx_fixtures() {
   case "$max" in ''|*[!0-9]*) echo "test pr: invalid TEST_PR_GFX_MAX=$max; using 12" >&2; max=12 ;; esac
   # Normalise decimal values (including 0 and leading zeroes) without shell octal interpretation.
   max="$(awk -v n="$max" 'BEGIN { printf "%.0f", n }')"
-  tagged="$(find "$tests_root" -name '*.cs' 2>/dev/null | sort | cs_classes 1)"
+  [ -d "$tests_root" ] || return 0
+  tagged="$(find "$tests_root" -name '*.cs' | sort | cs_classes 1)" || return
   [ -n "$tagged" ] || return 0
   rows="$( {
   pr_changed_paths "$1" | LC_ALL=C sort -zu | while IFS= read -r -d '' p; do
@@ -241,10 +249,11 @@ pr_gfx_fixtures() {
     esac
     [ -n "$files" ] || continue
     while IFS= read -r f; do
+      classes="$(cs_classes 0 <<< "$f")" || exit 1
       while IFS= read -r fixture; do
         grep -Fxq -- "$fixture" <<< "$tagged" || continue
         printf '%s\t%s\t%s\n' "$fixture" "$f" "$reason"
-      done < <(cs_classes 0 <<< "$f")
+      done <<< "$classes"
     done <<< "$files"
   done || exit 1
   # Explicit dependencies need not mention a builder identifier in test source.
@@ -252,10 +261,11 @@ pr_gfx_fixtures() {
     [ -n "$fixture" ] || continue
     grep -Fxq -- "$fixture" <<< "$tagged" || continue
     while IFS= read -r f; do
-      cs_classes 0 <<< "$f" | grep -Fxq -- "$fixture" || continue
+      classes="$(cs_classes 0 <<< "$f")" || exit 1
+      grep -Fxq -- "$fixture" <<< "$classes" || continue
       printf '%s\t%s\t%s\n' "$fixture" "$f" 'configured builder dependency'
     done < <(find "$tests_root" -name '*.cs' 2>/dev/null | sort)
-  done
+  done || exit 1
   } | sort -u)" || return
   [ -n "$rows" ] || return 0
   selected="$(cut -f1 <<< "$rows" | sort -u)"
