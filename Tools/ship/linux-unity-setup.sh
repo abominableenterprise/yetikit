@@ -20,18 +20,18 @@ DONE_MARK=".install-complete"
 PARTIAL_MARK=".install-partial"
 
 # True when the editor binary is the pinned version (the version string is compiled into it; Unity is not run).
-editor_version_ok() { as_root grep -aqF -- "$UNITY_VERSION" "$UNITY_BIN"; }
+editor_version_ok() { as_root grep -aqF -- "$UNITY_VERSION" "$1"; }
 
 install_editor() {
   local done="$UNITY_ROOT/$DONE_MARK" partial="$UNITY_ROOT/$PARTIAL_MARK"
   local clear="clear it (sudo rm -rf $UNITY_ROOT) and re-run setup"
   if [ -x "$UNITY_BIN" ] && [ -x "$LC" ] && ! as_root test -e "$partial"; then
     if as_root test -e "$done"; then
-      editor_version_ok || die "$UNITY_ROOT is not Unity $UNITY_VERSION; $clear"
+      editor_version_ok "$UNITY_BIN" || die "$UNITY_ROOT is not Unity $UNITY_VERSION; $clear"
       log "editor already at $UNITY_ROOT"; return
     fi
     # Installed before the marker existed: trust it once if the editor is the pinned version, and mark it.
-    editor_version_ok || die "$UNITY_ROOT has an editor but no $DONE_MARK and it is not Unity $UNITY_VERSION; $clear"
+    editor_version_ok "$UNITY_BIN" || die "$UNITY_ROOT has an editor but no $DONE_MARK and it is not Unity $UNITY_VERSION; $clear"
     as_root touch "$done"; log "editor already at $UNITY_ROOT (pre-existing install, marked complete)"; return
   fi
   # An existing empty directory (a pre-created mount point, a custom UNITY_ROOT) is filled in place; anything else
@@ -57,6 +57,7 @@ install_editor() {
   supervise extract_editor "$crane" "$stage"
   [ -x "$stage/opt/unity/$BIN_REL" ] && [ -x "$stage/opt/unity/$LC_REL" ] \
     || die "extract incomplete: editor or licensing client missing in $stage"
+  editor_version_ok "$stage/opt/unity/$BIN_REL" || die "editor from $UNITY_IMAGE is not Unity $UNITY_VERSION"
   [ -d "$UNITY_ROOT" ] || as_root mkdir "$UNITY_ROOT"
   as_root touch "$partial"
   # Move the contents, not the directory: `mv dir existing-dir` would make $UNITY_ROOT/unity.
@@ -140,9 +141,24 @@ cmd_setup() {
   done
   [ "$no_creds" = 1 ] || need_creds
   pick_image
-  install_crane; replace_base_editor; install_editor; install_libs; setup_git
+  install_crane
+  local parent lock lock_key setup_fd
+  parent="$(dirname -- "$UNITY_ROOT")"
+  lock_key="$(printf '%s' "${UNITY_ROOT##*/}" | sha256sum)"
+  lock="$parent/.unity-setup-lock.${lock_key%% *}"
+  # UNITY_ROOT is canonical. Keep the lock beside it, not inside a tree that may be empty or replaced.
+  # Use a persistent directory inode: Linux flock works on a read-only descriptor, including across users.
+  if [ ! -d "$lock" ]; then
+    [ -d "$parent" ] || as_root mkdir -p -- "$parent"
+    as_root mkdir -m 755 -- "$lock" || [ -d "$lock" ] || die "cannot create setup lock $lock"
+  fi
+  exec {setup_fd}< "$lock/." || die "cannot open setup lock $lock"
+  flock -x "$setup_fd" || die "cannot acquire setup lock for $UNITY_ROOT"
+  replace_base_editor; install_editor; install_libs
   if [ "$UNITY_MODULES" = android ]; then
     has_android || die "$UNITY_IMAGE gave no Android SDK/NDK under $UNITY_ROOT/$ANDROID_REL"
   fi
+  exec {setup_fd}<&-
+  setup_git
   log "setup ok"
 }

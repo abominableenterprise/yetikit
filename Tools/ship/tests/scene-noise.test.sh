@@ -138,6 +138,38 @@ for code in Assets/Editor/World/PropCatalog.cs Assets/Scripts/Props/PropThrow.cs
 done
 git checkout -q -- .
 
+# A leading dash is valid in a configured ERE; it must be read as a pattern, not an option.
+echo code > ./-fixture-code.cs
+echo regenerated > Assets/Art/Props/Cup/Cup.prefab
+jq '.noise.codeRegex = "-fixture-code[.]cs$"' yetikit.json > "$tmp/dash.json"
+out="$(YETIKIT_CONFIG="$tmp/dash.json" bash "$lib" 2>&1)"
+check "a valid dash-prefixed code pattern protects a regenerated prefab" \
+  '! clean Assets/Art/Props/Cup/Cup.prefab && output_has "keeping Assets/Art/Props/Cup/Cup.prefab (code changed)"'
+rm ./-fixture-code.cs
+git checkout -q -- .
+
+# Bypass config validation here to simulate grep failing during evaluation, not a config load error.
+echo regenerated > Assets/Art/Props/Cup/Cup.prefab
+rc=0
+out="$(NOISE_CODE_RE='[' revert_editor_noise '' 2>&1)" || rc=$?
+check "a grep evaluation error is reported and protects the regenerated prefab" \
+  '[ "$rc" -gt 1 ] && ! clean Assets/Art/Props/Cup/Cup.prefab && output_has "could not check for code changes"'
+git checkout -q -- .
+
+# A rename out of props changes the source set, whether staged or committed on the branch.
+git config diff.renames true
+for rename in staged committed; do
+  base="$(git rev-parse HEAD)"
+  git mv Assets/Art/Props/Cup/Cup.fbx Assets/Art/Cup.fbx
+  if [ "$rename" = committed ]; then git -c user.name=t -c user.email=t@t commit -qm 'move prop out'; fi
+  before="$(noise_dirty_files)"
+  echo regenerated > Assets/Art/Props/Grabbables_Atlas.png
+  out="$(NOISE_BASE="$base" revert_editor_noise "$before" 2>&1)"
+  check "a $rename rename out of props keeps the regenerated atlas" \
+    '! clean Assets/Art/Props/Grabbables_Atlas.png && output_has "keeping Assets/Art/Props/Grabbables_Atlas.png (a prop source changed)"'
+  git reset -q --hard "$base"
+done
+
 # --keep spellings, resolved from the caller's directory (standalone run: no "before" list, so only --keep protects).
 dirty() { echo prefab7 > Assets/Art/Props/Cup/Cup.prefab; echo prefab7 > Assets/Art/Props/Soda/Soda.prefab; }
 keep_case() { # $1: name, $2: directory to run from, rest: --keep args. Cup.prefab must survive, Soda.prefab must not.

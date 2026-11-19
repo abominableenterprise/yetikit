@@ -28,6 +28,8 @@ img="$tmp/img"; lc="opt/unity/Editor/Data/Resources/Licensing/Client"
 mkdir -p "$img/$lc" "$tmp/bin"
 printf '#!/bin/sh\n# Unity 6000.6.6f1\n' > "$img/opt/unity/Editor/Unity"; cp "$img/opt/unity/Editor/Unity" "$img/$lc/Unity.Licensing.Client"
 chmod +x "$img/opt/unity/Editor/Unity" "$img/$lc/Unity.Licensing.Client"
+wrong_img="$tmp/wrong-img"; cp -a "$img" "$wrong_img"
+printf '#!/bin/sh\n# Unity 2022.3.1f1\n' > "$wrong_img/opt/unity/Editor/Unity"
 # FAKE_CUT=1 drops the stream; FAKE_EXTRACT_GATE synchronizes concurrent extracts.
 cat > "$tmp/bin/crane" <<EOF
 #!/bin/bash
@@ -41,6 +43,7 @@ if [ -n "\${FAKE_EXTRACT_GATE:-}" ]; then
   done
 fi
 if [ "\${FAKE_CUT:-0}" = 1 ]; then tar -c -C "$img" opt/unity/Editor/Unity; exit 1; fi
+if [ "\$2" = fixture:wrong ]; then exec tar -c -C "$wrong_img" opt/unity; fi
 tar -c -C "$img" opt/unity
 EOF
 printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/dpkg"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/ldd"
@@ -98,6 +101,11 @@ for c in mv rm mkdir tar find; do
 done
 chmod +x "$tmp/bin/"*
 mkdir -p "$tmp/srv/unity"; : > "$tmp/ops"
+mkdir -p "$tmp/wrong/unity"
+check "a wrong-version override fails without publishing into an empty root" \
+  '! run env UNITY_ROOT="$tmp/wrong/unity" UNITY_IMAGE=fixture:wrong && grep -q "not Unity 6000.6.6f1" "$tmp/out" && [ -z "$(ls -A "$tmp/wrong/unity")" ]'
+check "a rejected override leaves no stage and the pinned image can be installed" \
+  '! ls -d "$tmp/wrong/.unity-extract."* >/dev/null 2>&1 && run env UNITY_ROOT="$tmp/wrong/unity" && [ -f "$tmp/wrong/unity/.install-complete" ]'
 check "an empty custom UNITY_ROOT is filled" 'run env UNITY_ROOT="$tmp/srv/unity" && grep -q "setup ok" "$tmp/out"'
 check "the editor is at UNITY_ROOT/Editor, not UNITY_ROOT/unity" \
   '[ -x "$tmp/srv/unity/Editor/Unity" ] && [ -x "$tmp/srv/unity/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client" ] && [ ! -e "$tmp/srv/unity/unity" ]'
@@ -142,7 +150,36 @@ check "two concurrent setups of sibling roots both succeed" '[ "$ra" = 0 ] && [ 
 check "both sibling roots are complete" \
   '[ -x "$tmp/sib/a/Editor/Unity" ] && [ -f "$tmp/sib/a/.install-complete" ] && [ -x "$tmp/sib/b/Editor/Unity" ] && [ -f "$tmp/sib/b/.install-complete" ]'
 check "each run removed only its own stage" \
-  '[ "$(cat "$tmp/sib/.unity-extract.tmp/f")" = theirs ] && [ "$(ls -A "$tmp/sib" | tr "\n" " ")" = ".unity-extract.tmp a b " ]'
+  '[ "$(cat "$tmp/sib/.unity-extract.tmp/f")" = theirs ] && [ "$(find "$tmp/sib" -maxdepth 1 -name ".unity-extract.*" -printf "%f\n")" = .unity-extract.tmp ]'
+
+# Two setups from different projects must serialize when their roots resolve to the same path.
+# Observe the second hitting flock (fixed) or entering a second extract (before the fix).
+rm "$tmp/extract-release"
+mkdir -p "$tmp/same" "$tmp/other-project"
+ln -s "$tmp/same" "$tmp/same-alias"
+cat > "$tmp/bin/flock" <<EOF
+#!/bin/sh
+if [ "\${FAKE_SETUP_CONTENDER:-0}" = 1 ] && [ "\${1:-}" = -x ] && [ -d "/proc/\$\$/fd/\${2:-}" ]; then
+  touch "$tmp/contender-flock"
+fi
+exec $(real flock) "\$@"
+EOF
+chmod +x "$tmp/bin/flock"
+downloads_before="$(wc -l < "$tmp/download-calls")"
+ra=0; rb=0
+PATH="$tmp/bin:$PATH" PROJECT="$tmp" UNITY_ROOT="$tmp/same/unity" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/logs-a" FAKE_EXTRACT_GATE="$tmp/same-a" timeout -k 5 120 bash "$script" setup --no-creds >"$tmp/out-a" 2>&1 & pa=$!
+setup_pids+=("$pa")
+ship_wait_until test -e "$tmp/same-a"
+PATH="$tmp/bin:$PATH" PROJECT="$tmp/other-project" YETIKIT_CONFIG="$tmp/yetikit.json" UNITY_ROOT="$tmp/same-alias/unity/" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/logs-b" FAKE_SETUP_CONTENDER=1 FAKE_EXTRACT_GATE="$tmp/same-b" timeout -k 5 120 bash "$script" setup --no-creds >"$tmp/out-b" 2>&1 & pb=$!
+setup_pids+=("$pb")
+contender_reached_setup() { [ -e "$tmp/contender-flock" ] || [ -e "$tmp/same-b" ]; }
+ship_wait_until contender_reached_setup
+check "the same-root contender does not extract while the first setup owns the root" '[ ! -e "$tmp/same-b" ]'
+touch "$tmp/extract-release"
+wait "$pa" || ra=$?; wait "$pb" || rb=$?
+setup_pids=()
+check "the same-root contender reuses the published editor without another extract" \
+  '[ "$ra" = 0 ] && [ "$rb" = 0 ] && grep -qF "editor already at $tmp/same/unity" "$tmp/out-b" && [ "$(wc -l < "$tmp/download-calls")" = "$((downloads_before + 1))" ] && [ -f "$tmp/same/unity/.install-complete" ] && [ ! -e "$tmp/same/unity/.install-partial" ]'
 
 # #145.3: a move that fails part-way (here: every entry moved, then mv reports a failure, as a cross-filesystem copy
 # can) leaves a tree that passes the executable checks. It has no completion marker, so a re-run refuses it.
