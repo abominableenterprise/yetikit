@@ -67,6 +67,8 @@ namespace YetiKit.Hands
 
         public bool RightHand => rightHand;
         public HandMode Mode { get; private set; }
+        /// <summary>Changes when the pose source switches or tracking is lost.</summary>
+        public int PoseEpoch { get; private set; }
         public bool HandTracked => Mode == HandMode.TrackedHand;
         public bool Present => Mode != HandMode.None;
         /// <summary>Unscaled time of the latest valid Dynamic joint sample, or negative infinity when unavailable.</summary>
@@ -245,6 +247,7 @@ namespace YetiKit.Hands
                 }
                 if (Mode == HandMode.Controller) controllerGrip = controllerTrigger = 0f;
                 Mode = mode;
+                PoseEpoch++;
                 PresenceChanged?.Invoke();
             }
             NotifyVisual();
