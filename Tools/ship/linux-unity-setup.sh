@@ -54,14 +54,14 @@ install_editor() {
   log "extracting $UNITY_IMAGE:/opt/unity (streamed, ~2-3 min, ~8.7 GB)"
   # Only opt/unity is written, into the stage, and moved into place once complete, so an interrupted extract never
   # leaves a half-installed $UNITY_ROOT that a re-run would trust.
-  supervise extract_editor "$crane" "$stage"
+  supervise --foreground-terminal extract_editor "$crane" "$stage"
   [ -x "$stage/opt/unity/$BIN_REL" ] && [ -x "$stage/opt/unity/$LC_REL" ] \
     || die "extract incomplete: editor or licensing client missing in $stage"
   editor_version_ok "$stage/opt/unity/$BIN_REL" || die "editor from $UNITY_IMAGE is not Unity $UNITY_VERSION"
   [ -d "$UNITY_ROOT" ] || as_root mkdir "$UNITY_ROOT"
   as_root touch "$partial"
   # Move the contents, not the directory: `mv dir existing-dir` would make $UNITY_ROOT/unity.
-  supervise as_root find "$stage/opt/unity" -mindepth 1 -maxdepth 1 -exec mv -t "$UNITY_ROOT" -- {} +
+  supervise --foreground-terminal as_root find "$stage/opt/unity" -mindepth 1 -maxdepth 1 -exec mv -t "$UNITY_ROOT" -- {} +
   [ -x "$UNITY_BIN" ] && [ -x "$LC" ] || die "editor or licensing client missing in $UNITY_ROOT after install"
   as_root mv -f "$partial" "$done"
   as_root rm -rf "$stage"
@@ -75,8 +75,8 @@ install_libs() {
   for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
   if [ ${#missing[@]} -gt 0 ]; then
     log "apt-get install ${missing[*]}"
-    supervise as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    supervise as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
+    supervise --foreground-terminal as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    supervise --foreground-terminal as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
   fi
   if ldd "$UNITY_BIN" | grep -q 'not found'; then
     ldd "$UNITY_BIN" | grep 'not found' >&2
@@ -129,7 +129,7 @@ replace_base_editor() {
   cleanup_unity require-idle || die "cleanup did not complete; refusing to replace $UNITY_ROOT. Close any Unity processes and re-run setup."
   # An editor can still start after the cleanup scan; recheck with deletion's privileges.
   refuse_editor_in_use
-  supervise as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  supervise --foreground-terminal as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 }
 
 cmd_setup() {

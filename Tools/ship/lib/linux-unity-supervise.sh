@@ -2,6 +2,22 @@
 # Keep state and EXIT cleanup in the wrapper. Bash dispatches signal traps
 # during a wait builtin, but defers them while a foreground child is running.
 
+# With no argument, report the caller's group only if it owns the terminal.
+# Otherwise, set the terminal's foreground group even from a background job.
+supervised_terminal_group() {
+  perl -MPOSIX=tcgetpgrp,tcsetpgrp -e '
+    open my $tty, "+<", "/dev/tty" or exit 1;
+    if (@ARGV) {
+      $SIG{TTOU} = "IGNORE";
+      tcsetpgrp(fileno($tty), $ARGV[0]) or exit 1;
+    } else {
+      my $group = getpgrp();
+      tcgetpgrp(fileno($tty)) == $group or exit 1;
+      print $group;
+    }
+  ' "$@"
+}
+
 supervised_signal() {
   local status="$1" pid stat group i live
   local -A groups=()
@@ -29,12 +45,17 @@ supervised_signal() {
   done
   for group in "${!groups[@]}"; do kill -KILL -- "-$group" 2>/dev/null || :; done
   wait "$child" 2>/dev/null || :
+  if [ -n "$terminal_group" ]; then supervised_terminal_group "$terminal_group" || :; fi
   if [ -n "${supervised_cancel:-}" ]; then "$supervised_cancel" || :; fi
   exit "$status"
 }
 
 supervise() {
-  local child='' pending='' saved rc=0 monitor=0 sig
+  local child='' pending='' saved rc=0 monitor=0 sig terminal_group=''
+  if [ "${1:-}" = --foreground-terminal ]; then
+    shift
+    terminal_group="$(supervised_terminal_group)" || terminal_group=''
+  fi
   saved="$(trap -p TERM INT HUP)"
   trap 'supervised_signal 143' TERM
   trap 'supervised_signal 130' INT
@@ -42,11 +63,17 @@ supervise() {
   # Job control makes $! the group leader. Turn it off again both here and
   # in the child, so its pipelines stay in that group and no job messages leak.
   if [[ $- != *m* ]]; then set -m; monitor=1; fi
-  (set +m; "$@") <&0 &
+  (
+    set +m
+    # Hand off before any sudo prompt, without changing pipeline stdin.
+    if [ -n "$terminal_group" ]; then supervised_terminal_group "$BASHPID" || exit 1; fi
+    "$@"
+  ) <&0 &
   child=$!
   if [ "$monitor" = 1 ]; then set +m; fi
   [ -z "$pending" ] || supervised_signal "$pending"
   wait "$child" || rc=$?
+  if [ -n "$terminal_group" ]; then supervised_terminal_group "$terminal_group" || :; fi
   # Replace installed handlers without an intermediate default disposition.
   eval "$saved"
   for sig in TERM INT HUP; do
