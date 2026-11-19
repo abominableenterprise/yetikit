@@ -104,6 +104,47 @@ check 'a method category and comment-like text in an interpolated string do not 
   '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.MethodCaptureTests;ShipFixtures.SiblingPureTests "* ]]'
 rm "$t/Props/MethodCaptureTests.cs"
 
+# Run each literal form on its own so a successful FirstTests selection cannot
+# conceal a dropped sibling. Both fixtures have headless tests and Gfx methods.
+for prefix in '@' '$@' '@$'; do
+  case "$prefix" in
+    '@') text='// {' ;;
+    *) text='/* {{ {value ?? "/*"} ""quoted""' ;;
+  esac
+  {
+    cat <<'CS'
+using NUnit.Framework;
+namespace ShipFixtures;
+public class FirstTests
+{
+    [Test, Category("Gfx")]
+    public void Render() {}
+    [Test, Explicit, Category("RenderTool")]
+    public void Capture() {}
+    [Test]
+    public void Rule()
+    {
+        string value = null;
+CS
+    printf '        var label = %s"start\n%s\n[Category(""Gfx"")] class Decoy\n        "; Assert.IsNotEmpty(label); }\n' "$prefix" "$text"
+    cat <<'CS'
+}
+public class SiblingTests
+{
+    [Test, Category("Gfx")] public void Render() {}
+    [Test] public void Rule() {}
+}
+public class UntaggedTests { [Test] public void Rule() {} }
+CS
+  } > "$t/Props/LiteralTests.cs"
+  pr HEAD
+  check "${prefix} multiline literal preserves all pure fixtures despite a method-only RenderTool category" \
+    '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.FirstTests;ShipFixtures.SiblingTests;ShipFixtures.UntaggedTests "* ]]'
+  check "${prefix} multiline literal preserves both Gfx fixtures without tagging the untagged sibling" \
+    '[ "$rc" = 0 ] && [ "$(filter)" = "ShipFixtures.FirstTests;ShipFixtures.SiblingTests" ]'
+done
+rm "$t/Props/LiteralTests.cs"
+
 printf 'using NUnit.Framework;\nnamespace ShipFixtures { public class MixedInlineTests { [Test] public void Rule() {} [Test, Category("Gfx")] public void Render() {} } }\n' > "$t/Props/MixedInlineTests.cs"
 pr HEAD
 check 'inline method Gfx category keeps the fixture in both passes, with Gfx excluded headlessly' \
