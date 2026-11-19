@@ -1,7 +1,7 @@
 {
   "name": "YetiKit.Lab",
   "rootNamespace": "YetiKit.Lab",
-  "references": ["YetiKit.Hands", "UnityEngine.UI"],
+  "references": ["YetiKit.Hands", "YetiKit.Interaction", "YetiKit.Playtest", "Unity.XR.Interaction.Toolkit", "UnityEngine.UI"],
   "defineConstraints": ["UNITY_EDITOR || DEVELOPMENT_BUILD", "UNITY_EDITOR || YETIKIT_DEV"],
   "autoReferenced": false
 }

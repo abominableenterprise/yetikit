@@ -36,8 +36,12 @@
       "source": "local",
       "dependencies": {
         "com.abominable.yetikit.hands": "0.0.1",
+        "com.abominable.yetikit.interaction": "0.0.1",
+        "com.abominable.yetikit.playtest": "0.0.1",
         "com.unity.ugui": "2.6.0",
-        "com.unity.modules.jsonserialize": "1.0.0"
+        "com.unity.modules.jsonserialize": "1.0.0",
+        "com.unity.modules.physics": "1.0.0",
+        "com.unity.xr.interaction.toolkit": "3.6.1"
       }
     },
     "com.abominable.yetikit.playtest": {
