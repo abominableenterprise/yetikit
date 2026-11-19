@@ -44,7 +44,7 @@ namespace YetiKit.Starter.HostTests
             Assert.That(lab.CurrentId, Is.Null);
             Assert.That(Panel(lab).GetComponentsInChildren<Button>().Select(button => button.name),
                 Is.EquivalentTo(new[] { "Compact turn", "Wide turn" }));
-            Capture("Start");
+            Capture(scene, lab, "Start");
             yield return null;
 
             Click(lab, "Compact turn");
@@ -56,7 +56,7 @@ namespace YetiKit.Starter.HostTests
             Assert.That(Turn(scene).turnAmount, Is.EqualTo(40f));
             yield return null;
             Assert.That(Status(lab), Does.Contain("40° (override)").And.Contain("default: 30°"));
-            Capture("Override");
+            Capture(scene, lab, "Override");
             yield return null;
 
             Click(lab, "Wide turn");
@@ -95,10 +95,36 @@ namespace YetiKit.Starter.HostTests
         static void Click(StarterLab lab, string name) => Panel(lab).GetComponentsInChildren<Button>()
             .Single(button => button.name == name).onClick.Invoke();
 
-        static void Capture(string state)
+        static void Capture(Scene scene, StarterLab lab, string state)
         {
             var dir = Environment.GetEnvironmentVariable("YETIKIT_STARTER_LAB_CAPTURE");
-            if (!string.IsNullOrEmpty(dir)) ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, state + ".png"));
+            if (string.IsNullOrEmpty(dir)) return;
+            var camera = StarterSandboxTests.Root(scene, "XR Origin").GetComponentInChildren<Camera>();
+            var canvas = Panel(lab).GetComponentInChildren<Canvas>();
+            var target = RenderTexture.GetTemporary(768, 480, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            var prior = RenderTexture.active;
+            try
+            {
+                camera.targetTexture = target;
+                canvas.renderMode = RenderMode.ScreenSpaceCamera;
+                canvas.worldCamera = camera;
+                canvas.planeDistance = 0.5f;
+                Canvas.ForceUpdateCanvases();
+                camera.Render();
+                RenderTexture.active = target;
+                image.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+                image.Apply();
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, state + ".png"), image.EncodeToPNG());
+            }
+            finally
+            {
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                camera.targetTexture = null;
+                RenderTexture.active = prior;
+                RenderTexture.ReleaseTemporary(target);
+                UnityEngine.Object.Destroy(image);
+            }
         }
 
         static void BackupPrefs()
