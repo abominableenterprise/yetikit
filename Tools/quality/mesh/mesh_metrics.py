@@ -25,7 +25,8 @@ def measure(verts, tris):
     for uses in edges.values():
         for i, _ in uses:
             neighbors[i].update(j for j, _ in uses if j != i)
-    # Outside rays can miss entire reversed shells, especially inside cavities.
+    # Rays alone cannot identify a wholly inside-out closed shell: its far wall
+    # still presents a front face. Signed volume supplies that missing evidence.
     unseen = set(range(len(t)))
     shells, shell_faces = [], []
     while unseen:
