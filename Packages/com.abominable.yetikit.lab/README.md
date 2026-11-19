@@ -54,6 +54,40 @@ Poses use Unity's left-handed axes (+X right, +Y up, +Z forward) for either hand
 with no mirroring. Each is `[px,py,pz,qx,qy,qz,qw]` in meters and quaternion
 components; rotations map child axes into the parent frame.
 
+### Generate a standalone scene
+
+Reference `YetiKit.Lab.Editor` from an Editor assembly and call
+`GripLabBuilder.Build(catalog, buildRig)` from a saved working scene. The rig hook
+receives the new active scene and returns its head transform; the hook supplies
+XR input and any UI.
+The builder adds a floor, table, light and station, restores the previously
+active scene, and returns the unsaved Lab scene. Save it with
+`EditorSceneManager.SaveScene` at a path you choose. It does not modify the
+build scene list or add passthrough.
+
+Catalog prefab entries must be prefab assets; factories run in the Editor and
+must return fresh active root props in the supplied scene. The saved scene keeps
+prefab links, factory-created objects, catalog IDs and rig references. At play
+start the station lays out those baked props and sizes the table to fit.
+
+### Optional passthrough
+
+The Lab and its scene builder do not require AR packages. With AR Foundation
+and Unity OpenXR: Meta installed, opt in by adding `GhostHandsOverlay` from
+`YetiKit.Lab.Passthrough` to the rig. Enable the Meta Quest Camera (Passthrough)
+OpenXR feature, and set up the rig's AR Session and camera following the
+[Unity passthrough guide](https://docs.unity3d.com/Packages/com.unity.xr.meta-openxr@2.6/manual/features/camera/passthrough.html).
+Assign the camera's otherwise-disabled `ARCameraManager` and the rig's
+`PlayerHand` components to one overlay. Disable or omit the overlay to leave
+camera settings alone. The overlay does not enable project-wide XR features.
+
+Each assigned hand uses its existing `IHandVisual` pose callbacks for wrist
+and joint alignment. To support ghost opacity, implement `IHandVisualAlpha`
+on that visual and use alpha-blended materials owned by the visual (not shared
+material assets). The overlay adjusts opacity only in tracked-hand mode and
+restores the prior value on mode changes, visual replacement, or disable, along
+with the original camera settings on disable. Controller visuals are unchanged.
+
 ### Grip overrides
 
 Pass an `IGripOverrideStore` to `Populate` to load and save overrides by catalog

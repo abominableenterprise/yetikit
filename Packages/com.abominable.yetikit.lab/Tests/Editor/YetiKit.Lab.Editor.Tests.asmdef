@@ -1,0 +1,10 @@
+{
+  "name": "YetiKit.Lab.Editor.Tests",
+  "rootNamespace": "YetiKit.Lab.Editor.Tests",
+  "references": ["YetiKit.Lab.Editor", "YetiKit.Lab", "YetiKit.Interaction", "Unity.XR.Interaction.Toolkit", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"],
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "autoReferenced": false
+}
