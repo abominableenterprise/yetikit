@@ -187,7 +187,9 @@ def main():
         if name == 'move' and os.geteuid() != 0:
             print('skip cross-UID move: fixture needs a root runner to drop UIDs; never invokes sudo')
             continue
-        with tempfile.TemporaryDirectory(prefix='ship-setup-cancel-') as tmp:
+        # The suite's per-fixture TMPDIR is private to the launching UID.
+        # This disposable sandbox must also be reachable after dropping UID.
+        with tempfile.TemporaryDirectory(prefix='ship-setup-cancel-', dir='/tmp') as tmp:
             root = Path(tmp)
             if name == 'move':
                 root.chmod(0o1777)  # Permit only the synthetic worker's readiness record.
