@@ -16,35 +16,40 @@ qr_lock_mtime() { perl -MTime::HiRes=stat -e '@s = stat $ARGV[0]; print "$s[9]\n
 # The lock's PID and run folder into QR_LOCK_PID / QR_LOCK_RUN. Returns 0 while its owner or worker group lives,
 # 1 when there is no lock, 2 when it is stale. An unknown group status is treated as live.
 # A lock with no PID counts as alive for its first minute
-# (another run is writing it), stale after that.
+# (another run is writing it), stale after that. For wait, status 1 can
+# still carry pending-generation evidence (with its directory pinned on FD 18).
 qr_lock_read() {
-  local d group status=0 workers="" metadata attempt; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
+  local d group status=0 workers="" metadata pending_metadata="" attempt; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
   case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
   QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
   QR_LOCK_PREV_PID=""; QR_LOCK_PREV_INVOCATION=""; QR_LOCK_UNPUBLISHED_AT=""; QR_LOCK_UNPUBLISHED_ID=""
+  if [ "${QR_WAIT_SAMPLE:-}" = 1 ]; then exec 18<&-; fi
   for attempt in 1 2; do
-    status=0
+    status=0; metadata=""
     if [ "${QR_WAIT_SAMPLE:-}" = 1 ]; then
-      # Pin the working directory before opening the descriptor. The snapshot
-      # inherits that same directory even if the lock path is replaced.
-      local saved_pwd="$PWD" saved_oldpwd="${OLDPWD-}"
-      exec 18<&-
-      cd "$d" 2>/dev/null || return 1
-      if { exec 18< .; } 2>/dev/null; then
-        metadata="$(qr_lock_snapshot "$d" pinned)" || status=$?
+      # Isolate cd: cleanup can remove the waiter's original directory.
+      # Keep the descriptor for the last sample that supplied evidence.
+      if { exec 20< "$d"; } 2>/dev/null; then
+        metadata="$(cd "$d" 2>/dev/null && qr_lock_snapshot "$d" pinned)" || status=$?
+        if [ -n "$metadata" ]; then
+          exec 18<&20
+          if [ "$status" = 3 ]; then pending_metadata="$metadata"; fi
+        fi
+        exec 20<&-
       else
         status=1
       fi
-      cd "$saved_pwd" || return 1
-      OLDPWD="$saved_oldpwd"
     else
       metadata="$(qr_lock_snapshot "$d")" || status=$?
     fi
     # A generation removed during the read may have lost some of its files.
-    # Retry it instead of interpreting a missing key as a legacy lock.
+    # Retry for a complete sample, keeping only pending evidence if it vanished.
     [ "$status" = 3 ] || break
   done
-  [ "$status" = 0 ] || return 1
+  if [ "$status" != 0 ]; then
+    [ -n "$pending_metadata" ] || return 1
+    metadata="$pending_metadata"
+  fi
   {
     IFS= read -r QR_LOCK_PID
     IFS= read -r QR_LOCK_INVOCATION
@@ -54,6 +59,7 @@ qr_lock_read() {
     read -r QR_LOCK_PREV_PID QR_LOCK_PREV_INVOCATION || true
     read -r QR_LOCK_UNPUBLISHED_AT QR_LOCK_UNPUBLISHED_ID || true
   } <<< "$metadata"
+  [ "$status" = 0 ] || return 1
   QR_LOCK_RUN="${QR_LOCK_RUN:--}"
   [ "$workers" != busy ] || return 0
   case "$group" in
@@ -78,10 +84,10 @@ qr_lock_stamp() {
   perl -MTime::HiRes=stat -e 'my @s = @ARGV ? stat($ARGV[0]) : stat(*STDIN); print "$s[9] $s[0]:$s[1]\n" if @s' "$@"
 }
 
-# Pin the directory generation while sampling it; status 3 means the lock
-# changed or lost its PID during the snapshot. Never consume that sample.
+# Pin the directory generation while sampling it. Status 3 means retry;
+# its only possible output is evidence of an observed pending generation.
 qr_lock_snapshot() {
-  local pid group invocation workers="" previous="" unpublished_at=""
+  local pid group invocation run_dir workers="" previous="" unpublished_at="" pinned_stamp
   local pointer="${1%/*}/current-invocation"
   if [ "${2:-}" = pinned ]; then
     [ "$1" -ef . ] || return 3
@@ -113,12 +119,21 @@ qr_lock_snapshot() {
     # only if PID data actually appeared after the first read.
     previous="$(cat "$pointer" 2>/dev/null)" || previous=""
     unpublished_at="$(qr_lock_stamp .)"
+    pinned_stamp="$(qr_lock_stamp <&20)"
+    # Opening the descriptor and entering the directory can straddle a
+    # replacement. Only keep evidence from the generation the FD pins.
+    [ -n "$unpublished_at" ] && [ "${unpublished_at#* }" = "${pinned_stamp#* }" ] || return 3
     [ -z "$(cat pid 2>/dev/null)" ] || return 3
   fi
-  printf '%s\n' "$pid" "$invocation" "$group" "$(cat run_dir 2>/dev/null)"
+  run_dir="$(cat run_dir 2>/dev/null)"
   if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then workers=busy; fi
-  printf '%s\n' "$workers" "$previous" "$unpublished_at"
-  [ "$1" -ef . ] || return 3
+  if [ ! "$1" -ef . ]; then
+    # These fields were sampled before the final generation check. Preserve
+    # the pending boundary, not any potentially torn owner or run metadata.
+    [ -z "$unpublished_at" ] || printf '\n\n\n\n\n%s\n%s\n' "$previous" "$unpublished_at"
+    return 3
+  fi
+  printf '%s\n' "$pid" "$invocation" "$group" "$run_dir" "$workers" "$previous" "$unpublished_at"
 }
 
 # Only look at the worker tree in this pinned generation. Probe the step

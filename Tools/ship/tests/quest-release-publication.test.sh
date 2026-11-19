@@ -112,6 +112,34 @@ start_during_wait() {
     grep -q '^synthetic release summary$' "$tmp/out"
 }
 
+removed_waiter_cwd() {
+  QR_LOGS="$tmp/cleanup"
+  mkdir -p "$QR_LOGS" "$tmp/removed-worktree" && start_release || return 1
+  cd "$tmp/removed-worktree" || return 1
+  qr_lock_snapshot() {
+    real_lock_snapshot "$@" || return $?
+    # Cleanup removes the launch directory during a sample of its live lock.
+    if [ -f "$QR_LOGS/first-poll" ]; then
+      rm -rf "$tmp/removed-worktree" || exit 99
+    fi
+  }
+  sleep() {
+    if [ ! -f "$QR_LOGS/first-poll" ]; then
+      touch "$QR_LOGS/first-poll" || exit 99
+    elif [ ! -f "$QR_LOGS/second-poll" ]; then
+      # The second sample must still see the live producer. Only now publish.
+      [ ! -e "$tmp/removed-worktree" ] && [ -d "$QR_LOGS/run.lock" ] &&
+        kill -0 "$$" && finish_release && touch "$QR_LOGS/second-poll" || exit 99
+    else
+      exit 99
+    fi
+  }
+  local wait_rc=0
+  QUEST_WAIT_GRACE=0 qr_main wait 1 || wait_rc=$?
+  [ -f "$QR_LOGS/second-poll" ] && [ "$wait_rc" = 0 ] &&
+    grep -q '^synthetic release summary$' "$tmp/out"
+}
+
 start_during_reconciliation() {
   local outcome="$1" wait_rc=0 polls=0 did_start=0 fake_now=0 samples=0 wait_minutes=1
   local dead_pid=2147483647
@@ -129,7 +157,7 @@ start_during_reconciliation() {
   if [ "$outcome" = first-legacy ] || [ "$outcome" = first-legacy-finished ]; then
     # With only legacy state, an abandoned startup must not reactivate last-result either.
     rm "$QR_LOGS/current-invocation" && printf 'QR_RUN_DIR=%q\n' "$QR_RUN_DIR" > "$QR_LOGS/current.env" || return 1
-  elif [ "$outcome" = first-keyed-stale-copy ]; then
+  elif [[ "$outcome" = first-keyed-stale-copy || "$outcome" = *vanished-stale ]]; then
     # This is A's normal compatibility copy, not B's terminal result.
     touch -t 200001010000 "$QR_LOGS/last-result" || return 1
     printf 'QR_RUN_DIR=%q\n' "$QR_RUN_DIR" > "$QR_LOGS/current.env" || return 1
@@ -137,7 +165,7 @@ start_during_reconciliation() {
     rm "$QR_LOGS/last-result" || return 1
   fi
   case "$outcome" in
-    first-keyed-legacy-race-created|first-keyed-legacy-race-in-snapshot) ;;
+    first-keyed-legacy-race-created|first-keyed-legacy-race-in-snapshot|first-keyed-legacy-race-vanished-recheck) ;;
     first-keyed-legacy-teardown|first-keyed-legacy-replaced|first-keyed-legacy-race-*)
       mkdir "$QR_LOGS/run.lock" && touch -t "$startup_stamp" "$QR_LOGS/run.lock" || return 1
       did_start=1 ;;
@@ -151,6 +179,23 @@ start_during_reconciliation() {
       did_start=1 ;;
     completed-deadline) wait_minutes=0 ;;
   esac
+  cat() {
+    command cat "$@"; local cat_rc=$?
+    if [[ "$outcome" = first-keyed-legacy-race-vanished* ]] && [ "$*" = pid ] &&
+       [ . -ef "$QR_LOGS/run.lock" ]; then
+      # Publish and fully remove the lock on the second PID read, after the
+      # pending stamp was sampled but before the final generation check.
+      if [ -f "$QR_LOGS/read-pid" ]; then
+        if [ "$outcome" != first-keyed-legacy-race-vanished-stale ]; then
+          finish_legacy_in_place || exit 99
+        fi
+        rmdir "$QR_LOGS/run.lock" && touch "$QR_LOGS/vanished" || exit 99
+      else
+        touch "$QR_LOGS/read-pid" || exit 99
+      fi
+    fi
+    return "$cat_rc"
+  }
   qr_lock_snapshot() {
     real_lock_snapshot "$@" || return $?
     if [ "$samples:$outcome" = 1:first-keyed-legacy-race-in-snapshot ]; then
@@ -175,7 +220,7 @@ start_during_reconciliation() {
         rmdir "$QR_LOGS/run.lock" || exit 99 ;;
     esac
     case "$samples:$outcome" in
-      1:first-keyed-legacy-race-created|1:first-keyed-legacy-race-replaced|1:first-keyed-legacy-race-in-snapshot|2:first-keyed-legacy-race-previous)
+      1:first-keyed-legacy-race-created|1:first-keyed-legacy-race-replaced|1:first-keyed-legacy-race-in-snapshot|2:first-keyed-legacy-race-previous|2:first-keyed-legacy-race-vanished-recheck)
         # On the original waiter this runs between FD open and the snapshot.
         # In the previous-result case the new generation starts after A's result.
         local stamp="$startup_stamp"
@@ -203,7 +248,8 @@ start_during_reconciliation() {
         if [ "$outcome" = stale ]; then
           printf '%s\n' "$dead_pid" > "$QR_LOGS/run.lock/pid" || exit 99
         fi
-      elif [[ "$outcome" != completed* ]] && [ "$outcome" != live-after-recheck ]; then
+      elif [[ "$outcome" != completed* && "$outcome" != live-after-recheck &&
+              "$outcome" != first-keyed-legacy-race-vanished-recheck ]]; then
         mkdir "$QR_LOGS/run.lock" || exit 99
       fi
       did_start=1
@@ -236,7 +282,7 @@ start_during_reconciliation() {
         fi
         # Strict freshness should not depend on timestamp resolution.
         perl -e 'utime time + 2, time + 2, $ARGV[0] or die $!' "$QR_LOGS/last-result" || exit 99 ;;
-      1:first-keyed-legacy-race-in-snapshot) ;;
+      1:first-keyed-legacy-race-in-snapshot|*:first-keyed-legacy-race-vanished-stale) ;;
       1:first-keyed-legacy-teardown|1:first-keyed-legacy-replaced|1:first-keyed-legacy-race-*)
         finish_legacy_in_place || exit 99
         if [ "$outcome" = first-keyed-legacy-replaced ]; then
@@ -281,6 +327,11 @@ start_during_reconciliation() {
       [ "$wait_rc" = 0 ] && [ "$(cat "$QR_LOGS/polls")" = 1 ] && grep -q '^synthetic previous success$' "$tmp/out" ;;
     first-keyed-legacy-replaced|first-keyed-legacy-race-previous)
       [ "$wait_rc" = 124 ] && [ ! -s "$tmp/out" ] && grep -Fq "$previous_key" "$QR_LOGS/current-invocation" ;;
+    first-keyed-legacy-race-vanished-stale)
+      [ -f "$QR_LOGS/vanished" ] && [ "$wait_rc" = 124 ] && [ ! -s "$tmp/out" ] ;;
+    first-keyed-legacy-race-vanished*)
+      [ -f "$QR_LOGS/vanished" ] && [ ! -f "$QR_LOGS/polls" ] && [ "$wait_rc" = 1 ] && grep -q 'exited 1' "$tmp/err" &&
+        grep -q '^synthetic successor failed$' "$tmp/out" && grep -qF "$previous_key" "$QR_LOGS/current-invocation" ;;
     first-keyed-legacy-teardown|first-keyed-legacy-race-*)
       [ "$wait_rc" = 1 ] && [ "$(cat "$QR_LOGS/polls")" = 2 ] && grep -q 'exited 1' "$tmp/err" &&
         grep -q '^synthetic successor failed$' "$tmp/out" && grep -Fq "$previous_key" "$QR_LOGS/current-invocation" ;;
@@ -323,5 +374,9 @@ check 'a replacement PID-less lock cannot claim the preceding legacy result' sta
 check 'a legacy lock created after FD open can still report its own result' start_during_reconciliation first-keyed-legacy-race-created
 check 'a legacy lock replaced after FD open can still report its own result' start_during_reconciliation first-keyed-legacy-race-replaced
 check 'a replacement during FD sampling rejects the preceding legacy result' start_during_reconciliation first-keyed-legacy-race-previous
+check 'a waiter survives removal of its launch directory while the producer is live' removed_waiter_cwd
 check 'a legacy result published before the snapshot returns keeps its startup cutoff' start_during_reconciliation first-keyed-legacy-race-in-snapshot
+check 'a pending legacy lock that vanishes during the snapshot does not fall back to the previous success' start_during_reconciliation first-keyed-legacy-race-vanished
+check 'a pending legacy lock that vanishes during pointer reconciliation suppresses the previous success' start_during_reconciliation first-keyed-legacy-race-vanished-recheck
+check 'a vanished pending lock cannot claim the preceding compatibility result' start_during_reconciliation first-keyed-legacy-race-vanished-stale
 [ "$fails" = 0 ]

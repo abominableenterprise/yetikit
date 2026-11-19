@@ -114,6 +114,31 @@ qr_wait_result() {
   if [ "$header" != "$record" ]; then printf '%s' "${record#*"$marker"}"; fi
 }
 
+# Record pending evidence before reconciling a pointer, even when the lock
+# disappears mid-sample. The pinned descriptor prevents inode reuse from
+# making a replacement lock look like the same generation.
+qr_wait_sample() {
+  st=0; qr_lock_read || st=$?
+  [ -z "$wpid" ] && { [ "$st" = 0 ] ||
+    { [ -n "$QR_LOCK_UNPUBLISHED_ID" ] && { [ "$st" = 1 ] || [ "$pending" = 1 ]; }; }; } &&
+    ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]] || return 0
+  pending=1
+  superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
+  # Teardown unlinks the PID and advances mtime. Keep the startup cutoff
+  # for this generation until a different lock is observed.
+  if [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ]; then
+    legacy_lock="$QR_LOCK_UNPUBLISHED_ID"; legacy_start="$QR_LOCK_UNPUBLISHED_AT"
+    exec 19<&-
+    if [ -n "$legacy_lock" ]; then exec 19<&18; fi
+  fi
+  # Older keyed producers removed their lock files in place. A retained
+  # key with its own result proves teardown, not a new pending startup.
+  if [ -n "$superseded_key" ] && [ "$QR_LOCK_INVOCATION" = "$superseded_key" ] &&
+     qr_wait_result "$superseded_pid" "" "" "$superseded_key" >/dev/null; then
+    superseded_pid=""; superseded_key=""
+  fi
+}
+
 qr_wait() (
   local minutes="${1:-45}" poll="${QUEST_WAIT_POLL:-5}" grace="${QUEST_WAIT_GRACE:-15}" t0 now deadline
   local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict
@@ -125,7 +150,7 @@ qr_wait() (
   t0="$(qr_wait_now)"; deadline=$((t0 + minutes * 60)); last_line="$t0"
   while :; do
     retry_pointer=0; res=""
-    st=0; qr_lock_read || st=$?
+    qr_wait_sample
     if [ -z "$wpid" ] && [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
       if [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$pointer" ]; then
         # A run can finish between samples, without ever preparing a folder. Use its
@@ -136,21 +161,21 @@ qr_wait() (
           qr_wait_say "invalid invocation identity"; return 1
         elif [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
           sampled_pid="$pointer_pid"; sampled_key="$pointer_key"
-          st=0; qr_lock_read || st=$?
+          qr_wait_sample
           if [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
             # A successor may have started or finished during reconciliation.
             # Recheck a changed pointer's lock, but keep the final poll bounded.
             start="$(qr_lock_mtime "$pointer")"
-            if read -r pointer_pid pointer_key 2>/dev/null < "$pointer" && [[ "$pointer_pid" =~ ^[0-9]+$ ]] &&
-               { [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; }; then
+            if ! read -r pointer_pid pointer_key 2>/dev/null < "$pointer" || ! [[ "$pointer_pid" =~ ^[0-9]+$ ]]; then
+              retry_pointer=1
+            elif [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
               if [ "$pointer_pid" != "$sampled_pid" ] || [ "$pointer_key" != "$sampled_key" ]; then
-                st=0; qr_lock_read || st=$?
+                qr_wait_sample
               fi
-              if [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
+              if [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]] &&
+                 { [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; }; then
                 wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
               fi
-            else
-              retry_pointer=1
             fi
           fi
         fi
@@ -163,25 +188,6 @@ qr_wait() (
       if [ -z "$key" ]; then
         start="$(qr_lock_mtime "$(qr_lock_dir)/pid")"
         [ -n "$start" ] || start="$(qr_lock_mtime "$(qr_lock_dir)")"
-      fi
-    elif [ -z "$wpid" ] && { [ "$st" = 0 ] || { [ "$pending" = 1 ] && [ -n "$QR_LOCK_UNPUBLISHED_ID" ]; }; }; then
-      pending=1
-      superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
-      # Teardown unlinks the PID and advances mtime. Keep the startup cutoff
-      # for this generation until a different lock is observed.
-      if [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ]; then
-        legacy_start=""; legacy_lock=""
-        exec 19<&-
-        if [ -n "$QR_LOCK_UNPUBLISHED_ID" ]; then
-          exec 19<&18
-          legacy_lock="$QR_LOCK_UNPUBLISHED_ID"; legacy_start="$QR_LOCK_UNPUBLISHED_AT"
-        fi
-      fi
-      # Older keyed producers removed their lock files in place. A retained
-      # key with its own result proves teardown, not a new pending startup.
-      if [ -n "$superseded_key" ] && [ "$QR_LOCK_INVOCATION" = "$superseded_key" ] &&
-         qr_wait_result "$superseded_pid" "" "" "$superseded_key" >/dev/null; then
-        superseded_pid=""; superseded_key=""
       fi
     elif [ -z "$wpid" ] && [ "$pending" = 1 ] && [ "$retry_pointer" = 0 ] &&
          [ -n "$legacy_start" ] && [ "$st" = 1 ] && [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ]; then
