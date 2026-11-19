@@ -123,10 +123,10 @@ qr_wait() {
             case "$pointer_pid" in ''|*[!0-9]*) qr_wait_say "invalid invocation identity"; return 1 ;; esac
             if [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
               start="$(qr_wait_mtime "$QR_LOGS/current-invocation")"
-              # A new lock can appear after the no-lock sample. An unpublished
-              # owner invalidates this provisional pointer, not a true lock pin.
+              # The lock may have appeared after the no-lock sample. A live
+              # mismatch (including an unpublished owner) supersedes the pointer.
               st=0; qr_lock_read || st=$?
-              if [ "$st" = 0 ] && [ "$QR_LOCK_PID" = unknown ]; then
+              if [ "$st" = 0 ] && { [ "$QR_LOCK_PID" != "$pointer_pid" ] || [ "$QR_LOCK_INVOCATION" != "$pointer_key" ]; }; then
                 superseded_pid="$pointer_pid"; superseded_key="$pointer_key"
               else
                 wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""

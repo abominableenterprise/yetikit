@@ -111,10 +111,11 @@ start_during_wait() {
     grep -q '^synthetic release summary$' "$tmp/out"
 }
 
-start_without_identity() {
+start_during_reconciliation() {
   local outcome="$1" wait_rc=0 polls=0 did_start=0 fake_now=0
   QR_LOGS="$tmp/pending-$outcome"
   mkdir -p "$QR_LOGS"
+  printf 'synthetic previous success\n' > "$QR_RUN_DIR/summary.txt" || return 1
   start_release && finish_release || return 1
   local previous_key="$QR_INVOCATION"
   qr_lock_read() {
@@ -122,7 +123,13 @@ start_without_identity() {
     real_lock_read || observed=$?
     if [ "$observed" = 1 ] && [ "$did_start" = 0 ]; then
       # A successor starts after the no-lock sample, but the pointer still names the old result.
-      mkdir "$QR_LOGS/run.lock" || exit 99
+      if [ "$outcome" = before-pointer ]; then
+        mv "$QR_LOGS/current-invocation" "$QR_LOGS/previous-pointer" && start_release &&
+          mv "$QR_LOGS/current-invocation" "$QR_LOGS/next-pointer" &&
+          mv "$QR_LOGS/previous-pointer" "$QR_LOGS/current-invocation" || exit 99
+      else
+        mkdir "$QR_LOGS/run.lock" || exit 99
+      fi
       did_start=1
     fi
     return "$observed"
@@ -136,6 +143,8 @@ start_without_identity() {
         if [ "$outcome" = fast ]; then finish_failed_successor || exit 99; fi ;;
       2:failure)
         finish_failed_successor || exit 99 ;;
+      1:before-pointer)
+        mv "$QR_LOGS/next-pointer" "$QR_LOGS/current-invocation" && finish_failed_successor || exit 99 ;;
       1:unpublished)
         # An abandoned startup must not send the waiter back to the old pointer.
         rmdir "$QR_LOGS/run.lock" || exit 99 ;;
@@ -146,9 +155,9 @@ start_without_identity() {
       qr_lock_result prepare 1 0 && qr_lock_release
   }
   QUEST_WAIT_GRACE=0 qr_main wait 1 || wait_rc=$?
-  ! grep -q '^synthetic release summary$' "$tmp/out" || return 1
+  ! grep -q '^synthetic previous success$' "$tmp/out" || return 1
   case "$outcome" in
-    failure|fast)
+    failure|fast|before-pointer)
       [ "$wait_rc" = 1 ] && grep -q '^synthetic successor failed$' "$tmp/out" &&
         ! grep -qF "$previous_key" "$QR_LOGS/current-invocation" ;;
     unpublished)
@@ -161,7 +170,8 @@ check 'deletion between metadata reads does not pin a legacy owner' torn_lock co
 check 'deletion paused before removing the directory does not pin a legacy owner' torn_lock paused
 check 'an old keyed pointer does not relabel a legacy lock with the same PID' legacy_with_old_pointer
 check 'a newly published invocation is waited on, not reported as ended' start_during_wait
-check 'an unpublished successor overrides a provisional previous result' start_without_identity failure
-check 'a successor that completes between polls replaces the provisional result' start_without_identity fast
-check 'retrying an unpublished successor is bounded and never returns the old result' start_without_identity unpublished
+check 'an unpublished successor overrides a provisional previous result' start_during_reconciliation failure
+check 'a successor that completes between polls replaces the provisional result' start_during_reconciliation fast
+check 'a successor with a published PID overrides an older pointer' start_during_reconciliation before-pointer
+check 'retrying an unpublished successor is bounded and never returns the old result' start_during_reconciliation unpublished
 [ "$fails" = 0 ]
