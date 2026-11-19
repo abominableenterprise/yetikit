@@ -87,13 +87,16 @@ qr_lock_stamp() {
 # Pin the directory generation while sampling it. Status 3 means retry;
 # its only possible output is evidence of an observed pending generation.
 qr_lock_snapshot() {
-  local pid group invocation run_dir workers="" previous="" unpublished_at="" pinned_stamp
+  local pid group invocation run_dir workers="" previous="" unpublished_at="" pinned_stamp pid_arrived=""
   local pointer="${1%/*}/current-invocation"
   if [ "${2:-}" = pinned ]; then
     [ "$1" -ef . ] || return 3
   else
     cd "$1" 2>/dev/null || return 1
   fi
+  # Sample the pinned timestamp before PID/metadata reads. Teardown can
+  # advance it past the result timestamp while those reads are in flight.
+  if [ "${QR_WAIT_SAMPLE:-}" = 1 ]; then pinned_stamp="$(qr_lock_stamp <&20)"; fi
   pid="$(cat pid 2>/dev/null)"
   # Check the owner before sampling the step group: a live owner can still
   # publish a new step. Then check the step before walking its worker slots.
@@ -117,20 +120,21 @@ qr_lock_snapshot() {
     # Capture the preceding pointer inside the pending lock's generation check.
     # A legacy writer can leave an empty pid file while publishing it. Retry
     # only if PID data actually appeared after the first read.
-    previous="$(cat "$pointer" 2>/dev/null)" || previous=""
     unpublished_at="$(qr_lock_stamp .)"
-    pinned_stamp="$(qr_lock_stamp <&20)"
     # Opening the descriptor and entering the directory can straddle a
     # replacement. Only keep evidence from the generation the FD pins.
-    [ -n "$unpublished_at" ] && [ "${unpublished_at#* }" = "${pinned_stamp#* }" ] || return 3
-    [ -z "$(cat pid 2>/dev/null)" ] || return 3
+    [ -n "$pinned_stamp" ] && [ "${unpublished_at#* }" = "${pinned_stamp#* }" ] || return 3
+    unpublished_at="$pinned_stamp"
+    previous="$(cat "$pointer" 2>/dev/null)" || previous=""
+    pid_arrived="$(cat pid 2>/dev/null)"
   fi
   run_dir="$(cat run_dir 2>/dev/null)"
   if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then workers=busy; fi
-  if [ ! "$1" -ef . ]; then
-    # These fields were sampled before the final generation check. Preserve
-    # the pending boundary, not any potentially torn owner or run metadata.
-    [ -z "$unpublished_at" ] || printf '\n\n\n\n\n%s\n%s\n' "$previous" "$unpublished_at"
+  if [ -n "$pid_arrived" ] || [ ! "$1" -ef . ]; then
+    # Preserve the pending boundary, not any torn owner or run metadata.
+    # A sampled invocation key can only be used with a matching pointer and
+    # that key's own saved result to recognize keyed teardown.
+    [ -z "$unpublished_at" ] || printf '\n%s\n\n\n\n%s\n%s\n' "$invocation" "$previous" "$unpublished_at"
     return 3
   fi
   printf '%s\n' "$pid" "$invocation" "$group" "$run_dir" "$workers" "$previous" "$unpublished_at"

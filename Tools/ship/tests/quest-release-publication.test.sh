@@ -166,6 +166,9 @@ start_during_reconciliation() {
   fi
   case "$outcome" in
     first-keyed-legacy-race-created|first-keyed-legacy-race-in-snapshot|first-keyed-legacy-race-vanished-recheck) ;;
+    first-keyed-legacy-race-vanished-keyed)
+      mkdir "$QR_LOGS/run.lock" && printf '%s\n' "$previous_key" > "$QR_LOGS/run.lock/invocation" || return 1
+      did_start=1 ;;
     first-keyed-legacy-teardown|first-keyed-legacy-replaced|first-keyed-legacy-race-*)
       mkdir "$QR_LOGS/run.lock" && touch -t "$startup_stamp" "$QR_LOGS/run.lock" || return 1
       did_start=1 ;;
@@ -181,15 +184,21 @@ start_during_reconciliation() {
   esac
   cat() {
     command cat "$@"; local cat_rc=$?
-    if [[ "$outcome" = first-keyed-legacy-race-vanished* ]] && [ "$*" = pid ] &&
-       [ . -ef "$QR_LOGS/run.lock" ]; then
+    if [ "$outcome" = first-keyed-legacy-race-vanished-early ] &&
+       [ "$*" = "$QR_LOGS/current-invocation" ] && [ . -ef "$QR_LOGS/run.lock" ]; then
+      finish_legacy_in_place && rmdir "$QR_LOGS/run.lock" && touch "$QR_LOGS/vanished" || exit 99
+    elif [[ "$outcome" = first-keyed-legacy-race-vanished* && "$outcome" != *vanished-early ]] &&
+         [ "$*" = pid ] && [ . -ef "$QR_LOGS/run.lock" ]; then
       # Publish and fully remove the lock on the second PID read, after the
       # pending stamp was sampled but before the final generation check.
       if [ -f "$QR_LOGS/read-pid" ]; then
-        if [ "$outcome" != first-keyed-legacy-race-vanished-stale ]; then
+        if [[ "$outcome" != *vanished-stale && "$outcome" != *vanished-keyed ]]; then
           finish_legacy_in_place || exit 99
         fi
-        rmdir "$QR_LOGS/run.lock" && touch "$QR_LOGS/vanished" || exit 99
+        if [ "$outcome" = first-keyed-legacy-race-vanished-pid ]; then
+          printf '%s\n' "$$"
+        fi
+        rm -rf "$QR_LOGS/run.lock" && touch "$QR_LOGS/vanished" || exit 99
       else
         touch "$QR_LOGS/read-pid" || exit 99
       fi
@@ -282,7 +291,7 @@ start_during_reconciliation() {
         fi
         # Strict freshness should not depend on timestamp resolution.
         perl -e 'utime time + 2, time + 2, $ARGV[0] or die $!' "$QR_LOGS/last-result" || exit 99 ;;
-      1:first-keyed-legacy-race-in-snapshot|*:first-keyed-legacy-race-vanished-stale) ;;
+      1:first-keyed-legacy-race-in-snapshot|*:first-keyed-legacy-race-vanished*) ;;
       1:first-keyed-legacy-teardown|1:first-keyed-legacy-replaced|1:first-keyed-legacy-race-*)
         finish_legacy_in_place || exit 99
         if [ "$outcome" = first-keyed-legacy-replaced ]; then
@@ -313,7 +322,7 @@ start_during_reconciliation() {
     printf 'synthetic third success\n' > "$QR_RUN_DIR/summary.txt" && start_release && finish_release
   }
   QUEST_WAIT_GRACE=0 qr_main wait "$wait_minutes" || wait_rc=$?
-  if [ "$outcome" != teardown ]; then
+  if [[ "$outcome" != teardown && "$outcome" != *vanished-keyed ]]; then
     ! grep -Eq '^synthetic (previous|third) success$' "$tmp/out" || return 1
   fi
   case "$outcome" in
@@ -327,6 +336,8 @@ start_during_reconciliation() {
       [ "$wait_rc" = 0 ] && [ "$(cat "$QR_LOGS/polls")" = 1 ] && grep -q '^synthetic previous success$' "$tmp/out" ;;
     first-keyed-legacy-replaced|first-keyed-legacy-race-previous)
       [ "$wait_rc" = 124 ] && [ ! -s "$tmp/out" ] && grep -Fq "$previous_key" "$QR_LOGS/current-invocation" ;;
+    first-keyed-legacy-race-vanished-keyed)
+      [ -f "$QR_LOGS/vanished" ] && [ "$wait_rc" = 0 ] && grep -q '^synthetic previous success$' "$tmp/out" ;;
     first-keyed-legacy-race-vanished-stale)
       [ -f "$QR_LOGS/vanished" ] && [ "$wait_rc" = 124 ] && [ ! -s "$tmp/out" ] ;;
     first-keyed-legacy-race-vanished*)
@@ -379,4 +390,7 @@ check 'a legacy result published before the snapshot returns keeps its startup c
 check 'a pending legacy lock that vanishes during the snapshot does not fall back to the previous success' start_during_reconciliation first-keyed-legacy-race-vanished
 check 'a pending legacy lock that vanishes during pointer reconciliation suppresses the previous success' start_during_reconciliation first-keyed-legacy-race-vanished-recheck
 check 'a vanished pending lock cannot claim the preceding compatibility result' start_during_reconciliation first-keyed-legacy-race-vanished-stale
+check 'a PID appearing on recheck does not erase pending evidence if the lock vanished' start_during_reconciliation first-keyed-legacy-race-vanished-pid
+check 'a legacy result written before the pointer read uses the earlier generation cutoff' start_during_reconciliation first-keyed-legacy-race-vanished-early
+check 'a keyed teardown that vanishes during sampling retains its own result' start_during_reconciliation first-keyed-legacy-race-vanished-keyed
 [ "$fails" = 0 ]
