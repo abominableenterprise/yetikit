@@ -6,7 +6,7 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 
-for file in linux-unity.sh linux-unity-setup.sh linux-unity-license.sh lib/android.sh lib/config.sh lib/linux-unity-idle.sh; do
+for file in linux-unity.sh linux-unity-setup.sh linux-unity-license.sh lib/android.sh lib/config.sh lib/linux-unity-idle.sh lib/linux-unity-shared-files.sh; do
   check "$file fits the hub source-size ceiling" \
     '[ -f "$ci/$file" ] && [ "$(wc -l < "$ci/$file")" -le 800 ] && [ "$(wc -c < "$ci/$file")" -le 51200 ]'
 done
@@ -35,6 +35,9 @@ for func in cmd_apk apk_swap_off apk_disk_check; do
   check "$func is loaded from the Android module" \
     'definition="$(declare -F "$func")" && [ "${definition##* }" = "$ci/lib/android.sh" ]'
 done
+
+check 'lock_unity is loaded from the shared-files module' \
+  'definition="$(declare -F lock_unity)" && [ "${definition##* }" = "$ci/lib/linux-unity-shared-files.sh" ]'
 
 echo "$fails failure(s)"
 [ "$fails" = 0 ]

@@ -186,20 +186,6 @@ discard_partial_restore() {
   rm -rf "$PROJECT"/.task-cache.*
 }
 
-# Cleanup touches global shared memory, so serialize editor runs across checkouts
-# and installations using that SHM_DIR. Refuse overlap instead of killing a peer.
-lock_unity() {
-  [ -z "${UNITY_CLEANUP_FD:-}" ] || return 0
-  local lock="$SHM_DIR/.linux-unity-cleanup.lock" flock_args=(-n)
-  # Publish once with shared read access, without truncating/replacing a peer's
-  # inode. Linux flock can take an exclusive lock on a read-only descriptor.
-  [ -e "$lock" ] || (umask 022; set -C; : > "$lock") 2>/dev/null || true
-  exec {UNITY_CLEANUP_FD}< "$lock" || die "cannot read $lock; ensure all runner accounts have read access"
-  [ "$#" = 0 ] || flock_args=(-w "$1")
-  flock "${flock_args[@]}" "$UNITY_CLEANUP_FD" || die "another Unity run owns $SHM_DIR; wait for it or stop its checkout"
-  chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
-}
-
 # Read-only installation scan. Strict mode prints matches but returns 1 if inspection is incomplete:
 # an unreadable live userspace process is not evidence of absence. Kernel threads, zombies and exits are exempt.
 # shared-files scope additionally scans other installations, reporting executable paths with the PIDs.
