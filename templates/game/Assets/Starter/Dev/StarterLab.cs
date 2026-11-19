@@ -24,6 +24,7 @@ namespace Game.Dev
         public string SuggestedId { get; private set; }
         public ITuningBinding Angle { get; private set; }
         public bool HasOverride => Angle != null && Angle.Get() != Angle.Default;
+        internal float SnapAngle => turn.turnAmount;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetHooks() => SceneManager.sceneLoaded -= OnSceneLoaded;
@@ -93,8 +94,9 @@ namespace Game.Dev
             var authoredDefault = id == Compact ? 30f : 45f;
             // Lab bindings apply saved overrides on registration, but callers supply the live default first.
             turn.turnAmount = authoredDefault;
-            tuning = new Tuning(Scope + "." + id);
-            Angle = tuning.Float("Snap turn", () => turn.turnAmount, value => turn.turnAmount = value,
+            var experimentId = Scope + "." + id;
+            tuning = StarterTuningDocument.CanPersist(experimentId) ? new Tuning(experimentId) : null;
+            Angle = tuning?.Float("Snap turn", () => turn.turnAmount, value => turn.turnAmount = value,
                 authoredDefault, min: 15f, max: 90f, step: 5f);
             CurrentId = id;
         }

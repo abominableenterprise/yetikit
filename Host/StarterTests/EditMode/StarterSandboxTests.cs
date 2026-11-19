@@ -26,12 +26,7 @@ namespace YetiKit.Starter.HostTests
         [UnityTest]
         public IEnumerator GeneratedSandboxPersistsAndSupportsGrabRelease()
         {
-            // The editor only allows additive creation with a previously saved scene open.
-            var baseline = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            Assert.That(EditorSceneManager.SaveScene(baseline, OutputParent + "/Baseline.unity"), Is.True);
-            var outputName = "Bake-" + Guid.NewGuid().ToString("N");
-            var output = $"{OutputParent}/{outputName}";
-            SessionState.SetString(OutputKey, output);
+            var output = PrepareBake();
 
             var active = SceneManager.GetActiveScene();
             var sceneCount = SceneManager.sceneCount;
@@ -75,6 +70,31 @@ namespace YetiKit.Starter.HostTests
             yield return StarterRigChecks.DriveRig(scene);
             yield return StarterLabChecks.DriveAndReload(scene.path);
             yield return new ExitPlayMode();
+        }
+
+        [UnityTest]
+        public IEnumerator EmptySavedTuningDisablesControls() => DriveUnreadableTuning("", "Empty");
+
+        [UnityTest]
+        public IEnumerator MalformedSavedTuningDisablesControls() => DriveUnreadableTuning("{broken", "Malformed");
+
+        static IEnumerator DriveUnreadableTuning(string document, string fixture)
+        {
+            SandboxBuilder.Build(PrepareBake());
+            yield return new EnterPlayMode();
+            yield return StarterLabChecks.DriveUnreadable(SessionState.GetString(OutputKey, "") + "/Sandbox.unity",
+                document, fixture);
+            yield return new ExitPlayMode();
+        }
+
+        static string PrepareBake()
+        {
+            // The editor only allows additive creation with a previously saved scene open.
+            var baseline = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            Assert.That(EditorSceneManager.SaveScene(baseline, OutputParent + "/Baseline.unity"), Is.True);
+            var output = $"{OutputParent}/Bake-{Guid.NewGuid():N}";
+            SessionState.SetString(OutputKey, output);
+            return output;
         }
 
         static void AssertSavedAssets(Scene scene, string output)
