@@ -4,7 +4,7 @@ This is the desktop editor scaffold for a consumer game, not a headset-ready pro
 From a kit checkout, run `python3 templates/game/new-game.py --id <your reverse-DNS ID> --title <your title> --out <new directory>`, replacing all three arguments. The generator refuses placeholder identity and never overwrites an existing directory. It uses only Python’s standard library.
 
 1. Open the generated directory in the Unity version recorded in `ProjectSettings/ProjectVersion.txt`.
-2. Use **Game → Build Starter Sandbox**, then open `Assets/Starter/Sandbox/Sandbox.unity`. The menu selects the scene on repeat use without overwriting your edits. Commit `Assets/Starter` with metadata and the Unity-generated package lock.
+2. Save any open untitled scene first (Unity requires a saved scene before it can create an additive scene). Use **Game → Build Starter Sandbox**, then open `Assets/Starter/Sandbox/Sandbox.unity`. The menu selects the scene on repeat use without overwriting your edits. Commit `Assets/Starter` with metadata and the Unity-generated package lock.
 3. Use the scene as the starting point for input and locomotion. It has a camera preview and two kit props ready for an XRI interactor, but no input rig yet. The ball and offset-grip prefab sit on a stand; thrown props make a short synthesized tone on the targets and the kit returns dropped props below the recovery plane.
 
 The project uses one pinned kit revision and leaves the existing Unity and XRI versions unchanged. No XR loader, dev boot, mic, capture or upload is configured; voice is off. The scene, prefabs, materials and tone belong to the generated project, not a package sample. Each generation gets fresh asset GUIDs.

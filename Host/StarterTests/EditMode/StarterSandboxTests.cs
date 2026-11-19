@@ -26,6 +26,9 @@ namespace YetiKit.Starter.HostTests
         [UnityTest]
         public IEnumerator GeneratedSandboxPersistsAndSupportsGrabRelease()
         {
+            // The editor only allows additive creation with a previously saved scene open.
+            var baseline = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            Assert.That(EditorSceneManager.SaveScene(baseline, OutputParent + "/Baseline.unity"), Is.True);
             var outputName = "Bake-" + Guid.NewGuid().ToString("N");
             var output = $"{OutputParent}/{outputName}";
             SessionState.SetString(OutputKey, output);
@@ -40,12 +43,15 @@ namespace YetiKit.Starter.HostTests
             Assert.That(path, Does.StartWith(output + "/").And.EndWith(".unity"));
             Assert.That(AssetDatabase.LoadAssetAtPath<SceneAsset>(path), Is.Not.Null);
 
-            var saved = EditorSceneManager.OpenScene(path, OpenSceneMode.Additive);
+            var saved = EditorSceneManager.OpenScene(path, OpenSceneMode.Single);
             AssertSavedAssets(saved, output);
 
             yield return new EnterPlayMode();
 
-            var scene = SceneManager.GetSceneByPath(path);
+            // The EditMode runner restores its own scene on entering Play Mode.
+            var scene = EditorSceneManager.LoadSceneInPlayMode(SessionState.GetString(OutputKey, "") + "/Sandbox.unity",
+                new LoadSceneParameters(LoadSceneMode.Single));
+            yield return null;
             Assert.That(scene.IsValid() && scene.isLoaded, Is.True);
             var bindings = Bindings(scene);
             var recovery = ComponentOn<BoxCollider>(Root(scene, "Recovery Volume"));
@@ -174,13 +180,9 @@ namespace YetiKit.Starter.HostTests
             if (EditorApplication.isPlaying) yield return new ExitPlayMode();
             var output = SessionState.GetString(OutputKey, "");
             if (output.Length == 0) yield break;
-            for (var i = SceneManager.sceneCount - 1; i >= 0; i--)
-            {
-                var scene = SceneManager.GetSceneAt(i);
-                if (scene.path.StartsWith(output + "/", StringComparison.Ordinal))
-                    EditorSceneManager.CloseScene(scene, true);
-            }
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             SessionState.EraseString(OutputKey);
+            AssetDatabase.DeleteAsset(OutputParent + "/Baseline.unity");
             if (AssetDatabase.IsValidFolder(output))
                 Assert.That(AssetDatabase.DeleteAsset(output), Is.True, $"Could not delete {output}");
         }

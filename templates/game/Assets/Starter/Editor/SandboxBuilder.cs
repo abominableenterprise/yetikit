@@ -29,8 +29,9 @@ namespace Game.Starter.Editor
         public static string Build(string output)
         {
             var prior = SceneManager.GetActiveScene();
-            if (prior.IsValid() && prior.isLoaded && string.IsNullOrEmpty(prior.path) && prior.isDirty)
-                throw new InvalidOperationException("Save the active untitled scene before building the sandbox.");
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+                if (SceneManager.GetSceneAt(i).isLoaded && string.IsNullOrEmpty(SceneManager.GetSceneAt(i).path))
+                    throw new InvalidOperationException("Save or close untitled scenes before building the sandbox.");
             var clip = AssetDatabase.LoadAssetAtPath<AudioClip>(StarterFolder + "/Impact.wav");
             if (!clip) throw new InvalidOperationException("The generated impact clip is missing.");
             var parent = Path.GetDirectoryName(output)?.Replace('\\', '/');
