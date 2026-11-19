@@ -131,49 +131,121 @@ def aapt_path():
     return str(max(versions, key=version) / "aapt")
 
 
+# Qualifiers with unambiguous equality or minimum matching in aapt's config names.
+# Leave special cases (such as locale and density) opaque rather than guessing
+# about their compatibility or ranking on a device.
+MIN_QUALIFIER = re.compile(r"(?:(sw|w|h)(\d+)dp|(v)(\d+))")
+EXACT_AXES = (
+    ("ldltr", "ldrtl"), ("notlong", "long"), ("notround", "round"),
+    ("nowidecg", "widecg"), ("lowdr", "highdr"), ("port", "land", "square"),
+    ("desk", "television", "appliance", "watch", "vrheadset"),
+    ("notnight", "night"), ("notouch", "finger", "stylus"), ("nokeys", "qwerty", "12key"),
+    ("navexposed", "navhidden"), ("nonav", "dpad", "trackball", "wheel"),
+)
+AXIS = {qualifier: axis[0] for axis in EXACT_AXES for qualifier in axis}
+# Earlier Android qualifier groups take priority. Keep width and height as
+# separate constraints because their combined ranking depends on the request.
+QUALIFIER_ORDER = (
+    "mcc", "mnc", "ldltr", "sw", "w", "h", "notlong", "notround", "nowidecg",
+    "lowdr", "port", "desk", "notnight", "notouch", "navexposed", "nokeys", "nonav", "v",
+)
+
+
+def resource_config(name):
+    exact, minimum, opaque = {}, {}, set()
+    if name != "(default)":
+        for qualifier in name.split("-"):
+            match = MIN_QUALIFIER.fullmatch(qualifier)
+            if match:
+                minimum[match[1] or match[3]] = int(match[2] or match[4])
+            elif qualifier in AXIS:
+                exact[AXIS[qualifier]] = qualifier
+            elif re.fullmatch(r"m[cn]c\d+", qualifier):
+                exact[qualifier[:3]] = qualifier
+            else:
+                opaque.add(qualifier)
+    return exact, minimum, opaque
+
+
+def config_implies(required, candidate):
+    """Whether an always-matching candidate is guaranteed by these constraints."""
+    return (candidate[0].items() <= required[0].items()
+            and all(required[1].get(axis, 0) >= n for axis, n in candidate[1].items())
+            and candidate[2] <= required[2])
+
+
+def config_rank(config):
+    exact, minimum, _ = config
+    return tuple(minimum.get(axis, axis in exact) for axis in QUALIFIER_ORDER)
+
+
+def outranks(left, right):
+    if left > right:
+        first = next(axis for axis, a, b in zip(QUALIFIER_ORDER, left, right) if a != b)
+        height = QUALIFIER_ORDER.index("h")
+        return first != "w" or left[height] >= right[height]
+    return False
+
+
 def apk_exported(value, resources):
     if value == "true":
         return True
     if not value or not re.fullmatch(r"@0x[0-9a-fA-F]+", value):
         return False
 
-    entries = {}
-    defaults = set()
-    is_default = False
+    entries, configs, ranks = {}, {}, {}
+    config = None
     for line in resources.splitlines():
         line = line.strip()
-        if line.startswith("config "):
-            is_default = line == "config (default):"
+        if line.startswith(("Package ", "type ", "config ")):
+            header = re.fullmatch(r"config (\S+?)(?: flags=0x[0-9a-fA-F]+(?: \[\w+\])*)?:", line)
+            config = header[1] if header else None
         entry = re.fullmatch(r"resource (0x[0-9a-fA-F]+) \S+: (.*)", line)
-        if entry:
+        if entry and config is not None:
             resource = int(entry[1], 16)
-            entries.setdefault(resource, set()).add(entry[2])
-            if is_default:
-                defaults.add(resource)
+            entries.setdefault(resource, {}).setdefault(config, set()).add(entry[2])
+            if config not in configs:
+                configs[config] = resource_config(config)
+                ranks[config] = config_rank(configs[config])
 
-    # The offline check has no device configuration. Require a default and
-    # reject any alternative that can resolve to false or an unknown value.
-    resolving = set()
-    verified = set()
+    # Only discard candidates we can prove lose: a better-ranked override
+    # must match throughout this context, with identical opaque qualifiers.
+    # Keep potentially reachable values when precedence is unclear.
+    def shadowed(resource, selected, context):
+        return any(configs[other][2] == configs[selected][2] and outranks(ranks[other], ranks[selected])
+                   and config_implies(context, configs[other]) for other in entries[resource])
 
-    def is_true(resource):
-        if resource in verified:
-            return True
-        if resource not in defaults or resource in resolving:
+    def is_true(resource, context, path):
+        # An unconditional default is required at the root. An alias target
+        # can omit it if a variant matches throughout the context that needs it.
+        # Carry the intersection along the path, including through defaults.
+        variants = entries.get(resource, {})
+        if not any(config_implies(context, configs[name]) for name in variants):
             return False
-        resolving.add(resource)
-        for entry in entries[resource]:
-            typed = re.match(r"t=(0x[0-9a-fA-F]+) d=(0x[0-9a-fA-F]+)(?=\s|$)", entry)
-            if not typed:
+        exact, minimum, opaque = context
+        for name, values in variants.items():
+            other_exact, other_minimum, other_opaque = configs[name]
+            if any(axis in exact and exact[axis] != token for axis, token in other_exact.items()):
+                continue
+            combined = (exact | other_exact,
+                        minimum | {axis: max(n, minimum.get(axis, 0)) for axis, n in other_minimum.items()},
+                        opaque | other_opaque)
+            if (shadowed(resource, name, combined)
+                    or any(shadowed(prior, selected, combined) for prior, selected in path)):
+                continue
+            if any(prior == resource for prior, _ in path):
                 return False
-            kind, data = (int(field, 16) for field in typed.groups())
-            if not ((kind == 0x12 and data != 0) or (kind == 0x01 and is_true(data))):
-                return False
-        resolving.remove(resource)
-        verified.add(resource)
+            for entry in values:
+                typed = re.match(r"t=(0x[0-9a-fA-F]+) d=(0x[0-9a-fA-F]+)(?=\s|$)", entry)
+                if not typed:
+                    return False
+                kind, data = (int(field, 16) for field in typed.groups())
+                if not ((kind == 0x12 and data != 0)
+                        or (kind == 0x01 and is_true(data, combined, (*path, (resource, name))))):
+                    return False
         return True
 
-    return is_true(int(value[1:], 16))
+    return is_true(int(value[1:], 16), resource_config("(default)"), ())
 
 
 def apk(path, package, checks, contest=False):
