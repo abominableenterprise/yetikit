@@ -254,6 +254,7 @@ qr_cancel() {
   if [ -n "$group" ]; then
     # Perf recovery still needs the old group ID to resume its device lock.
     if ! qr_lock_drain_step; then
+      [ "$cmd" != perf ] || qr_perf_cancel warn-only
       qr_lock_result "$cmd" 1
       exit 1
     fi
