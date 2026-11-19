@@ -4,6 +4,9 @@
   "references": [
     "Game.Starter",
     "Game.Starter.Editor",
+    "Game.Dev",
+    "YetiKit.Lab",
+    "UnityEngine.UI",
     "YetiKit.Hands",
     "YetiKit.Interaction",
     "Unity.InputSystem",

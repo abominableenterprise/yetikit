@@ -45,6 +45,7 @@ namespace YetiKit.Starter.HostTests
 
             var saved = EditorSceneManager.OpenScene(path, OpenSceneMode.Single);
             AssertSavedAssets(saved, output);
+            StarterLabChecks.AssertSavedScene(saved);
 
             yield return new EnterPlayMode();
 
@@ -72,6 +73,7 @@ namespace YetiKit.Starter.HostTests
             GrabAndRelease(scene);
             AssertSyntheticImpact(scene);
             yield return StarterRigChecks.DriveRig(scene);
+            yield return StarterLabChecks.DriveAndReload(path);
             yield return new ExitPlayMode();
         }
 
@@ -180,6 +182,7 @@ namespace YetiKit.Starter.HostTests
         public IEnumerator CleanBake()
         {
             if (EditorApplication.isPlaying) yield return new ExitPlayMode();
+            StarterLabChecks.RestorePrefs();
             var output = SessionState.GetString(OutputKey, "");
             if (output.Length == 0) yield break;
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
