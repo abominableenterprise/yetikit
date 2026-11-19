@@ -194,6 +194,27 @@ clock b invalid 5000
 run "$b" perf stop
 check 'unavailable stop clock reports INFRA and still restores proximity' \
   '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0 and (.message | contains("invalid adb capture clock"))'\'' && [ ! -e "$key_b" ] && [ ! -e "$tmp/b.override" ]'
+clock a 1700000150.000000000 6000
+run "$a" perf start
+check 'start commits a window before the stop reservation becomes unwritable' \
+  '[ "$rc" = 0 ] && json '\''.start == "1700000150.000000000"'\'' "$key_a"'
+# Run stop from a different run. The fallback must follow the reservation, not
+# whichever run happens to receive the stop report.
+( qr_config && qr_new_run '2222222222222222' synthetic ) || exit 1
+mkdir "$key_a.tmp" || exit 1
+: > "$tmp/a.restore-fails"
+: > "$tmp/events"
+clock a 1700000152.000000000 8000
+run "$a" perf stop
+check 'stop reservation write and fake adb restore both fail, leaving recovery pending' \
+  '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and (.message | contains("adb proximity restoration failed"))'\'' && json '\''has("start")'\'' "$key_a" && [ -e "$tmp/a.override" ] && grep -q "automation_disable" "$tmp/events" && ! grep -q "logcat" "$tmp/events"'
+rmdir "$key_a.tmp" || exit 1
+rm -f "$tmp/a.restore-fails"
+clock a 1700000154.000000000 10000
+{ sample 1700000150.500000 'App=5ms'; sample 1700000153.000000 'App=6ms'; } > "$tmp/a.samples"
+run "$a" perf stop
+check 'retry after both stop failures restores proximity but reports the window as unknown' \
+  '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0 and (.message | contains("stop boundary unknown"))'\'' && ! grep -Eq "shell date|logcat" "$tmp/events" && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/unlocked-restore" ]'
 # A directory at the root report path defeats rm -f even as root, without
 # blocking the per-device reports or the reservation cleanup.
 list="$a,$b"
