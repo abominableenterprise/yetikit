@@ -59,6 +59,8 @@ cs_classes() {
           end = attribute_end(line)
           if (!end) { attributes = line " "; break }
           line = substr(line, end + 1)
+          # A same-line block comment after a section is not a declaration.
+          while (sub(/^[[:space:]]*\/\*([^*]|\*+[^*/])*\*+\//, "", line)) {}
         }
         if (attributes != "" || line ~ /^[[:space:]]*(\/\/.*)?$/) next
         if (scope == "class") {
