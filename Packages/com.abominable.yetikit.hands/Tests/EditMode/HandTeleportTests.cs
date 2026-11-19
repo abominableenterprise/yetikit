@@ -166,14 +166,60 @@ namespace YetiKit.Hands.Tests
             Step(other, .66f);
             Assert.That(teleport.Aiming, Is.True);
             Assert.That(other.Aiming || other.hand.GrabBlocked, Is.False);
-            teleport.enabled = false;
-            // Unity does not dispatch play-mode lifecycle callbacks for this component in EditMode.
-            typeof(HandTeleport).GetMethod("OnDisable", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(teleport, null);
+            Disable(teleport);
             Assert.That(teleport.Aiming || teleport.hand.GrabBlocked || teleport.HasTarget, Is.False);
             Step(other, .68f);
             Step(other, 1f);
             Assert.That(other.Aiming, Is.True);
+        }
+
+        [Test]
+        public void DisablingAnActivePreviewNotifiesOnceAfterCleanup()
+        {
+            Step(0f);
+            Step(.32f);
+            Assert.That(teleport.Aiming && teleport.HasTarget, Is.True);
+            var target = teleport.Target.destinationPosition;
+            var notifications = 0;
+            teleport.AimEnded += (queued, destination) =>
+            {
+                notifications++;
+                Assert.That(queued, Is.False);
+                Assert.That(destination, Is.EqualTo(target));
+                Assert.That(teleport.Aiming || teleport.HasTarget || teleport.hand.GrabBlocked, Is.False);
+            };
+
+            Disable(teleport);
+            CallOnDisable(teleport);
+            Step(.34f);
+            Assert.That(notifications, Is.EqualTo(1));
+            Assert.That(provider.Count, Is.Zero);
+        }
+
+        [Test]
+        public void ACancelPinchSampledBeforeSiblingPreemptionStaysBlockedUntilRelease()
+        {
+            var other = AddHand(teleport.hand.transform.parent, out _);
+            other.CanPreempt = owner => ReferenceEquals(owner, teleport);
+            Step(0f);
+            Step(.32f);
+            Assert.That(teleport.Aiming, Is.True);
+            Step(other, .34f);
+
+            HandGrabTests.Pinch(tracking.points, .01f);
+            teleport.hand.Tick(.66f); // Both hands sample before either teleport adapter ticks.
+            Assert.That(teleport.hand.Pinch, Is.GreaterThanOrEqualTo(HandTeleportGesture.CancelPinch));
+            Step(other, .66f);
+            Assert.That(other.Aiming, Is.True);
+            Assert.That(teleport.Aiming || teleport.HasTarget, Is.False);
+            Assert.That(teleport.hand.GrabBlocked, Is.True, "the incoming grab phase must not see an unblocked pinch");
+            Assert.That(teleport.Tick(.66f, false), Is.False);
+            Assert.That(teleport.hand.GrabBlocked, Is.True);
+            Assert.That(provider.Count, Is.Zero);
+
+            tracking.points = Point();
+            Step(.68f);
+            Assert.That(teleport.hand.GrabBlocked, Is.False);
         }
 
         [Test]
@@ -196,6 +242,17 @@ namespace YetiKit.Hands.Tests
             }
             finally { lease.Release(external); }
         }
+
+        static void Disable(HandTeleport adapter)
+        {
+            adapter.enabled = false;
+            CallOnDisable(adapter);
+        }
+
+        // Unity does not dispatch play-mode lifecycle callbacks for this component in EditMode.
+        static void CallOnDisable(HandTeleport adapter) =>
+            typeof(HandTeleport).GetMethod("OnDisable", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(adapter, null);
 
         RectTransform RegisterPanel(Vector3 position)
         {

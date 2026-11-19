@@ -23,7 +23,6 @@ namespace YetiKit.Hands
         int drawn, teleportMask;
         RaycastHit landing;
         BaseTeleportationInteractable landingArea;
-        Vector3 hitNormal = Vector3.up;
         GameObject detachedReticle;
 
         public bool HasTarget { get; set; }
@@ -61,14 +60,11 @@ namespace YetiKit.Hands
                 landing = hit;
                 landingArea = area;
                 HasTarget = true;
-                var orientation = area.matchOrientation;
-                hitNormal = orientation == MatchOrientation.TargetUp || orientation == MatchOrientation.TargetUpAndForward
-                    ? area.transform.up : hit.normal;
                 Target = new TeleportRequest
                 {
                     destinationPosition = hit.point,
                     destinationRotation = area.transform.rotation,
-                    matchOrientation = orientation,
+                    matchOrientation = area.matchOrientation,
                 };
                 break;
             }
@@ -137,10 +133,20 @@ namespace YetiKit.Hands
             }
             if (reticle.activeSelf != on) reticle.SetActive(on);
             if (!on) return;
-            var fwd = Vector3.ProjectOnPlane(head ? head.forward : Vector3.forward, hitNormal);
-            if (fwd.sqrMagnitude < 1e-6f) fwd = Vector3.ProjectOnPlane(Vector3.forward, hitNormal);
-            if (fwd.sqrMagnitude < 1e-6f) fwd = Vector3.right;
-            reticle.transform.SetPositionAndRotation(Target.destinationPosition, Quaternion.LookRotation(fwd, hitNormal));
+            reticle.transform.SetPositionAndRotation(Target.destinationPosition, ReticleRotation(head));
+        }
+
+        Quaternion ReticleRotation(Transform head)
+        {
+            if (Target.matchOrientation == MatchOrientation.TargetUpAndForward) return Target.destinationRotation;
+
+            // For modes that do not set yaw, preview the head's heading around the destination up.
+            var up = Target.matchOrientation == MatchOrientation.TargetUp
+                ? Target.destinationRotation * Vector3.up : Vector3.up;
+            var fwd = Vector3.ProjectOnPlane(head ? head.forward : Vector3.forward, up);
+            if (fwd.sqrMagnitude < 1e-6f) fwd = Vector3.ProjectOnPlane(Vector3.forward, up);
+            if (fwd.sqrMagnitude < 1e-6f) fwd = Vector3.ProjectOnPlane(Vector3.right, up);
+            return Quaternion.LookRotation(fwd, up);
         }
     }
 }

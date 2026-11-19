@@ -66,8 +66,7 @@ namespace YetiKit.Hands
             {
                 // A competing interaction cancels the preview, not the release requirement. Also catch
                 // a cancelling pinch on the takeover frame, before it can become a fresh grab.
-                if (Aiming && pinch >= CancelPinch) needRelease = true;
-                Cancel();
+                CancelForTakeover(pinch);
                 return false;
             }
             var pose = point && forward;
@@ -121,6 +120,12 @@ namespace YetiKit.Hands
             if (pose) droppedAt = -1f;
             else if (droppedAt < 0f) droppedAt = now;
             return false;
+        }
+
+        internal void CancelForTakeover(float pinch)
+        {
+            if (Aiming && pinch >= CancelPinch) needRelease = true;
+            Cancel();
         }
 
         void Cancel()
