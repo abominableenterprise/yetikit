@@ -49,7 +49,10 @@ def live(pid):
 
 def eventually(predicate, description='synthetic setup worker startup'):
     deadline = time.monotonic() + 8
-    while not predicate():
+    while True:
+        result = predicate()
+        if result:
+            return result
         if time.monotonic() >= deadline:
             raise AssertionError(f'timed out waiting for {description}')
         time.sleep(0.02)
@@ -139,7 +142,8 @@ while True:
         assert retry.returncode and b'exists but is incomplete' in retry.stderr
 
 
-def terminal_case(root, env, interrupt_handler=False, escalate=None, signal_worker=False):
+def terminal_case(root, env, interrupt_handler=False, escalate=None, signal_worker=False,
+                  signal_group=False):
     directed = escalate is not None
     script(root / 'sudo', '#!/bin/sh\nexec "$@"\n')
     # dpkg -s returns zero even when a known package is not configured.
@@ -177,6 +181,7 @@ Path('write-completed').touch()
 ''')
     script(root / 'ldd', '#!/bin/sh\ntouch checked-libraries\n')
     driver = r'''
+trap ':' TERM HUP
 rc=0; bash -c "$1" _ "$2" packages || rc=$?
 python3 -c 'import os; assert os.tcgetpgrp(os.open("/dev/tty", os.O_RDONLY)) == os.getpgrp()' || exit 99
 exit "$rc"
@@ -207,7 +212,44 @@ exit "$rc"
             assert int(ignored.split()[1], 16) & (1 << (signal.SIGINT - 1))
             os.kill(target, signal.SIGINT)
             assert live(leader) and live(descendant), 'protected write did not defer INT'
-            os.kill(supervisor if signal_worker else target, escalate)
+            if signal_group:
+                # Freeze the polling sleep and supervisor to make the order
+                # independent of scheduling: escalation must survive a failed
+                # sleep while the cleanup barrier is still held.
+                children = Path(f'/proc/{target}/task/{target}/children')
+
+                def poll_sleep(previous=0, stop=False):
+                    try:
+                        pids = children.read_text().split()
+                    except FileNotFoundError:
+                        return 0
+                    for child in map(int, pids):
+                        if child == previous:
+                            continue
+                        try:
+                            if Path(f'/proc/{child}/comm').read_text().strip() == 'sleep':
+                                if stop:
+                                    os.kill(child, signal.SIGSTOP)
+                                return child
+                        except (ProcessLookupError, FileNotFoundError):
+                            continue
+                    return 0
+
+                sleeper = eventually(lambda: poll_sleep(stop=True), 'wrapper barrier polling sleep')
+                os.kill(supervisor, signal.SIGSTOP)
+                try:
+                    os.killpg(os.getpgid(target), escalate)
+                    try:
+                        os.kill(sleeper, signal.SIGCONT)
+                    except ProcessLookupError:
+                        pass
+                    eventually(lambda: not live(target) or poll_sleep(previous=sleeper),
+                               'wrapper to resume polling after escalation')
+                    assert live(target), 'wrapper exited before the cleanup barrier opened'
+                finally:
+                    os.kill(supervisor, signal.SIGCONT)
+            else:
+                os.kill(supervisor if signal_worker else target, escalate)
             if not signal_worker:
                 expected = 128 + escalate
         else:
@@ -256,6 +298,7 @@ def main():
         'wrapper-int-term': lambda root, env: terminal_case(root, env, True, signal.SIGTERM),
         'wrapper-int-hup': lambda root, env: terminal_case(root, env, True, signal.SIGHUP),
         'wrapper-int-worker-term': lambda root, env: terminal_case(root, env, True, signal.SIGTERM, True),
+        'wrapper-int-group-term': lambda root, env: terminal_case(root, env, True, signal.SIGTERM, signal_group=True),
     }
     failed = False
     for name in sys.argv[1:] or cases:

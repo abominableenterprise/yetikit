@@ -40,7 +40,8 @@ supervised_signal() {
     # A foreground blocking flock would defer the escalation traps in Bash.
     # Keep checking the same barrier while the protected write runs or drains.
     while ! flock -nx "$control" -c :; do
-      /bin/sleep 0.05
+      # Group TERM/HUP can also interrupt sleep; still wait for the lock.
+      /bin/sleep 0.05 || :
     done
   else
     trap '' TERM INT HUP
