@@ -153,7 +153,7 @@ cmd_setup() {
     as_root mkdir -m 755 -- "$lock" || [ -d "$lock" ] || die "cannot create setup lock $lock"
   fi
   exec {setup_fd}< "$lock/." || die "cannot open setup lock $lock"
-  flock -x "$setup_fd" || die "cannot acquire setup lock for $UNITY_ROOT"
+  supervise flock -x "$setup_fd" || die "cannot acquire setup lock for $UNITY_ROOT"
   replace_base_editor; install_editor; install_libs
   if [ "$UNITY_MODULES" = android ]; then
     has_android || die "$UNITY_IMAGE gave no Android SDK/NDK under $UNITY_ROOT/$ANDROID_REL"
