@@ -194,16 +194,28 @@ qr_cleanup_expected_head() {
   return 1
 }
 
-# Called with HEAD locked. Use the registered worktree's actual index, not an
-# alternate index inherited from the caller. Git writers must acquire index.lock
-# before changing flags; hold it through both inspection and non-forced removal.
-qr_remove_clean_worktree() (
-  local wt="$1" index lock index_rc=0
+# Use the worktree's own index, not an alternate index inherited from the caller.
+qr_cleanup_index_path() (
+  local wt="$1" index
   unset GIT_INDEX_FILE
   if ! index="$(git -C "$wt" rev-parse --path-format=absolute --git-path index)" || [ -z "$index" ]; then
     echo "kept (inspection failed)"
     return 1
   fi
+  # Git can lock the symlink target rather than the reported index path.
+  if [ -L "$index" ]; then
+    qr_log "symlinked index in $wt; preserving worktree"
+    echo "kept (symlinked index)"
+    return 1
+  fi
+  printf '%s\n' "$index"
+)
+
+# Called with HEAD locked. Hold index.lock through flag inspection and removal.
+qr_remove_clean_worktree() (
+  local wt="$1" index lock index_rc=0
+  unset GIT_INDEX_FILE
+  index="$(qr_cleanup_index_path "$wt")" || { echo "$index"; return 1; }
   lock="$index.lock"
   if [ -e "$lock" ] || [ -L "$lock" ] || ! (set -C; : > "$lock") 2>> "$QR_RUN_DIR/cleanup.log"; then
     qr_log "cannot lock index in $wt; preserving worktree"
@@ -228,6 +240,8 @@ qr_remove_clean_worktree() (
 qr_cleanup_one() {
   local wt="$1" discard="${2:-}" status_file noise_rc=0 result
   [ -d "$wt" ] || { echo "absent"; return 0; }
+  # Refuse before status or opt-in noise reversal can touch the worktree.
+  result="$(qr_cleanup_index_path "$wt")" || { echo "$result"; return 1; }
   if [ "$discard" = --discard-noise ]; then
     qr_discard_noise "$wt" || noise_rc=$?
     case "$noise_rc" in
