@@ -10,7 +10,7 @@ KIT_PREFIX = "com.abominable.yetikit."
 KIT_REMOTE = "https://github.com/abominableenterprise/yetikit.git"
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[\w.-]+)?(?:\+[\w.-]+)?", re.ASCII)
 REVISION = re.compile(r"[0-9a-f]{40}|v[0-9]+\.[0-9]+\.[0-9]+(?:-[\w.-]+)?", re.ASCII)
-REMOTE = re.compile(r"(?:git\+)?https?://[^/\s]+/\S+|(?:git\+)?ssh://[^/\s]+/\S+|git://[^/\s]+/\S+")
+REMOTE = re.compile(r"(?:git\+)?(?:https?|ssh)://[^/\s]+(?:/\S*)?|git://[^/\s]+/\S+")
 
 
 def entries(path):

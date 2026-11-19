@@ -27,6 +27,7 @@ verify('packages-lock.json')
 verify(None, '--manifest-only')
 locked = {name: {'version': version, 'source': 'git' if name.startswith('com.abominable.yetikit.') else 'registry'}
           for name, version in direct.items()}
+locked['com.unity.inputsystem']['url'] = 'https://registry.invalid'
 
 
 def write(path, entries):
