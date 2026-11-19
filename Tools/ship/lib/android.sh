@@ -146,11 +146,11 @@ apk_bee_move() {
 
 apk_bee_restore() {
   local aside="$PROJECT/Temp/apk-bee-aside" identity
-  # A relative Bee link can dangle after it is moved out of Library.
-  [ -n "$APK_BEE_ID" ] && { [ -L "$aside" ] || [ -d "$aside" ]; } || return 0
-  identity="$(stat -c '%d:%i' -- "$aside")" || return "$?"
-  # If the aside was replaced (or move-out lost a race), don't move it back.
-  if [ "$identity" != "$APK_BEE_ID" ]; then
+  [ -n "$APK_BEE_ID" ] || return 0
+  # A relative link can dangle here. A missing or replaced aside is an error
+  # while restoration is pending, and must never be moved over Library/Bee.
+  if { [ ! -L "$aside" ] && [ ! -d "$aside" ]; } ||
+     ! identity="$(stat -c '%d:%i' -- "$aside")" || [ "$identity" != "$APK_BEE_ID" ]; then
     log "error: refusing to restore an unexpected Bee aside at $aside"
     return 1
   fi
@@ -203,7 +203,10 @@ apk_cache_save() {
         # Even with equal device IDs, copy-up can change the inode. Force it
         # at the source and record the identity before rename, so EXIT can
         # restore Bee without trusting whatever appears at the aside path.
-        touch -ch -r "$bee" -- "$bee" || return
+        if ! touch -ch -r "$bee" -- "$bee"; then
+          log "warning: could not prepare Library/Bee symlink for overlayfs; skipping Android cache save"
+          return 0
+        fi
         identity="$(stat -c '%d:%i' -- "$bee")" || return
       fi
     fi
