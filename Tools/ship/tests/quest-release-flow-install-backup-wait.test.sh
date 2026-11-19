@@ -43,18 +43,18 @@ check 'the configured prefix replaces the default while keeping the timestamp an
   '[ "$rc" = 0 ] && [ -s "$backup/SHA256SUMS" ] && grep -Fq "backup:      $backup (verified" "$tmp/out"'
 check 'omitting launcherChecks also skips both device queries' \
   'out_has "permissions: none configured" && ! grep -qE "get-current-user|dumpsys package" "$tmp/adb.log" && ! out_has RECORD_AUDIO'
-jq '.quest.launcherChecks.permissions = ["android.permission.CAMERA", "android.permission.BLUETOOTH_CONNECT", "android.permission.POST_NOTIFICATIONS", "android.permission.VIBRATE"]' \
+jq '.quest.launcherChecks.permissions = ["android.permission.CAMERA", "android.permission.BLUETOOTH_CONNECT", "android.permission.POST_NOTIFICATIONS", "android.permission.VIBRATE", "android.permission.READ_EXTERNAL_STORAGE"]' \
   "$YETIKIT_CONFIG" > "$tmp/permissions.json"
 YETIKIT_CONFIG="$tmp/permissions.json"
 reset_logs; run install "$apk"
 check 'install uses only the current user runtime grants and retains package-wide install grants' \
   '[ "$rc" = 0 ] && [ "$(grep -c "dumpsys package" "$tmp/adb.log")" = 1 ] &&
-    grep -Fxq "permissions: user 10: android.permission.CAMERA granted=false; android.permission.BLUETOOTH_CONNECT granted=true; android.permission.POST_NOTIFICATIONS unavailable; android.permission.VIBRATE not requested" "$tmp/out" &&
+    grep -Fxq "permissions: user 10: android.permission.CAMERA granted=false; android.permission.BLUETOOTH_CONNECT granted=true; android.permission.POST_NOTIFICATIONS unavailable; android.permission.VIBRATE not requested; android.permission.READ_EXTERNAL_STORAGE unavailable" "$tmp/out" &&
     ! out_has RECORD_AUDIO'
 qr_flow_old_apk
 reset_logs; FAKE_CURRENT_USER=0 run rollback "$old"
-check 'rollback persists the grant of user 0 when it is the current user' \
-  '[ "$rc" = 0 ] && out_has "permissions: user 0: android.permission.CAMERA granted=true"'
+check 'rollback reports the current user grant and the annotated request without a grant row' \
+  '[ "$rc" = 0 ] && grep -Fxq "permissions: user 0: android.permission.CAMERA granted=true; android.permission.BLUETOOTH_CONNECT granted=true; android.permission.POST_NOTIFICATIONS unavailable; android.permission.VIBRATE not requested; android.permission.READ_EXTERNAL_STORAGE unavailable" "$tmp/out"'
 
 permissions_unavailable() {
   [ "$rc" = 0 ] && out_has "android.permission.CAMERA unavailable" &&
