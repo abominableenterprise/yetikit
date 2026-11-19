@@ -194,9 +194,39 @@ qr_cleanup_expected_head() {
   return 1
 }
 
+# Called with HEAD locked. Use the registered worktree's actual index, not an
+# alternate index inherited from the caller. Git writers must acquire index.lock
+# before changing flags; hold it through both inspection and non-forced removal.
+qr_remove_clean_worktree() (
+  local wt="$1" index lock index_rc=0
+  unset GIT_INDEX_FILE
+  if ! index="$(git -C "$wt" rev-parse --path-format=absolute --git-path index)" || [ -z "$index" ]; then
+    echo "kept (inspection failed)"
+    return 1
+  fi
+  lock="$index.lock"
+  if [ -e "$lock" ] || [ -L "$lock" ] || ! (set -C; : > "$lock") 2>> "$QR_RUN_DIR/cleanup.log"; then
+    qr_log "cannot lock index in $wt; preserving worktree"
+    echo "kept (index lock unavailable)"
+    return 1
+  fi
+  trap 'rm -f -- "$lock"' EXIT
+  trap 'exit 1' HUP INT TERM
+  qr_hidden_index_entry "$wt" || index_rc=$?
+  case "$index_rc" in
+    0) ;;
+    1) echo "kept (hidden index entry)"; return 1 ;;
+    *) qr_log "cannot inspect index flags in $wt; preserving worktree"
+       echo "kept (inspection failed)"; return 1 ;;
+  esac
+  GIT_OPTIONAL_LOCKS=0 qr_git worktree remove "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1 || return 1
+  # A successful removal deletes the worktree's Git admin directory and lock.
+  trap - EXIT
+)
+
 # Remove only clean worktrees, optionally after reversing recognized editor noise.
 qr_cleanup_one() {
-  local wt="$1" discard="${2:-}" status_file noise_rc=0 index_rc=0
+  local wt="$1" discard="${2:-}" status_file noise_rc=0 result
   [ -d "$wt" ] || { echo "absent"; return 0; }
   if [ "$discard" = --discard-noise ]; then
     qr_discard_noise "$wt" || noise_rc=$?
@@ -222,20 +252,14 @@ qr_cleanup_one() {
       return 1
     fi
     rm -f "$status_file"
-    qr_hidden_index_entry "$wt" || index_rc=$?
-    case "$index_rc" in
-      0) ;;
-      1) echo "kept (hidden index entry)"; return 1 ;;
-      *) qr_log "cannot inspect index flags in $wt; preserving worktree"
-         echo "kept (inspection failed)"; return 1 ;;
-    esac
   fi
-  # Non-forced removal rechecks local changes, not the release commit.
-  if qr_with_cleanup_head "$wt" qr_git worktree remove "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1; then
+  if result="$(qr_with_cleanup_head "$wt" qr_remove_clean_worktree "$wt")"; then
     echo "removed"
   else
-    qr_log "cannot lock and verify HEAD or remove $wt (cleanup.log)"
-    echo "kept or removal failed"; return 1
+    if [ -z "$result" ]; then
+      qr_log "cannot lock and verify HEAD or remove $wt (cleanup.log)"
+    fi
+    echo "${result:-kept or removal failed}"; return 1
   fi
 }
 

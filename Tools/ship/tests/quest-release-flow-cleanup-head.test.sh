@@ -25,6 +25,13 @@ git() {
     apply:-c:apply:--reverse) [ ! "$PWD" -ef "$test_wt" ] || try_head_move ;;
     remove:-C:worktree:remove) [ "$5" != "$test_wt" ] || try_head_move ;;
   esac
+  if [ -n "${index_race_flag:-}" ] && [ "${3:-}:${4:-}:${5:-}" = "worktree:remove:$test_wt" ]; then
+    : > "$tmp/index-writer-started"
+    if command git -C "$test_wt" update-index "--$index_race_flag" -- "$mat" 2> "$tmp/index-writer.err"; then
+      : > "$tmp/index-writer-succeeded"
+    fi
+    cp "$tmp/edited.mat" "$test_wt/$mat" || return 1
+  fi
   command git "$@" || return $?
   [ ! -e "$tmp/head-moved" ] || return 0
   case "${move_at:-}:${1:-}:${3:-}" in
@@ -107,6 +114,25 @@ for flag in assume-unchanged skip-worktree; do
   check "plain cleanup preserves a tracked edit hidden by --$flag" \
     '[ "$rc" != 0 ] && out_has "kept (hidden index entry)" && [ -d "$test_wt" ] &&
      cmp -s "$tmp/edited.mat" "$test_wt/$mat"'
+done
+
+# Inject an index writer after the earlier checks, just before real non-forced
+# removal. Even if flagging fails, the subsequent authored edit must survive.
+for mode in plain --discard-noise; do
+  for flag in assume-unchanged skip-worktree; do
+    reset_test_worktree
+    rm -f "$tmp/index-writer-started" "$tmp/index-writer-succeeded"
+    index_lock="$(command git -C "$test_wt" rev-parse --path-format=absolute --git-path index.lock)" || exit 1
+    if [ "$mode" = plain ]; then
+      index_race_flag="$flag" run cleanup
+    else
+      index_race_flag="$flag" run cleanup "$mode"
+    fi
+    check "$mode cleanup preserves an edit made by a racing --$flag writer" \
+      '[ "$rc" != 0 ] && [ -e "$tmp/index-writer-started" ] && [ ! -e "$tmp/index-writer-succeeded" ] &&
+       grep -q "index.lock" "$tmp/index-writer.err" && [ ! -e "$index_lock" ] &&
+       cmp -s "$tmp/edited.mat" "$test_wt/$mat"'
+  done
 done
 
 qr_flow_finish
