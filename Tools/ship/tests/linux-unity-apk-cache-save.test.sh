@@ -24,6 +24,37 @@ rm -rf "$proj/Library" "$proj/Temp"; : > "$tmp/cache-bee"
 check "cold save restores the relative Bee link and allows the next cold save" \
   'FAKE_MUTATE="$FAKE_MUTATE; $linked_bee" TASK_CACHE=fake-cache lu apk && [ "$(readlink "$proj/Library/Bee")" = bee-cache ] && grep -qx linked "$proj/Library/Bee/obj" && [ ! -L "$proj/Temp/apk-bee-aside" ] && rm -rf "$proj/Library" && FAKE_MUTATE="$FAKE_MUTATE; $linked_bee" TASK_CACHE=fake-cache lu apk && [ "$(grep -cFx "save $ka nobee" "$tmp/cache-bee")" = 2 ] && [ "$(readlink "$proj/Library/Bee")" = bee-cache ] && [ ! -L "$proj/Temp/apk-bee-aside" ]'
 
+# Simulate the overlayfs path and EPERM from touch on a link owned by another
+# UID. Real filesystem access stays intact (in particular, mv is not blocked).
+real_stat="$(command -v stat)"; real_touch="$(command -v touch)"
+export REAL_STAT="$real_stat" REAL_TOUCH="$real_touch"
+cat > "$tmp/bin/stat" <<'EOF'
+#!/usr/bin/env bash
+if [[ ${FAKE_BEE_TOUCH_DENIED:-0} = 1 && "$*" = '-fc %T -- '*/Library ]]; then
+  echo overlayfs
+else
+  exec "$REAL_STAT" "$@"
+fi
+EOF
+cat > "$tmp/bin/touch" <<'EOF'
+#!/usr/bin/env bash
+if [[ ${FAKE_BEE_TOUCH_DENIED:-0} = 1 && $1 = -ch && "${@: -1}" = */Library/Bee ]]; then
+  "$REAL_STAT" -c '%d:%i' -- "${@: -1}" > "$FAKE_TMP/denied-bee-id"
+  echo 'touch: Operation not permitted' >&2
+  exit 1
+fi
+exec "$REAL_TOUCH" "$@"
+EOF
+chmod +x "$tmp/bin/stat" "$tmp/bin/touch"
+rm -rf "$proj/Library" "$proj/Temp"; : > "$tmp/cache-calls"
+check "touch denied on the Bee link skips saving but still reports the APK" \
+  'FAKE_MUTATE="$FAKE_MUTATE; $linked_bee" FAKE_BEE_TOUCH_DENIED=1 TASK_CACHE=fake-cache lu apk &&
+   grep -qx apk "$proj/Builds/Android/GeneratedScene-dev.apk" && grep -q "apk: sha256 " "$tmp/err" &&
+   grep -q "warning:.*skipping.*cache save" "$tmp/err" && ! grep -q "^save " "$tmp/cache-calls" &&
+   [ "$(readlink "$proj/Library/Bee")" = bee-cache ] && grep -qx linked "$proj/Library/Bee/obj" &&
+   [ "$(stat -c "%d:%i" -- "$proj/Library/Bee")" = "$(< "$tmp/denied-bee-id")" ] &&
+   [ ! -L "$proj/Temp/apk-bee-aside" ] && [ ! -e "$proj/Temp/apk-bee-aside" ]'
+
 real_mv="$(command -v mv)"
 export REAL_MV="$real_mv"
 cat > "$tmp/bin/mv" <<'EOF'

@@ -59,13 +59,23 @@ mv() {
     case "$scenario" in
       interrupted) kill -TERM "$BASHPID" ;;
       replaced-in-move) replace_aside ;;
+      aside-*-exit)
+        replace_aside && mkdir "$bee" && echo new > "$bee/obj" || return
+        kill -TERM "$BASHPID" ;;
     esac
   fi
 }
 
 replace_aside() {
   command mv -T -- "$aside" "$aside.original" || return
-  if [ "$scenario" = replaced-dir ]; then mkdir "$aside"; else ln -s bee-cache "$aside"; fi
+  case "$scenario" in
+    replaced-dir) mkdir "$aside" ;;
+    replaced-*) ln -s bee-cache "$aside" ;;
+    aside-missing-*) return 0 ;;
+    aside-file-*) echo replacement > "$aside" ;;
+    aside-fifo-*) mkfifo "$aside" ;;
+  esac || return
+  command stat -c '%d:%i' -- "$aside" > "$PROJECT/replacement-id"
 }
 
 log() { printf '%s\n' "$*" >&2; }
@@ -74,12 +84,14 @@ cmd_cache() {
   [ ! -e "$aside" ] && [ "$(readlink "$aside")" = bee-cache ] || return 1
   echo saved > "$PROJECT/saved"
   case "$scenario" in
-    replaced-dir|replaced-link) replace_aside ;;
+    replaced-dir|replaced-link|aside-*-normal) replace_aside ;;
   esac
 }
 
 fails=0
-scenarios=(normal interrupted replaced-dir replaced-link replaced-in-move occupied)
+scenarios=(normal interrupted replaced-dir replaced-link replaced-in-move occupied
+  aside-missing-normal aside-file-normal aside-fifo-normal
+  aside-missing-exit aside-file-exit aside-fifo-exit)
 for scenario in "${scenarios[@]}"; do
   backing="$tmp/$scenario"
   if [ -n "$lower" ]; then backing="$lower/$scenario"; fi
@@ -128,6 +140,22 @@ for scenario in "${scenarios[@]}"; do
           [ ! -L "$bee" ] && [ ! -e "$bee" ] &&
           [ "$(command stat -c '%d:%i' -- "$aside.original")" = "$moved_id" ] || return 1
         if [ "$scenario" = replaced-dir ]; then [ -d "$aside" ]; else [ "$(readlink "$aside")" = bee-cache ]; fi ;;
+      aside-*)
+        grep -q 'error: refusing to restore an unexpected Bee aside' "$PROJECT/log" &&
+          [ "$(command stat -c '%d:%i' -- "$aside.original")" = "$moved_id" ] || return 1
+        case "$scenario" in
+          *-normal)
+            [ "$rc" = 1 ] && [ -f "$PROJECT/saved" ] && [ ! -L "$bee" ] && [ ! -e "$bee" ] || return 1 ;;
+          *-exit)
+            [ "$rc" = 143 ] && [ ! -e "$PROJECT/saved" ] && [ ! -L "$bee" ] && grep -qx new "$bee/obj" &&
+              grep -q 'exit cleanup failed (exit 1): apk_cache_cleanup' "$PROJECT/log" || return 1 ;;
+        esac
+        case "$scenario" in
+          aside-missing-*) [ ! -e "$aside" ] && [ ! -L "$aside" ]; return "$?" ;;
+          aside-file-*) [ -f "$aside" ] && grep -qx replacement "$aside" || return 1 ;;
+          aside-fifo-*) [ -p "$aside" ] || return 1 ;;
+        esac
+        [ "$(command stat -c '%d:%i' -- "$aside")" = "$(< "$PROJECT/replacement-id")" ] ;;
       occupied)
         [ "$rc" != 0 ] && [ "$(readlink "$bee")" = other-cache ] &&
           [ "$(stat -c '%d:%i' -- "$aside")" = "$moved_id" ] ;;
