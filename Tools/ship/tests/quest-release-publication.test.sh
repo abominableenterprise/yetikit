@@ -166,7 +166,7 @@ start_during_reconciliation() {
   fi
   case "$outcome" in
     first-keyed-legacy-race-created|first-keyed-legacy-race-in-snapshot|first-keyed-legacy-race-vanished-recheck) ;;
-    first-keyed-legacy-race-vanished-keyed)
+    first-keyed-legacy-race-vanished-keyed|first-keyed-legacy-race-vanished-mismatch)
       mkdir "$QR_LOGS/run.lock" && printf '%s\n' "$previous_key" > "$QR_LOGS/run.lock/invocation" || return 1
       did_start=1 ;;
     first-keyed-legacy-teardown|first-keyed-legacy-replaced|first-keyed-legacy-race-*)
@@ -182,6 +182,13 @@ start_during_reconciliation() {
       did_start=1 ;;
     completed-deadline) wait_minutes=0 ;;
   esac
+  cd() {
+    if [ "$outcome" = first-keyed-legacy-race-vanished-mismatch ] && [ "$1" = "$QR_LOGS/run.lock" ]; then
+      # FD 20 still pins A when the snapshot enters the PID-less successor B.
+      mv "$1" "$QR_LOGS/retired" && mkdir "$1" && touch -t "$startup_stamp" "$1" || exit 99
+    fi
+    builtin cd "$@"
+  }
   cat() {
     command cat "$@"; local cat_rc=$?
     if [ "$outcome" = first-keyed-legacy-race-vanished-early ] &&
@@ -393,4 +400,5 @@ check 'a vanished pending lock cannot claim the preceding compatibility result' 
 check 'a PID appearing on recheck does not erase pending evidence if the lock vanished' start_during_reconciliation first-keyed-legacy-race-vanished-pid
 check 'a legacy result written before the pointer read uses the earlier generation cutoff' start_during_reconciliation first-keyed-legacy-race-vanished-early
 check 'a keyed teardown that vanishes during sampling retains its own result' start_during_reconciliation first-keyed-legacy-race-vanished-keyed
+check 'a vanished successor entered after FD open overrides the preceding keyed success' start_during_reconciliation first-keyed-legacy-race-vanished-mismatch
 [ "$fails" = 0 ]

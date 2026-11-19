@@ -125,11 +125,11 @@ qr_wait_sample() {
   pending=1
   superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
   # Teardown unlinks the PID and advances mtime. Keep the startup cutoff
-  # for this generation until a different lock is observed.
-  if [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ]; then
+  # only while a retained descriptor proves it is the same generation.
+  if [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ] || [ "$legacy_lock" = unpinned ]; then
     legacy_lock="$QR_LOCK_UNPUBLISHED_ID"; legacy_start="$QR_LOCK_UNPUBLISHED_AT"
     exec 19<&-
-    if [ -n "$legacy_lock" ]; then exec 19<&18; fi
+    case "$legacy_lock" in ''|unpinned) ;; *) exec 19<&18 ;; esac
   fi
   # Older keyed producers removed their lock files in place. A retained
   # key with its own result proves teardown, not a new pending startup.
