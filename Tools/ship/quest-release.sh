@@ -121,7 +121,8 @@ qr_all() {
   qr_load_state
   if [ "${#QR_SERIALS[@]}" -gt 1 ]; then
     qr_lock_note_run
-    qr_multi_begin all
+    # Internal exit 4 tells the owner not to finalize or retry a failed begin.
+    qr_multi_begin all || return 4
   fi
   ( qr_keystore_preflight ) || {
     if [ -n "${QR_SIGNING_PATH_ENV:-}" ]; then qr_set install "skipped: signing keystore failed";
@@ -217,14 +218,14 @@ qr_main() {
   case "$cmd" in
     all|install|launch|rollback)
       if [ "${#QR_SERIALS[@]}" -gt 1 ]; then
-        list_release=1
         if [ "$cmd" = all ]; then
           # Never certify an older run as this list all, even if its worker
           # cannot start. Prepare will publish the new run when ready.
           rm -f "$(qr_state_file)" || { qr_lock_result "$cmd" 3; return 3; }
         else
-          qr_multi_begin "$cmd"
+          qr_multi_begin "$cmd" || { qr_lock_result "$cmd" 3; return 3; }
         fi
+        list_release=1
       elif [ "$cmd" != all ]; then
         # A single-device invocation must not print stale list outcomes.
         qr_set device_results ''; qr_set multi_command ''; qr_set overall ''
@@ -259,7 +260,11 @@ qr_main() {
   fi
   if [ "$list_release" = 1 ]; then
     qr_lock_note_run
-    [ "$(qr_get multi_command '')" = "$cmd" ] || qr_multi_begin "$cmd"
+    if [ "$cmd:$rc" = all:4 ] ||
+      ! { [ "$(qr_get multi_command '')" = "$cmd" ] || qr_multi_begin "$cmd"; }; then
+      qr_lock_result "$cmd" 3
+      return 3
+    fi
     # The device verdict cannot certify success if workers are still unconfirmed.
     if [ -n "${QR_ACTIVE_STEP:-}" ]; then qr_set multi_result 3; fi
     rc=0; qr_multi_finish || rc=$?

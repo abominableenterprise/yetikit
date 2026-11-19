@@ -24,7 +24,12 @@ qr_backup() { echo "$tmp/backup"; }
 qr_mic_state() { echo true; }
 qr_adb() {
   : > "$tmp/adb-called"
-  [ "${FAIL_ADB:-0}" = 0 ] || return 1
+  case "${ADB_FAULT:-}" in
+    rejection) printf 'adb: failed to install %s: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: synthetic rejection]\n' "${@: -1}" >&2; return 1 ;;
+    disconnect)
+      cp "${@: -1}" "$tmp/device.apk" || return 1
+      printf 'adb: error: device disconnected\n' >&2; return 1 ;;
+  esac
   if [ "${ADB_CREATES_DIRECTORY:-0}" = 1 ]; then mkdir "$QR_LOGS/latest-install" || return 1; fi
   echo Success
 }
@@ -73,10 +78,18 @@ QR_RUN_DIR="$c_run"; now=20260105-000000
 qr_install_apk "$a" 0 install
 check 'explicit install of another run APK records A, not the current prepared C' '[ "$(qr_get installed_commit)" = aaaaaaaaa ]'
 check 'latest operation wins even inside an older run directory' '[ "$(qr_last_installed_sha)" = aaaaaaaaa ]'
-# A refused/failed adb install must not overwrite the actually installed baseline.
+# A definitive Package Manager rejection cannot have replaced the installed APK.
 now=20260106-000000
-if ( FAIL_ADB=1; qr_install_apk "$c" 0 rollback ); then exit 1; fi
-check 'failed install keeps the last actual installed commit' '[ "$(qr_last_installed_sha)" = aaaaaaaaa ]'
+if ( ADB_FAULT=rejection; qr_install_apk "$c" 0 rollback ); then exit 1; fi
+check 'definite install rejection keeps the known baseline' '[ "$(qr_last_installed_sha)" = aaaaaaaaa ]'
+# The same nonzero exit can follow an actual commit if the transport drops.
+if ( ADB_FAULT=disconnect; qr_install_apk "$c" 0 install ); then exit 1; fi
+check 'commit then disconnect masks the old baseline until successful retry' \
+  'cmp -s "$c" "$tmp/device.apk" && grep -Fq "device disconnected" "$QR_RUN_DIR/install-adb.log" &&
+    [ "$(head -n1 "$QR_LOGS/latest-install")" = aaaaaaaaa ] &&
+    [ -d "$QR_LOGS/latest-install.pending" ] && [ -z "$(qr_last_installed_sha)" ]'
+qr_install_apk "$c" 0 install
+check 'retry after disconnect restores a known baseline' '[ "$(qr_last_installed_sha)" = ccccccccc ]'
 # Fail only the atomic publication, not summary writes or adb. The old file
 # remains on disk alongside a same-second legacy row, but neither is trusted.
 for fault in write rename; do
@@ -99,7 +112,7 @@ for fault in write rename; do
     '[ -f "$tmp/adb-called" ] && grep -qx Success "$QR_RUN_DIR/rollback-adb.log" &&
       [[ "$(qr_get install)" == "rollback: adb install ok"*"provenance publication failed"* ]] &&
       [ "$(head -n1 "$QR_LOGS/latest-install")" = aaaaaaaaa ] && [ -z "$(qr_last_installed_sha)" ]'
-  if ( FAIL_ADB=1; qr_install_apk "$c" 0 rollback ); then exit 1; fi
+  if ( ADB_FAULT=rejection; qr_install_apk "$c" 0 rollback ); then exit 1; fi
   check "publication $fault: later adb failure does not revive the stale baseline" '[ -z "$(qr_last_installed_sha)" ]'
   qr_install_apk "$c" 0 rollback
   check "publication $fault: successful retry publishes the new baseline" '[ "$(qr_last_installed_sha)" = ccccccccc ]'

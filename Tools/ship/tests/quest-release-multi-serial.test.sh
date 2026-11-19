@@ -83,6 +83,21 @@ qr_config_base="$(declare -f qr_config)"
 eval "${qr_config_base/qr_config ()/qr_fixture_config ()}"
 qr_config() { qr_fixture_config || return; QR_DATA_FILES=''; }
 
+# Fail only migration I/O, even when running as root. Simulate a partial read
+# and a failed atomic publish after an earlier step has already been migrated.
+cat() {
+  case "${migration_fault:-}:$*" in
+    read:*/summary/device_results) head -n1 "$1"; return 1 ;;
+  esac
+  command cat "$@"
+}
+mv() {
+  case "${migration_fault:-}:${*: -1}" in
+    write:*/summary/device_results_rollback) return 1 ;;
+  esac
+  command mv "$@"
+}
+
 # Fake state is keyed by a fixed fixture ID, never the current list string.
 # Unknown/list-valued -s arguments fail closed instead of contacting real adb.
 fixture_id() {
@@ -450,6 +465,21 @@ run "$a,$b" install "$tmp/new.apk"
 # stale launch to check that only other steps are carried forward.
 rm -f "$run_dir/summary/device_results_install"
 printf 'rollback[%s]: OK: legacy rollback\nlaunch[%s]: CRASH: legacy launch\n' "$a" "$wifi" >> "$run_dir/summary/device_results"
+cp "$run_dir/summary/device_results" "$tmp/legacy-rows"
+for migration_fault in read write; do
+  : > "$tmp/adb.log"
+  run "$b,$a" launch
+  check "legacy migration $migration_fault failure aborts launch and preserves combined history" \
+    '[ "$rc" = 3 ] && [ ! -s "$tmp/adb.log" ] &&
+      cmp -s "$tmp/legacy-rows" "$run_dir/summary/device_results" &&
+      grep -qx "rc=3" "$QUEST_LOG_ROOT/last-result" && grep -qx "verdict=1" "$QUEST_LOG_ROOT/last-result"'
+  if [ "$migration_fault" = read ]; then
+    # The write fault must start from an unmigrated report too.
+    cp "$tmp/legacy-rows" "$run_dir/summary/device_results"
+    rm -f "$run_dir/summary/"device_results_{install,launch,rollback}
+  fi
+done
+migration_fault=''
 run "$b,$a" launch
 check 'first list launch after upgrade retains legacy install and rollback but replaces launch' \
   '[ "$rc" = 0 ] && result_is install "$a" OK && result_is install "$b" OK && result_is rollback "$a" OK &&

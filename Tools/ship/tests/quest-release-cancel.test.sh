@@ -90,10 +90,10 @@ qr_build() {
   esac
   bash "$CANCEL_TMP/worker.sh" build
 }
-qr_verify() { [ "$CANCEL_PHASE" = list ] || echo verify >> "$CANCEL_TMP/later"; }
+qr_verify() { case "$CANCEL_PHASE" in list|list-finished) return 0 ;; esac; echo verify >> "$CANCEL_TMP/later"; }
 qr_device_locked() { "$@"; }
 qr_install_apk_locked() {
-  if [ "$QUEST_SERIAL" = synthetic-a ]; then
+  if [ "$QUEST_SERIAL" = synthetic-a ] || [ "$CANCEL_PHASE" = list-finished ]; then
     qr_set install 'install ok (synthetic APK)'
   else
     bash "$CANCEL_TMP/worker.sh" install
@@ -108,7 +108,19 @@ if [ "$CANCEL_PHASE" = registration ]; then
   set -T
   trap 'if [ "$BASH_COMMAND" = '\''QR_ACTIVE_STEP=$!'\'' ]; then read -r -t 60 _ <&8; kill -TERM "$$"; fi' DEBUG
 fi
-if [ "$CANCEL_PHASE" = list ]; then
+if [ "$CANCEL_PHASE" = list-finished ]; then
+  # Send a real signal from the owner immediately after writing overall success.
+  original_set="$(declare -f qr_set)"
+  eval "${original_set/qr_set ()/fixture_set ()}"
+  qr_set() {
+    fixture_set "$@" || return
+    if [ "$1:$2" = 'overall:OK (exit 0)' ] && [ -z "${QR_ACTIVE_STEP:-}" ]; then
+      touch "$CANCEL_TMP/late-signal"
+      kill -TERM "$$"
+    fi
+  }
+fi
+if [ "$CANCEL_PHASE" = list ] || [ "$CANCEL_PHASE" = list-finished ]; then
   QUEST_SERIAL=synthetic-a,synthetic-b qr_main install "$CANCEL_TMP/fixture.apk"
 else
   qr_main "$CANCEL_CMD"
@@ -167,6 +179,13 @@ for sig in TERM HUP INT; do
     fi
   done
 done
+rm -rf "$tmp/logs"
+rc=0; ( CANCEL_PHASE=list-finished qr_fixture_bash "$tmp/run.sh" ) > "$tmp/out" 2>&1 || rc=$?
+check 'cancellation after overall success keeps both finished device rows but invalidates the frozen report' \
+  '[ "$rc" = 1 ] && [ -f "$tmp/late-signal" ] && [ ! -e "$tmp/logs/run.lock" ] &&
+    result="$tmp/logs/last-result" && grep -qx "rc=1" "$result" && grep -qx "verdict=1" "$result" &&
+    grep -Fq "install[synthetic-a]: OK: install ok" "$result" && grep -Fq "install[synthetic-b]: OK: install ok" "$result" &&
+    ! grep -q "^overall: *OK" "$result" && grep -q "^overall: *INFRA: cancelled$" "$result"'
 # A fake compiler outlives the editor, ignores TERM, and notices if publication happens before it is killed.
 cat > "$tmp/compiler.sh" <<'COMPILER'
 . "$FIXTURE_LIB"

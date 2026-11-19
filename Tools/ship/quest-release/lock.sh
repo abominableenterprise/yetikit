@@ -261,15 +261,13 @@ qr_cancel() {
   fi
   if [ "$cmd" = perf ] || [ -f "$(qr_state_file)" ]; then qr_load_state; fi
   [ "$cmd" != perf ] || qr_perf_cancel
-  # Rebuild only the report, not a success/crash verdict from partial work.
-  case "$cmd" in
-    all|install|launch|rollback)
-      if [ -n "$group" ] && [ "$(qr_get multi_command '')" = "$cmd" ]; then
-        qr_multi_collect
-        qr_set multi_result 3
-        qr_set overall 'INFRA: cancelled'
-      fi ;;
-  esac
+  # The worker may already be drained and its rows complete. Cancellation
+  # still invalidates the overall verdict for this invocation, not those rows.
+  if [ "${list_release:-0}" = 1 ] && [ "$(qr_get multi_command '')" = "$cmd" ]; then
+    qr_multi_collect
+    qr_set multi_result 3
+    qr_set overall 'INFRA: cancelled'
+  fi
   qr_summary
   qr_lock_result "$cmd" 1 0
   exit 1
