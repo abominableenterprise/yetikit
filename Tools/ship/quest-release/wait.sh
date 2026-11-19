@@ -123,18 +123,23 @@ qr_wait_sample() {
     { [ -n "$QR_LOCK_UNPUBLISHED_ID" ] && { [ "$st" = 1 ] || [ "$pending" = 1 ]; }; }; } &&
     ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]] || return 0
   pending=1
-  superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
   # Teardown unlinks the PID and advances mtime. Keep the startup cutoff
   # only while a retained descriptor proves it is the same generation.
   if [ "$QR_LOCK_UNPUBLISHED_ID" != "$legacy_lock" ] || [ "$legacy_lock" = unpinned ]; then
     legacy_lock="$QR_LOCK_UNPUBLISHED_ID"; legacy_start="$QR_LOCK_UNPUBLISHED_AT"
+    superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
     exec 19<&-
     case "$legacy_lock" in ''|unpinned) ;; *) exec 19<&18 ;; esac
   fi
-  # Older keyed producers removed their lock files in place. A retained
-  # key with its own result proves teardown, not a new pending startup.
-  if [ -n "$superseded_key" ] && [ "$QR_LOCK_INVOCATION" = "$superseded_key" ] &&
-     qr_wait_result "$superseded_pid" "" "" "$superseded_key" >/dev/null; then
+  # The pointer read can land after the sampled generation publishes. A
+  # strictly newer pointer is not a predecessor; let reconciliation recheck
+  # the lock before selecting it. For in-place teardown, a retained matching
+  # key with a result also proves this is not an unpublished startup.
+  if [ -n "$QR_LOCK_PREV_INVOCATION" ] && [ "$QR_LOCK_PREV_INVOCATION" = "$superseded_key" ] &&
+     { { [ -n "$legacy_start" ] && [ -n "$QR_LOCK_POINTER_AT" ] &&
+         perl -e 'exit !($ARGV[0] > $ARGV[1])' "$QR_LOCK_POINTER_AT" "$legacy_start"; } ||
+       { [ "$QR_LOCK_INVOCATION" = "$superseded_key" ] &&
+         qr_wait_result "$superseded_pid" "" "" "$superseded_key" >/dev/null; }; }; then
     superseded_pid=""; superseded_key=""
   fi
 }
