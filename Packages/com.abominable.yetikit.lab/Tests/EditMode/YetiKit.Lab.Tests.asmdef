@@ -1,0 +1,10 @@
+{
+  "name": "YetiKit.Lab.Tests",
+  "rootNamespace": "YetiKit.Lab.Tests",
+  "references": ["YetiKit.Lab", "YetiKit.Hands", "UnityEngine.UI", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"],
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "autoReferenced": false
+}

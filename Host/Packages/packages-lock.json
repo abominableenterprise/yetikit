@@ -30,6 +30,16 @@
         "com.unity.xr.interaction.toolkit": "3.6.1"
       }
     },
+    "com.abominable.yetikit.lab": {
+      "version": "file:../../Packages/com.abominable.yetikit.lab",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.abominable.yetikit.hands": "0.0.1",
+        "com.unity.ugui": "2.6.0",
+        "com.unity.modules.jsonserialize": "1.0.0"
+      }
+    },
     "com.abominable.yetikit.playtest": {
       "version": "file:../../Packages/com.abominable.yetikit.playtest",
       "depth": 0,
