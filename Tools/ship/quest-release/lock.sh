@@ -22,7 +22,7 @@ qr_lock_read() {
   local d group status=0 workers="" metadata retry_evidence="" attempt stamp retry_stamp; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
   case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
   QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
-  QR_LOCK_POINTER_AT=""; QR_LOCK_PREV_PID=""; QR_LOCK_PREV_INVOCATION=""
+  QR_LOCK_POINTER_AT=""; QR_LOCK_PREV_PID=""; QR_LOCK_PREV_INVOCATION=""; QR_LOCK_POINTER_CHANGED=""
   QR_LOCK_UNPUBLISHED_AT=""; QR_LOCK_UNPUBLISHED_ID=""
   if [ "${QR_WAIT_SAMPLE:-}" = 1 ]; then exec 18<&-; fi
   for attempt in 1 2; do
@@ -73,7 +73,7 @@ qr_lock_read() {
     IFS= read -r group
     IFS= read -r QR_LOCK_RUN
     IFS= read -r workers || true
-    read -r QR_LOCK_POINTER_AT QR_LOCK_PREV_PID QR_LOCK_PREV_INVOCATION || true
+    read -r QR_LOCK_POINTER_AT QR_LOCK_PREV_PID QR_LOCK_PREV_INVOCATION QR_LOCK_POINTER_CHANGED || true
     read -r QR_LOCK_UNPUBLISHED_AT QR_LOCK_UNPUBLISHED_ID || true
   } <<< "$metadata"
   [ "$status" = 0 ] || return 1
@@ -115,7 +115,7 @@ qr_lock_pointer() {
 qr_lock_snapshot() {
   local pid group invocation run_dir workers="" previous="" unpublished_at="" stamp="" pid_arrived="" replaced=""
   local pointer="${1%/*}/current-invocation" pid_at="" pid_lost="" pointer_pid="" pointer_key="" pointer_at=""
-  local published_pid published_key
+  local initial_pointer initial_key="" pointer_sampled="" published_pid published_key
   if [ "${2:-}" != pinned ]; then cd "$1" 2>/dev/null || return 1; fi
   # Sample the entered directory before PID/metadata reads. If pathname
   # replacement made FD 20 pin its predecessor, only use this directory's
@@ -127,13 +127,17 @@ qr_lock_snapshot() {
     pinned_stamp="$(qr_lock_stamp <&20)"
     if [ "${stamp#* }" != "${pinned_stamp#* }" ]; then
       replaced=1; stamp="${stamp% *} unpinned"
-    elif [ -f pid ]; then
-      pid_at="$(qr_lock_mtime pid)"
-      # Sample a possible teardown pointer while the PID file still
-      # provides an ordering check against the same directory generation.
-      if [ "${1##*/}" = run.lock ] && [ -n "$pid_at" ]; then
-        read -r pointer_at pointer_pid pointer_key <<< "$(qr_lock_pointer "$pointer")"
-        [ "$1" -ef . ] || pointer_key=""
+    elif [ "${1##*/}" = run.lock ]; then
+      if [ -f pid ]; then
+        pid_at="$(qr_lock_mtime pid)"
+        # The key is written before the PID. Capture it before teardown can
+        # split the owner reads; unlike a pointer it belongs to this directory.
+        initial_key="$(cat invocation 2>/dev/null)"
+      fi
+      initial_pointer="$(qr_lock_pointer "$pointer")"
+      if [ "$1" -ef . ]; then
+        pointer_sampled=1
+        read -r pointer_at pointer_pid pointer_key <<< "$initial_pointer"
       fi
     fi
   fi
@@ -149,7 +153,9 @@ qr_lock_snapshot() {
     # Older producers could unlink invocation before removing the directory.
     # A keyed producer publishes its pointer after pid. An older pointer isn't
     # evidence for this lock (a genuine legacy owner may reuse the same PID).
-    if [ -f pid ] && [ "${1##*/}" = run.lock ] && [ -f "$pointer" ] && [ ! pid -nt "$pointer" ] &&
+    if [ -n "$initial_key" ]; then
+      invocation="$initial_key"
+    elif [ -f pid ] && [ "${1##*/}" = run.lock ] && [ "$pointer" -nt pid ] &&
        read -r published_pid published_key < "$pointer" && [ "$published_pid" = "$pid" ] &&
        [[ "$published_key" =~ ^run\.[a-zA-Z0-9]{10}$ ]]; then
       invocation="$published_key"
@@ -174,12 +180,17 @@ qr_lock_snapshot() {
       # removed its files. Use its captured cutoff, not a new pathname stat.
       if [ -z "$invocation" ] && [ -n "$pid_at" ] && [ "$pointer_pid" = "$pid" ] &&
          [[ "$pointer_key" =~ ^run\.[a-zA-Z0-9]{10}$ ]] &&
-         perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$pointer_at" "$pid_at"; then
+         perl -e 'exit !($ARGV[0] > $ARGV[1])' "$pointer_at" "$pid_at"; then
         invocation="$pointer_key"
       fi
       printf '%s\n%s\n\n%s\n\n%s\n%s\n' "$pid" "$invocation" "$run_dir" "$previous" "${pid_at:-${stamp% *}} ${stamp#* }"
     elif [ -n "$unpublished_at" ]; then
-      # A pending sample has no owner to pin; keep its generation boundary.
+      # If the pointer's identity changed after it was read with this lock
+      # still published, the late pointer cannot be this lock's predecessor.
+      if [ -n "$pointer_sampled" ] && [ ! "$1" -ef . ] && [ -n "$previous" ] &&
+         [ "${previous#* }" != "${initial_pointer#* }" ]; then
+        previous="$previous changed"
+      fi
       printf '\n%s\n\n\n\n%s\n%s\n' "$invocation" "$previous" "$unpublished_at"
     fi
     return 3

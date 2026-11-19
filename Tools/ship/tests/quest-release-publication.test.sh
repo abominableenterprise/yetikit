@@ -175,6 +175,9 @@ start_during_reconciliation() {
       # Reuse A's PID, but its pointer predates B's PID file and lock.
       mkdir "$QR_LOGS/run.lock" && printf '%s\n' "$$" > "$QR_LOGS/run.lock/pid" &&
         touch -t "$startup_stamp" "$QR_LOGS/run.lock/pid" "$QR_LOGS/run.lock" || return 1
+      if [[ "$outcome" = *-equal* ]]; then
+        touch -t "$startup_stamp" "$QR_LOGS/current-invocation" || return 1
+      fi
       did_start=1 ;;
     first-keyed-legacy-race-created|first-keyed-legacy-race-in-snapshot|first-keyed-legacy-race-vanished-recheck) ;;
     first-keyed-legacy-race-vanished-keyed|first-keyed-legacy-race-vanished-mismatch)
@@ -202,6 +205,9 @@ start_during_reconciliation() {
   }
   cat() {
     command cat "$@"; local cat_rc=$?
+    if [ "$outcome" = first-keyed-legacy-race-vanished-early ] && [ "$*" = invocation ]; then
+      touch "$QR_LOGS/read-owner" || exit 99
+    fi
     if [[ "$outcome" = *vanished-owner* ]] && [ . -ef "$QR_LOGS/run.lock" ]; then
       # Finish just after sampling a numeric PID (or after its metadata checks).
       if { [ "$*" = run_dir ] && [[ "$outcome" = *-final ]]; } ||
@@ -232,7 +238,8 @@ start_during_reconciliation() {
     return "$cat_rc"
   }
   qr_lock_pointer() {
-    if [ "$outcome" = first-keyed-legacy-race-vanished-early ] && [ . -ef "$QR_LOGS/run.lock" ]; then
+    if [ "$outcome" = first-keyed-legacy-race-vanished-early ] && [ -f "$QR_LOGS/read-owner" ] &&
+       [ . -ef "$QR_LOGS/run.lock" ]; then
       finish_legacy_in_place && rmdir "$QR_LOGS/run.lock" && touch "$QR_LOGS/vanished" || exit 99
     fi
     real_lock_pointer "$@"
@@ -393,14 +400,18 @@ start_during_reconciliation() {
 }
 
 pending_keyed_copy_failure() {
-  QR_LOGS="$tmp/pending-copy"
+  local timing="$1" cutoff=200001010001
+  QR_LOGS="$tmp/pending-copy-$timing"
   local lock="$QR_LOGS/run.lock" wait_rc=0
   QR_RUN_DIR="$QR_LOGS/run"
   mkdir -p "$QR_RUN_DIR" || return 1
   printf 'synthetic previous success\n' > "$QR_RUN_DIR/summary.txt" || return 1
   start_release && qr_lock_result prepare 0 0 && qr_lock_release || return 1
   touch -t 200001010000 "$QR_LOGS/current-invocation" "$QR_LOGS/last-result" || return 1
-  mkdir "$lock" && touch -t 200001010001 "$lock" || return 1
+  mkdir "$lock" && touch -t "$cutoff" "$lock" || return 1
+  if [ "$timing" = predecessor ]; then
+    touch -t "$cutoff" "$QR_LOGS/current-invocation" || return 1
+  fi
   cp() {
     [ "$2" = "$QR_LOGS/last-result.$$" ] || { command cp "$@"; return; }
     touch "$QR_LOGS/copy-attempted" || exit 99
@@ -410,11 +421,16 @@ pending_keyed_copy_failure() {
     command cat "$@"; local status=$?
     if [ "$*" = invocation ] && [ . -ef "$lock" ]; then
       # Publish after both owner reads missed, but before wait samples the pointer.
+      if [ "$timing" = predecessor ]; then
+        rmdir "$lock" && touch "$QR_LOGS/vanished" || exit 99
+        return "$status"
+      fi
       local invocation_dir
       invocation_dir="$(mktemp -d "$QR_LOGS/invocations/run.XXXXXXXXXX")" || exit 99
       QR_INVOCATION="${invocation_dir##*/}"; QR_LOCK_HELD=1
       printf '%s\n' "$QR_INVOCATION" > "$lock/invocation" && printf '%s\n' "$$" > "$lock/pid" &&
         printf '%s %s\n' "$$" "$QR_INVOCATION" > "$QR_LOGS/new-pointer" &&
+        { [ "$timing" != equal ] || touch -t "$cutoff" "$QR_LOGS/new-pointer"; } &&
         mv "$QR_LOGS/new-pointer" "$QR_LOGS/current-invocation" &&
         printf 'synthetic keyed successor\n' > "$QR_RUN_DIR/summary.txt" &&
         qr_lock_result prepare 0 0 && qr_lock_release || exit 99
@@ -422,6 +438,9 @@ pending_keyed_copy_failure() {
     return "$status"
   }
   QUEST_WAIT_GRACE=0 qr_main wait 0 || wait_rc=$?
+  if [ "$timing" = predecessor ]; then
+    [ -f "$QR_LOGS/vanished" ] && [ "$wait_rc" = 124 ] && [ ! -s "$tmp/out" ]; return $?
+  fi
   [ -f "$QR_LOGS/copy-attempted" ] && grep -q '^synthetic previous success$' "$QR_LOGS/last-result" &&
     [ "$wait_rc" = 0 ] && grep -q '^synthetic keyed successor$' "$tmp/out" &&
     ! grep -q '^synthetic previous success$' "$tmp/out"
@@ -457,7 +476,9 @@ pending_legacy_retry() {
 }
 
 check 'compatibility copy failure does not change the published outcome' compat_copy_failure
-check 'a pointer published during pending sampling resolves without a compatibility copy' pending_keyed_copy_failure
+check 'a pointer published during pending sampling resolves without a compatibility copy' pending_keyed_copy_failure newer
+check 'an equal-time publication during pending sampling resolves without a compatibility copy' pending_keyed_copy_failure equal
+check 'an unchanged equal-time pointer cannot resolve an abandoned pending lock' pending_keyed_copy_failure predecessor
 check 'a same-generation legacy retry keeps the initial pending cutoff' pending_legacy_retry
 check 'keyed teardown retains the key when pointer and PID timestamps are equal' torn_lock equal
 check 'deletion between metadata reads does not pin a legacy owner' torn_lock complete
@@ -496,6 +517,8 @@ check 'a PID appearing on recheck does not erase pending evidence if the lock va
 check 'a legacy result written before the pointer read uses the earlier generation cutoff' start_during_reconciliation first-keyed-legacy-race-vanished-early
 check 'a keyed teardown that vanishes during sampling retains its own result' start_during_reconciliation first-keyed-legacy-race-vanished-keyed
 check 'a legacy owner that unlinks its sampled PID still reports its failure' start_during_reconciliation first-keyed-legacy-race-vanished-owner
+check 'a vanished legacy owner cannot inherit an equal-time pointer for its reused PID' start_during_reconciliation first-keyed-legacy-race-vanished-owner-equal
+check 'a legacy owner cannot inherit an equal-time pointer before teardown either' start_during_reconciliation first-keyed-legacy-race-vanished-owner-equal-final
 check 'a legacy owner that unlocks after the PID checks still reports its failure' start_during_reconciliation first-keyed-legacy-race-vanished-owner-final
 check 'a PID-less retry of the same legacy lock retains the sampled numeric owner' start_during_reconciliation first-keyed-legacy-race-vanished-owner-retained-dir
 check 'a vanished legacy owner rejects a fresh result for another PID' start_during_reconciliation first-keyed-legacy-race-vanished-owner-wrong-pid

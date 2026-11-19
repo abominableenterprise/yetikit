@@ -131,13 +131,13 @@ qr_wait_sample() {
     exec 19<&-
     case "$legacy_lock" in ''|unpinned) ;; *) exec 19<&18 ;; esac
   fi
-  # The pointer read can land after the sampled generation publishes. A
-  # strictly newer pointer is not a predecessor; let reconciliation recheck
-  # the lock before selecting it. For in-place teardown, a retained matching
-  # key with a result also proves this is not an unpublished startup.
+  # The late pointer can be a publication rather than a predecessor. For
+  # equal timestamps require an observed identity change during teardown;
+  # for in-place teardown a retained matching key and result also suffice.
   if [ -n "$QR_LOCK_PREV_INVOCATION" ] && [ "$QR_LOCK_PREV_INVOCATION" = "$superseded_key" ] &&
      { { [ -n "$legacy_start" ] && [ -n "$QR_LOCK_POINTER_AT" ] &&
-         perl -e 'exit !($ARGV[0] > $ARGV[1])' "$QR_LOCK_POINTER_AT" "$legacy_start"; } ||
+         perl -e 'exit !($ARGV[0] > $ARGV[1] || ($ARGV[0] == $ARGV[1] && $ARGV[2] eq "changed"))' \
+           "$QR_LOCK_POINTER_AT" "$legacy_start" "$QR_LOCK_POINTER_CHANGED"; } ||
        { [ "$QR_LOCK_INVOCATION" = "$superseded_key" ] &&
          qr_wait_result "$superseded_pid" "" "" "$superseded_key" >/dev/null; }; }; then
     superseded_pid=""; superseded_key=""
