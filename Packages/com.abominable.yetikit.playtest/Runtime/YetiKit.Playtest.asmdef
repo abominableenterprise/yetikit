@@ -1,0 +1,7 @@
+{
+  "name": "YetiKit.Playtest",
+  "rootNamespace": "YetiKit.Playtest",
+  "references": ["YetiKit.Core"],
+  "defineConstraints": ["UNITY_EDITOR || DEVELOPMENT_BUILD || YETIKIT_DEV"],
+  "autoReferenced": false
+}
