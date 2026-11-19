@@ -16,10 +16,13 @@ namespace YetiKit.Interaction.Tests
         XRInteractionManager manager;
         PropGrabInteractable grab;
         GrabbableProp prop;
+        int settled, ownerReturns;
+        bool callbackSawReset;
 
         [TearDown]
         public void TearDown()
         {
+            PropGrabInteractable.GameplayPaused = false;
             if (scene) Object.DestroyImmediate(scene);
         }
 
@@ -70,6 +73,117 @@ namespace YetiKit.Interaction.Tests
         }
 
         [UnityTest]
+        public IEnumerator PauseCancelsFollowThroughBeforeResume()
+        {
+            yield return new EnterPlayMode();
+            Build();
+            var hand = Controller(out var motion);
+            Select(hand);
+            SeedController(motion, 1f, 4f);
+            Exit(hand);
+            Assert.That(grab.PendingLateRelease, Is.True);
+            grab.Released += CountSettlement;
+            PropGrabInteractable.GameplayPaused = true;
+            grab.SendMessage("LateUpdate");
+            Assert.That(grab.PendingLateRelease, Is.False);
+            Assert.That(prop.Body.isKinematic, Is.False);
+            PropGrabInteractable.GameplayPaused = false;
+            yield return new WaitForSeconds(LateRelease.Max + 0.02f);
+            Assert.That(grab.ReleaseSequence, Is.Zero);
+            Assert.That(grab.ReleaseVelocity, Is.EqualTo(Vector3.zero));
+            Assert.That(prop.Body.linearVelocity, Is.EqualTo(Vector3.zero));
+            Assert.That(settled, Is.EqualTo(1));
+            yield return new ExitPlayMode();
+        }
+
+        [UnityTest]
+        public IEnumerator StartPreservesAnUnmarkedLaunchAndAnExplicitThrow()
+        {
+            yield return new EnterPlayMode();
+            Build();
+            var unmarked = prop;
+            unmarked.Body.linearVelocity = Vector3.forward * 4f;
+            Build(scene);
+            var scripted = prop;
+            scripted.Body.position = Vector3.right * 5f;
+            scripted.Thrown(Time.time);
+            scripted.Body.angularVelocity = Vector3.up * 3f;
+            yield return new WaitForFixedUpdate();
+            Assert.That(unmarked.Body.position.z, Is.GreaterThan(0f));
+            Assert.That(scripted.Body.angularVelocity.y, Is.EqualTo(3f).Within(0.1f));
+            yield return new ExitPlayMode();
+        }
+
+        [UnityTest]
+        public IEnumerator OwnerResetsCancelPendingLaunchAndRemoveCatchCandidates()
+        {
+            yield return new EnterPlayMode();
+            Build();
+            var hand = Controller(out var motion);
+            var target = Child("Synthetic target").AddComponent<BoxCollider>();
+            target.transform.position = Vector3.forward * 10f;
+            prop.HitSink = new HitSink(target);
+            prop.ReturnHome += CheckOwnerReturn;
+            System.Action[] resets = { prop.PutHome, prop.Respawn, prop.ClearThrow };
+            foreach (var reset in resets)
+            {
+                prop.Body.useGravity = true;
+                Select(hand);
+                SeedController(motion, 1f, 4f);
+                Exit(hand);
+                Assert.That(grab.PendingLateRelease, Is.True);
+                var sequence = grab.ReleaseSequence;
+                var revision = prop.MotionRevision;
+                reset();
+                Assert.That(prop.MotionRevision, Is.EqualTo(revision + 1));
+                Assert.That(grab.PendingLateRelease, Is.False, reset.Method.Name);
+                Assert.That(prop.Body.isKinematic, Is.False);
+                Assert.That(prop.Body.useGravity, Is.True);
+                var resetPosition = prop.Body.position;
+                hand.transform.position += Vector3.right;
+                grab.SendMessage("LateUpdate");
+                grab.FinishLateRelease();
+                ProcessLate();
+                Assert.That(prop.Body.position, Is.EqualTo(resetPosition));
+                Assert.That(grab.ReleaseSequence, Is.EqualTo(sequence));
+                AssertNoThrow(target);
+
+                Select(hand);
+                SeedController(motion, 4f, 4f);
+                Exit(hand);
+                ProcessLate();
+                Assert.That(grab.Launched, Is.True);
+                Assert.That(PropGrabInteractable.RecentlyThrown, Has.Member(grab));
+                sequence = grab.ReleaseSequence;
+                reset();
+                Assert.That(grab.ReleaseSequence, Is.EqualTo(sequence));
+                AssertNoThrow(target);
+            }
+            Assert.That(ownerReturns, Is.EqualTo(2));
+            Assert.That(callbackSawReset, Is.True);
+            yield return new ExitPlayMode();
+        }
+
+        void CountSettlement(PropGrabInteractable _, Transform hand) => settled++;
+
+        void CheckOwnerReturn()
+        {
+            ownerReturns++;
+            callbackSawReset = !grab.PendingLateRelease && !grab.Launched && !prop.Body.isKinematic;
+        }
+
+        void AssertNoThrow(Collider target)
+        {
+            Assert.That(grab.Launched, Is.False);
+            Assert.That(grab.ReleaseSource, Is.Null);
+            Assert.That(grab.ReleaseVelocity, Is.EqualTo(Vector3.zero));
+            Assert.That(grab.ThrownAt, Is.EqualTo(float.NegativeInfinity));
+            Assert.That(grab.ThrownBy, Is.Null);
+            Assert.That(PropGrabInteractable.RecentlyThrown, Has.No.Member(grab));
+            Assert.That(prop.Collided(target, Vector3.right * 5f, Vector3.zero, Time.time), Is.False);
+        }
+
+        [UnityTest]
         public IEnumerator SameFrameHandOffDoesNotLaunchFromGivingHand()
         {
             yield return new EnterPlayMode();
@@ -85,6 +199,153 @@ namespace YetiKit.Interaction.Tests
             Assert.That(grab.PendingLateRelease, Is.False);
             Assert.That(grab.ReleaseSequence, Is.Zero);
             Assert.That(grab.Launched, Is.False);
+            yield return new ExitPlayMode();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SnapTurnCarriesTheRetainedPeakWithoutAddingMotion(bool sampleAfterTurn)
+        {
+            scene = new GameObject("Tracking space");
+            var controller = Child("Controller").AddComponent<ControllerMotion>();
+            const float dt = 0.01f;
+            controller.Sample(1f, dt);
+            controller.transform.localPosition = Vector3.forward * 0.06f;
+            controller.transform.localRotation = Quaternion.AngleAxis(5f, Vector3.right);
+            controller.Sample(1f + dt, dt);
+            var old = controller.History.Latest;
+
+            var turn = Quaternion.AngleAxis(90f, Vector3.up);
+            scene.transform.SetPositionAndRotation(Vector3.forward * 3f, turn);
+            if (sampleAfterTurn) controller.Sample(1f + 2f * dt, dt);
+
+            Assert.That(controller.Release(1f + 2f * dt, out var peak), Is.True);
+            Assert.That(peak.Time, Is.EqualTo(old.Time));
+            Assert.That(peak.Source, Is.EqualTo(ControllerMotion.FrameDelta));
+            Assert.That(Vector3.Distance(peak.Linear, turn * old.Linear), Is.LessThan(1e-4f));
+            Assert.That(Vector3.Distance(peak.Angular, turn * old.Angular), Is.LessThan(1e-4f));
+            if (sampleAfterTurn)
+            {
+                Assert.That(controller.History.Latest.Linear.magnitude, Is.LessThan(1e-4f));
+                Assert.That(controller.History.Latest.Angular.magnitude, Is.LessThan(1e-4f));
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator SnapTurnBetweenGripExitAndDetachRotatesTheLaunch()
+        {
+            yield return new EnterPlayMode();
+            Build();
+            var hand = Controller(out var motion);
+            var trackingSpace = Child("Tracking space").transform;
+            hand.transform.SetParent(trackingSpace, false);
+            Select(hand);
+            var spin = Vector3.forward * 5f;
+            SeedController(motion, 4f, 4f, spin);
+            Exit(hand);
+            Assert.That(grab.PendingLateRelease, Is.False);
+            Assert.That(grab.ReleaseSequence, Is.Zero);
+
+            var turn = Quaternion.AngleAxis(90f, Vector3.up);
+            trackingSpace.rotation = turn;
+            ProcessLate();
+            Assert.That(grab.ReleaseSequence, Is.EqualTo(1));
+            Assert.That(Vector3.Dot(grab.ReleaseVelocity, turn * Vector3.right), Is.GreaterThan(2f));
+            Assert.That(Vector3.Distance(prop.Body.angularVelocity, turn * spin), Is.LessThan(1e-4f));
+            yield return new ExitPlayMode();
+        }
+
+        [UnityTest]
+        public IEnumerator SnapTurnDuringFollowThroughKeepsTheRotatedPeakSpin()
+        {
+            yield return new EnterPlayMode();
+            Build();
+            var hand = Controller(out var motion);
+            var trackingSpace = Child("Tracking space").transform;
+            hand.transform.SetParent(trackingSpace, false);
+            Select(hand);
+            var spin = Vector3.forward * 5f;
+            SeedController(motion, 1f, 4f, spin);
+            Exit(hand);
+            Assert.That(grab.PendingLateRelease, Is.True);
+
+            // The first post-turn sample slows the throw. Without carrying the older history,
+            // this frame looks like a reversal and its zero spin replaces the cached peak spin.
+            var turn = Quaternion.AngleAxis(180f, Vector3.up);
+            trackingSpace.rotation = turn;
+            hand.transform.localPosition = Vector3.right * 0.03f;
+            motion.Sample(Time.time + 0.01f, 0.01f);
+            grab.SendMessage("LateUpdate");
+
+            Assert.That(grab.PendingLateRelease, Is.False);
+            Assert.That(grab.ReleaseSequence, Is.EqualTo(1));
+            Assert.That(Vector3.Dot(grab.ReleaseVelocity, turn * Vector3.right), Is.GreaterThan(2f));
+            Assert.That(Vector3.Distance(prop.Body.angularVelocity, turn * spin), Is.LessThan(1e-4f));
+            yield return new ExitPlayMode();
+        }
+
+        [Test]
+        public void SnapTurnWhileTrackingIsLostCarriesTheCachedPalmVelocity()
+        {
+            scene = new GameObject("Tracking space");
+            var root = Child("Hand");
+            var hand = root.AddComponent<PlayerHand>();
+            var tracking = new PalmTracking();
+            hand.Tracking = tracking;
+            var motion = root.AddComponent<ControllerMotion>();
+            motion.hand = hand;
+            hand.Tick(1f);
+            motion.Sample(1f, 0.01f);
+            var linear = Vector3.forward * 4f;
+            var spin = Vector3.right * 5f;
+            for (var i = 0; i < 3; i++)
+                motion.History.Add(new ThrowSample(1f + i * 0.01f, linear, spin, ThrowSources.HandPalm));
+            tracking.Tracked = false;
+            hand.Tick(1.04f);
+            motion.Sample(1.04f, 0.01f);
+            Assert.That(hand.Present, Is.False);
+
+            var turn = Quaternion.AngleAxis(90f, Vector3.up);
+            scene.transform.rotation = turn;
+            // The last raw sample has expired; only the cached tracking-loss release is still usable.
+            Assert.That(motion.Release(1.30f, out var peak), Is.True);
+            Assert.That(peak.Source, Is.EqualTo(ThrowSources.HandPalm));
+            Assert.That(Vector3.Distance(peak.Linear, turn * linear), Is.LessThan(1e-4f));
+            Assert.That(Vector3.Distance(peak.Angular, turn * spin), Is.LessThan(1e-4f));
+        }
+
+        [UnityTest]
+        public IEnumerator PalmSpinAddsNoLeverSpeedWhenTheHeldCentreIsAtThePalm()
+        {
+            yield return new EnterPlayMode();
+            Build();
+            var root = Child("Hand");
+            var hand = root.AddComponent<PlayerHand>();
+            var tracking = new PalmTracking { Palm = Vector3.up * 0.15f };
+            hand.Tracking = tracking;
+            var motion = root.AddComponent<ControllerMotion>();
+            motion.hand = hand;
+            hand.Tick(Time.time);
+            var near = Child("Near", root.transform);
+            near.transform.position = hand.PalmPose.position;
+            near.AddComponent<SphereCollider>().isTrigger = true;
+            var interactor = near.AddComponent<XRDirectInteractor>();
+            interactor.interactionManager = manager;
+            grab.attachTransform = prop.transform;
+            Select(interactor);
+            motion.SampleThisFrame();
+            motion.History.Clear();
+            var linear = Vector3.forward * 3f;
+            var spin = Vector3.right * 8f;
+            for (var i = 2; i >= 0; i--)
+                motion.History.Add(new ThrowSample(Time.time - i * 0.01f, linear, spin, ThrowSources.HandPalm));
+
+            Exit(interactor);
+            ProcessLate();
+            Assert.That(grab.ReleaseSequence, Is.EqualTo(1));
+            Assert.That(grab.ReleaseSource, Is.EqualTo(ThrowSources.HandPalm));
+            Assert.That(Vector3.Distance(grab.ReleaseVelocity, PropThrow.Linear(linear)), Is.LessThan(1e-4f),
+                "The 15 cm palm-to-wrist offset is not part of the centre-of-mass lever.");
             yield return new ExitPlayMode();
         }
 
@@ -288,10 +549,45 @@ namespace YetiKit.Interaction.Tests
             }
         }
 
-        void Build(bool compound = false)
+        [UnityTest]
+        public IEnumerator ScaledGripCenterAlignsAndStaysFixedDuringAdjustment()
         {
-            scene = new GameObject("Synthetic interaction");
-            manager = scene.AddComponent<XRInteractionManager>();
+            yield return new EnterPlayMode();
+            Build();
+            var hand = Controller(out _);
+            var visual = hand.gameObject.AddComponent<FittedGripVisual>();
+            visual.UseAuthoredPose = true;
+            var scale = new Vector3(2f, 3f, 0.5f);
+            var center = new Vector3(0.1f, 0.04f, -0.12f);
+            prop.transform.localScale = scale;
+            prop.grip.center = center;
+            hand.transform.rotation = Quaternion.Euler(15f, 30f, 45f);
+            Select(hand);
+            foreach (var oriented in new[] { false, true })
+            {
+                if (oriented)
+                {
+                    prop.grip.handForward = Vector3.right;
+                    prop.grip.handUp = Vector3.up;
+                }
+                foreach (var angle in new[] { 0f, 70f })
+                {
+                    grab.GripAdjustment = new Pose(Vector3.zero, Quaternion.AngleAxis(angle, Vector3.forward));
+                    visual.Refit();
+                    var expected = visual.transform.TransformPoint(prop.grip.ModelPoint(Vector3.zero));
+                    var actual = visual.Held.position + visual.Held.rotation * Vector3.Scale(scale, center);
+                    Assert.That(Vector3.Distance(actual, expected), Is.LessThan(0.0001f), $"oriented={oriented}, angle={angle}");
+                }
+            }
+            yield return new ExitPlayMode();
+        }
+
+        void Build(bool compound = false) => Build(null, compound);
+
+        void Build(GameObject existingScene, bool compound = false)
+        {
+            scene = existingScene ? existingScene : new GameObject("Synthetic interaction");
+            manager = existingScene ? scene.GetComponent<XRInteractionManager>() : scene.AddComponent<XRInteractionManager>();
             var body = Child("Prop");
             if (compound)
             {
@@ -316,12 +612,12 @@ namespace YetiKit.Interaction.Tests
             return hand;
         }
 
-        static void SeedController(ControllerMotion motion, float previous, float latest)
+        static void SeedController(ControllerMotion motion, float previous, float latest, Vector3 spin = default)
         {
             motion.SampleThisFrame();
             motion.History.Clear();
             motion.History.Add(new ThrowSample(Time.time - 0.01f, Vector3.right * previous, Vector3.zero, ControllerMotion.FrameDelta));
-            motion.History.Add(new ThrowSample(Time.time, Vector3.right * latest, Vector3.zero, ControllerMotion.FrameDelta));
+            motion.History.Add(new ThrowSample(Time.time, Vector3.right * latest, spin, ControllerMotion.FrameDelta));
         }
 
         void Select(IXRSelectInteractor hand) => manager.SelectEnter(hand, grab);
@@ -338,6 +634,7 @@ namespace YetiKit.Interaction.Tests
         public sealed class FittedGripVisual : MonoBehaviour, IHeldVisual
         {
             public Pose Held;
+            public bool UseAuthoredPose;
             public Vector3 Offset = new Vector3(0.1f, 0.2f, 0.05f);
             public event System.Action GripChanged;
             public void Refit() => GripChanged?.Invoke();
@@ -348,7 +645,7 @@ namespace YetiKit.Interaction.Tests
                 return true;
             }
             public Pose FitGrip(PropGrabInteractable prop, GripSpec grip, Pose authoredPose) =>
-                new Pose(transform.position + Offset, Quaternion.Euler(10f, 20f, 35f));
+                UseAuthoredPose ? authoredPose : new Pose(transform.position + Offset, Quaternion.Euler(10f, 20f, 35f));
             public void Hold(PropGrabInteractable prop, GripSpec grip, Pose heldPose) => Held = heldPose;
             public void Release(PropGrabInteractable prop) { }
         }

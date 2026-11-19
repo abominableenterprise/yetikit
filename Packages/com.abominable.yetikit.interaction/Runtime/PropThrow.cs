@@ -27,15 +27,15 @@ namespace YetiKit.Interaction
         public static Vector3 Linear(Vector3 controller) => Vector3.ClampMagnitude(controller * ThrowTuning.Power, MaxSpeed);
 
         /// <summary>
-        /// The launch velocity of a prop whose centre of mass is <paramref name="lever"/> from the controller (world),
-        /// with the controller moving at <paramref name="controller"/> and spinning at <paramref name="angular"/> rad/s.
-        /// The wrist's ω × r adds only its forward component, so it does not slow or deflect the throw.
+        /// The launch velocity of a prop whose centre of mass is <paramref name="lever"/> from the sampled point in
+        /// world space (palm or controller), moving at <paramref name="controller"/> and spinning at
+        /// <paramref name="angular"/> rad/s. The ω × r term adds only its forward component to a moving throw.
         /// </summary>
         public static Vector3 Linear(Vector3 controller, Vector3 angular, Vector3 lever)
         {
             var tangential = Vector3.Cross(angular, lever);
             var speed = controller.magnitude;
-            if (speed < 1e-4f) return Linear(tangential); // the wrist alone
+            if (speed < 1e-4f) return Linear(tangential); // rotation alone
             var dir = controller / speed;
             return Linear(dir * (speed + Mathf.Max(0f, Vector3.Dot(tangential, dir))));
         }

@@ -9,8 +9,8 @@ namespace YetiKit.Interaction
     /// Every frame records the tracked device velocity and angular velocity (tracking space, turned into world space
     /// by the Camera Offset) from the first of <see cref="VelocityPaths"/> / <see cref="AngularPaths"/> that is bound
     /// and reporting, or, without one (editor, simulator, tracking loss), the finite difference of this transform
-    /// within the Camera Offset (so moving the rig is not hand motion). <see cref="Release"/> gives the peak of the
-    /// last few frames (<see cref="ThrowHistory"/>), with the source it came from.
+    /// within the Camera Offset (so moving the rig is not hand motion). Retained velocities turn with the tracking
+    /// space. <see cref="Release"/> gives the peak of the last few frames (<see cref="ThrowHistory"/>), with its source.
     /// </summary>
     public sealed class ControllerMotion : MonoBehaviour
     {
@@ -73,6 +73,7 @@ namespace YetiKit.Interaction
         InputAction[] velocity, angular;
         Vector3 lastPosition;
         Quaternion lastRotation;
+        Quaternion? historySpaceRotation;
         bool hasLast, trustedPalmAtLoss, hasPalmBaseline;
         Vector3 palmBaseline; // independently supported position; an isolated accepted step cannot move it
         float PalmToleranceSquared => HandReleaseVelocity.StillSpeed * HandReleaseVelocity.StillSpeed * ReleaseWindow * ReleaseWindow;
@@ -131,6 +132,7 @@ namespace YetiKit.Interaction
         {
             history.Clear();
             handRelease.Clear();
+            historySpaceRotation = null;
             hasLast = hasPalmBaseline = trustedPalmAtLoss = false;
             sampledFrame = -1;
             lastSnapAt = float.NegativeInfinity;
@@ -155,7 +157,12 @@ namespace YetiKit.Interaction
         public void SampleFrame(int frame, float now, float deltaTime)
         {
             if (PropGrabInteractable.GameplayPaused) { ResetAfterPause(); return; }
-            if (sampledFrame == frame) return;
+            if (sampledFrame == frame)
+            {
+                // Locomotion can turn the rig after this frame's sample, before a consumer reads History.
+                CarryMotionWithRig();
+                return;
+            }
             sampledFrame = frame;
             Sample(now, hasLast ? now - lastTime : deltaTime);
             lastTime = now;
@@ -185,6 +192,7 @@ namespace YetiKit.Interaction
         {
             var reseeded = false;
             if (hand) hand.Sync(); // controller mode: the root on the controller's newest pose (no-op with a tracked hand)
+            CarryMotionWithRig();
             if (hand && hand.PoseEpoch != epoch)
             {
                 // A new pose source (controller ↔ hand, tracking lost or back): the root may jump. A new baseline and no
@@ -292,6 +300,24 @@ namespace YetiKit.Interaction
         // both pose sources in tracking space so rig translation cannot become throw velocity.
         Transform TrackingSpace => hand ? hand.transform.parent : transform.parent;
 
+        // This baseline belongs to the sampler, not to any one prop's RigFollow. Translate neither the
+        // stored velocities nor the tracking-local pose baselines; only reorient the retained world vectors.
+        void CarryMotionWithRig()
+        {
+            var space = TrackingSpace;
+            var rotation = space ? space.rotation : Quaternion.identity;
+            var previous = historySpaceRotation;
+            historySpaceRotation = rotation;
+            if (!previous.HasValue || previous.Value.Equals(rotation)) return;
+            var turn = rotation * Quaternion.Inverse(previous.Value);
+            history.Rotate(turn);
+            handRelease.Rotate(turn);
+        }
+
+        // Tracking loss retains the last palm pose. Use the selected sample's source, not the current mode.
+        internal Vector3 ReleaseOrigin(ThrowSample sample) =>
+            sample.Source == HandPalm && hand ? hand.PalmPose.position : transform.position;
+
         Vector3 LocalPosition(bool trackedHand)
         {
             var world = trackedHand ? hand.PalmPose.position : transform.position;
@@ -327,6 +353,7 @@ namespace YetiKit.Interaction
         /// punch's speed on its first frame after a reacquire.</summary>
         public bool Release(float now, out ThrowSample peak, bool throwing)
         {
+            CarryMotionWithRig();
             // a bare hand (or one that just lost tracking): HandReleaseVelocity; a controller: the history's raw peak
             if (throwing && (history.Latest.Source == HandPalm || handRelease.Carried(now, out _)))
             {

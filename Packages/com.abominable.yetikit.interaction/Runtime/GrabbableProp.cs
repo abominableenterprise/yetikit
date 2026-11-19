@@ -42,10 +42,9 @@ namespace YetiKit.Interaction
             ForHand(gripProfiles?.For(mode)?.spec ?? grip, rightHand);
 
         /// <summary>
-        /// The grip for the <paramref name="rightHand"/> or left hand. GripPlacement builds a proper rotation from the
-        /// mirrored left glove's back and thumb, so a prop's +Z that runs along the right hand's fingers runs back
-        /// toward the left wrist (and the reverse); a <see cref="handed"/> prop flips its palm side there, turning it about
-        /// its axis; a <see cref="faceToWrist"/> prop flips its axis, turning it about the palm normal.
+        /// The authored grip for the <paramref name="rightHand"/> or left hand. On the left,
+        /// <see cref="handed"/> turns the grip about the glove's thumb axis and <see cref="faceToWrist"/> turns it
+        /// about the palm normal. An oriented grip applies those turns to its model-frame up and forward directions.
         /// </summary>
         public GripSpec GripFor(bool rightHand) => ForHand(grip, rightHand);
 
@@ -54,6 +53,13 @@ namespace YetiKit.Interaction
             if (rightHand || !handed && !faceToWrist) return g;
             if (handed) g.palm = -g.palm;
             if (faceToWrist) g.axis = -g.axis;
+            if (g.IsOriented)
+            {
+                // Half-turns about model +Y (thumb) and +X (palm normal); either turn reverses +Z.
+                var signs = new Vector3(handed ? -1f : 1f, faceToWrist ? -1f : 1f, handed != faceToWrist ? -1f : 1f);
+                g.handUp = Vector3.Scale(g.handUp, signs);
+                g.handForward = Vector3.Scale(g.handForward, signs);
+            }
             return g;
         }
         [Tooltip("Enable distance, idle and area respawn. Loose props still recover from falls.")]
@@ -159,7 +165,13 @@ namespace YetiKit.Interaction
             grab.Released -= OnReleaseSettled;
         }
 
-        void Start() => body.Sleep(); // placed at rest: no settling jitter at load
+        void Start()
+        {
+            // Sleep only a prop placed at rest, not one already in use before the first physics step.
+            if (!Held && !grab.PendingLateRelease && !inFlight && !Stuck && !body.isKinematic &&
+                body.linearVelocity.sqrMagnitude == 0f && body.angularVelocity.sqrMagnitude == 0f)
+                body.Sleep();
+        }
 
         void OnGrabbed(SelectEnterEventArgs _)
         {
@@ -292,15 +304,18 @@ namespace YetiKit.Interaction
         /// <summary>Restart the idle clock after an owner lets go of the prop.</summary>
         public void ResetIdle() => idle = 0f;
 
-        /// <summary>Nothing in flight any more (put back somewhere by its owner): no hit counts until the next throw.</summary>
+        /// <summary>Cancel any unsettled hand release and clear catch and hit eligibility until the next throw.
+        /// Does not stop an already launched body; the owner controls its motion.</summary>
         public void ClearThrow()
         {
             MotionRevision++;
             hits.Reset();
             inFlight = false;
+            velocityBefore = Vector3.zero;
             neighbours?.Clear();
             pairs?.Clear();
             idle = 0f;
+            if (grab) grab.ResetThrow();
         }
 
         /// <summary>Back to the home spot, at rest.</summary>
@@ -320,7 +335,7 @@ namespace YetiKit.Interaction
         /// <summary>Back to the home spot, at rest, with nothing in flight (what <see cref="Respawn"/> does without a <see cref="ReturnHome"/>).</summary>
         public void PutHome()
         {
-            MotionRevision++;
+            ClearThrow();
             if (!body.isKinematic)
             {
                 body.linearVelocity = Vector3.zero;
@@ -332,11 +347,7 @@ namespace YetiKit.Interaction
             // Its original stack may have been removed: let gravity find support again.
             if (!body.isKinematic && body.useGravity) body.WakeUp();
             else body.Sleep();
-            hits.Reset();
-            inFlight = false;
-            neighbours?.Clear();
-            pairs?.Clear();
-            idle = outOfArea = 0f;
+            outOfArea = 0f;
         }
     }
 }

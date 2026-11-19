@@ -15,7 +15,7 @@ namespace YetiKit.Interaction
         public const float Gravity = 9.81f;
         const float DefaultNearReach = 0.25f;
 
-        /// <summary>Host pause flag; controller motion history is reset while paused.</summary>
+        /// <summary>Host pause flag. Paused updates clear controller history and cancel unsettled releases without throwing.</summary>
         public static bool GameplayPaused { get; set; }
 
         HandMode? gripModeOverride;
@@ -64,12 +64,16 @@ namespace YetiKit.Interaction
             finally { modeDrop = false; }
         }
 
-        void ClearReleaseVelocity()
+        void ForgetReleaseVelocity()
         {
-            haveRelease = false;
+            haveRelease = Launched = false;
             ReleaseSource = null;
             releaseLinear = releaseAngular = Vector3.zero;
-            Launched = false;
+        }
+
+        void ClearReleaseVelocity()
+        {
+            ForgetReleaseVelocity();
             if (!body.isKinematic)
             {
                 body.linearVelocity = Vector3.zero;
@@ -210,10 +214,7 @@ namespace YetiKit.Interaction
             // The outgoing selection settles before the incoming hand takes custody, without launching.
             NotifyRelease(committed: false);
             Grabbing?.Invoke(this);
-            Launched = false;
-            haveRelease = false;
-            ReleaseSource = null;
-            releaseLinear = releaseAngular = Vector3.zero;
+            ForgetReleaseVelocity();
             thrown.Remove(this);
             var to = HandOf(args.interactorObject);
             if (exitFrame == Time.frameCount && holder != null && !ReferenceEquals(holder, to)) Guard(holder);
@@ -264,8 +265,11 @@ namespace YetiKit.Interaction
             }
             var right = hand ? hand.RightHand : !motion || motion.rightHand;
             var spec = CurrentGripFor(right);
-            var held = visual.FitGrip(this, spec, GripPlacement.PropPose(model, knuckles, spec));
-            held = GripAdjustmentMath.Apply(held, GripAdjustmentMath.WorldFrame(model), spec.center, GripAdjustment, right);
+            var pivot = Quaternion.Inverse(transform.rotation) * transform.TransformVector(spec.center);
+            var placement = spec;
+            placement.center = pivot;
+            var held = visual.FitGrip(this, spec, GripPlacement.PropPose(model, knuckles, placement));
+            held = GripAdjustmentMath.Apply(held, GripAdjustmentMath.WorldFrame(model), pivot, GripAdjustment, right);
             // The prop's pose relative to the interactor's attach point, expressed as the prop's own attach point.
             var inv = Quaternion.Inverse(held.rotation);
             // Undo the scale XRI sees at grab/refit, after rotating the fitted offset into the current prop frame.
@@ -301,7 +305,7 @@ namespace YetiKit.Interaction
                 motion.SampleThisFrame();
                 if (motion.Release(Time.time, out var peak) && (!hand || hand.Present || peak.Source == ThrowSources.HandPalm))
                 {
-                    var lever = HeldCenter(interactor.GetAttachTransform(this), interactor) - motion.transform.position;
+                    var lever = HeldCenter(interactor.GetAttachTransform(this), interactor) - motion.ReleaseOrigin(peak);
                     SampleRelease(peak, lever);
                     var latest = motion.History.Latest;
                     var previous = motion.History.Previous;
@@ -368,7 +372,7 @@ namespace YetiKit.Interaction
 
         public override void ProcessInteractable(XRInteractionUpdateOrder.UpdatePhase updatePhase)
         {
-            if (GameplayPaused) return;
+            if (CancelReleaseWhilePaused()) return;
             if ((isSelected || lateRelease != null) && heldGripMode != GripMode) DropForModeChange();
             // Carry before XRI's velocity tracking can chase a teleport across the gap.
             if (isSelected && (updatePhase == XRInteractionUpdateOrder.UpdatePhase.Dynamic || updatePhase == XRInteractionUpdateOrder.UpdatePhase.Fixed))
@@ -390,15 +394,18 @@ namespace YetiKit.Interaction
                 body.angularVelocity = carry.Rotation * body.angularVelocity;
             }
             if (isSelected) SetTargetPose(carry.Carry(GetTargetPose()));
-            lateLastPosition = carry.Point(lateLastPosition);
+            var turn = carry.Rotation;
+            if (releaseUnannounced && haveRelease)
+            {
+                releaseLinear = turn * releaseLinear;
+                releaseAngular = turn * releaseAngular;
+            }
             if (lateRelease != null)
             {
                 // The deadline branch can finish without updating the attach pose again.
-                var turn = carry.Rotation;
-                latePeak = new ThrowSample(latePeak.Time, turn * latePeak.Linear, turn * latePeak.Angular, latePeak.Source);
+                lateLastPosition = carry.Point(lateLastPosition);
+                latePeak = latePeak.Rotated(turn);
                 lateLever = turn * lateLever;
-                releaseLinear = turn * releaseLinear;
-                releaseAngular = turn * releaseAngular;
                 lateRelease.Rotate(turn);
             }
             CarriedByRig?.Invoke(carry);
@@ -406,7 +413,7 @@ namespace YetiKit.Interaction
 
         void LateUpdate()
         {
-            if (GameplayPaused || lateRelease == null) return;
+            if (CancelReleaseWhilePaused() || lateRelease == null) return;
             if (heldGripMode != GripMode || !lateAttach || hand && !hand.Present) { DropForModeChange(); return; }
             CarryWithRig(); // keep the ride's sweep off the rig relocation gap
             if (lateRelease == null) return;
@@ -447,6 +454,31 @@ namespace YetiKit.Interaction
             lateAttach = null;
         }
 
+        bool CancelReleaseWhilePaused()
+        {
+            if (!GameplayPaused) return false;
+            if (!isSelected && releaseUnannounced)
+            {
+                if (lateRelease != null) CancelLateRelease();
+                ClearReleaseVelocity();
+                NotifyRelease(committed: false);
+            }
+            return true;
+        }
+
+        // Unlike CancelLateReleaseForOwner, the prop reset restores the pre-ride body flags.
+        internal void ResetThrow()
+        {
+            if (lateRelease != null) CancelLateRelease();
+            if (!isSelected && releaseUnannounced) ClearReleaseVelocity();
+            else ForgetReleaseVelocity();
+            thrown.Remove(this);
+            thrownBy = guarded = holder = null;
+            thrownAt = guardedAt = float.NegativeInfinity;
+            exitFrame = -1;
+            NotifyRelease(committed: false);
+        }
+
         /// <summary>A scripted owner claims the prop during follow-through. That owner controls kinematic state.</summary>
         public void CancelLateReleaseForOwner()
         {
@@ -455,16 +487,14 @@ namespace YetiKit.Interaction
             lateRelease = null;
             lateAttach = null;
             body.useGravity = lateGravity;
-            haveRelease = false;
-            ReleaseSource = null;
-            releaseLinear = releaseAngular = Vector3.zero;
+            ForgetReleaseVelocity();
             NotifyRelease(committed: false);
         }
 
         /// <summary>End the brief ride early on a collision; only the first completion can launch.</summary>
         public void FinishLateRelease()
         {
-            if (lateRelease == null || GameplayPaused) return;
+            if (CancelReleaseWhilePaused() || lateRelease == null) return;
             if (heldGripMode != GripMode || !lateAttach || hand && !hand.Present) { DropForModeChange(); return; }
             CarryWithRig();
             if (lateRelease == null) return;
@@ -488,6 +518,8 @@ namespace YetiKit.Interaction
 
         void Launch()
         {
+            if (!releaseUnannounced || isSelected) return;
+            CarryWithRig(); // XRI may defer detach until after a turn that occurred after select exit.
             if (!releaseUnannounced || isSelected) return;
             Guard(holder);
             if (!throwOnDetach || body.isKinematic)
