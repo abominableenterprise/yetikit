@@ -585,9 +585,11 @@ change is an unstaged file edit recognized by Ship's editor-run noise rules
 For prefabs, only spelling changes in recognized transform vectors that keep
 the same serialized float value count as noise.
 A worktree with staged or untracked work, deletions, or unclassified edits is
-kept intact with a reason. Both modes keep a worktree if the index cannot be
-inspected or if it contains `assume-unchanged` or `skip-worktree` entries, since
-Git can hide edits to those files. `--discard-noise` is only for standalone
+kept intact with a reason. Both modes lock the worktree index while checking
+for `assume-unchanged` or `skip-worktree` entries and through non-forced
+removal. Cleanup keeps the worktree if the index is busy, cannot be inspected,
+or has either flag, since Git can hide edits to those files.
+`--discard-noise` is only for standalone
 `cleanup`; `all` continues to remove only clean worktrees.
 
 `prepare` (also used by `all`) fetches origin without prompting. Quest release

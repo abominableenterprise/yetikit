@@ -30,9 +30,13 @@ case "$1" in
     exit 1
     ;;
   rev-parse)
-    [ "$*" = 'rev-parse --verify HEAD^{commit}' ] || exit 96
-    [ "${FIXTURE_HEAD_FAIL:-0}" = 0 ] || exit 128
-    printf '%s\n' "$QR_SHA"
+    case "$*" in
+      'rev-parse --verify HEAD^{commit}')
+        [ "${FIXTURE_HEAD_FAIL:-0}" = 0 ] || exit 128
+        printf '%s\n' "$QR_SHA" ;;
+      'rev-parse --path-format=absolute --git-path index') printf '%s\n' "$wt/index-fixture" ;;
+      *) exit 96 ;;
+    esac
     ;;
   update-ref)
     [ "$*" = 'update-ref --stdin' ] || exit 97
@@ -137,9 +141,24 @@ preserves_unreadable_index() {
   if result="$(FIXTURE_INDEX_FAIL=1 qr_cleanup_one "$wt")"; then
     return 1
   fi
-  [ -d "$wt" ] && [ ! -s "$FIXTURE_CALLS" ] && [ "$result" = 'kept (inspection failed)' ]
+  [ -d "$wt" ] && [ ! -s "$FIXTURE_CALLS" ] && [ "$result" = 'kept (inspection failed)' ] &&
+    [ ! -e "$wt/index-fixture.lock" ]
 }
 check preserves_unreadable_index
+
+preserves_existing_index_lock() {
+  local wt="$tmp/busy-index" result
+  mkdir -p "$wt"
+  printf 'pending index write\n' > "$wt/index-fixture.lock"
+  : > "$FIXTURE_STATUS"
+  : > "$FIXTURE_CALLS"
+  if result="$(qr_cleanup_one "$wt")"; then
+    return 1
+  fi
+  [ ! -s "$FIXTURE_CALLS" ] && [ "$result" = 'kept (index lock unavailable)' ] &&
+    grep -Fxq 'pending index write' "$wt/index-fixture.lock"
+}
+check preserves_existing_index_lock
 
 preserves_unreadable_head() {
   local wt="$tmp/unreadable-head" result
