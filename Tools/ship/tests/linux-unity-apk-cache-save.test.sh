@@ -19,6 +19,11 @@ rm -rf "$proj/Library"; : > "$tmp/cache-calls"
 check "a failed cold save still puts Library/Bee back" \
   'FAKE_MUTATE="$FAKE_MUTATE; mkdir -p Library/Bee && echo x > Library/Bee/obj" FAKE_SAVE_RC=1 TASK_CACHE=fake-cache FAKE_HIT="$k" lu apk && grep -q "cache-save failed" "$tmp/err" && [ -f "$proj/Library/Bee/obj" ] && [ ! -e "$proj/Temp/apk-bee-aside" ]'
 
+linked_bee='mkdir -p Library/bee-cache && echo linked > Library/bee-cache/obj && ln -s bee-cache Library/Bee'
+rm -rf "$proj/Library" "$proj/Temp"; : > "$tmp/cache-bee"
+check "cold save restores the relative Bee link and allows the next cold save" \
+  'FAKE_MUTATE="$FAKE_MUTATE; $linked_bee" TASK_CACHE=fake-cache lu apk && [ "$(readlink "$proj/Library/Bee")" = bee-cache ] && grep -qx linked "$proj/Library/Bee/obj" && [ ! -L "$proj/Temp/apk-bee-aside" ] && rm -rf "$proj/Library" && FAKE_MUTATE="$FAKE_MUTATE; $linked_bee" TASK_CACHE=fake-cache lu apk && [ "$(grep -cFx "save $ka nobee" "$tmp/cache-bee")" = 2 ] && [ "$(readlink "$proj/Library/Bee")" = bee-cache ] && [ ! -L "$proj/Temp/apk-bee-aside" ]'
+
 real_mv="$(command -v mv)"
 export REAL_MV="$real_mv"
 cat > "$tmp/bin/mv" <<'EOF'
@@ -53,18 +58,31 @@ FAKE_MUTATE="$FAKE_MUTATE; $new_bee" TASK_CACHE=fake-cache lu apk || rc=$?
 check "a pre-existing aside and the new Bee cache both survive" \
   '[ "$rc" != 0 ] && grep -qx old "$proj/Temp/apk-bee-aside/obj" && grep -qx new "$proj/Library/Bee/obj" && ! grep -q "^save " "$tmp/cache-calls"'
 
-rm -rf "$proj/Library" "$proj/Temp"
-gate="$tmp/save-gate"
-mkfifo "$gate"
-FAKE_MUTATE="$FAKE_MUTATE; $new_bee" FAKE_SAVE_GATE="$gate" TASK_CACHE=fake-cache bash "$script" apk 2>"$tmp/err" &
-wrapper=$!
-deadline=$((SECONDS + 10))
-while [ ! -s "$gate.ready" ] && kill -0 "$wrapper" 2>/dev/null && [ "$SECONDS" -lt "$deadline" ]; do sleep 0.02; done
-ready=0
-if [ -s "$gate.ready" ] && [ -f "$proj/Temp/apk-bee-aside/obj" ]; then ready=1; fi
-kill -TERM "$wrapper" 2>/dev/null || :
-rc=0; wait "$wrapper" || rc=$?
-check "wrapper-only TERM drains the blocked save and restores Bee" \
-  '[ "$ready" = 1 ] && [ "$rc" = 143 ] && [ ! -e "$gate.finished" ] && grep -qx new "$proj/Library/Bee/obj" && [ ! -e "$proj/Temp/apk-bee-aside" ]'
+aside="$proj/Temp/apk-bee-aside"
+for kind in directory symlink; do
+  rm -rf "$proj/Library" "$proj/Temp"
+  gate="$tmp/save-gate-$kind"
+  mkfifo "$gate"
+  if [ "$kind" = symlink ]; then mutate="$linked_bee"; else mutate="$new_bee"; fi
+  FAKE_MUTATE="$FAKE_MUTATE; $mutate" FAKE_SAVE_GATE="$gate" TASK_CACHE=fake-cache bash "$script" apk 2>"$tmp/err" &
+  wrapper=$!
+  deadline=$((SECONDS + 10))
+  while [ ! -s "$gate.ready" ] && kill -0 "$wrapper" 2>/dev/null && [ "$SECONDS" -lt "$deadline" ]; do sleep 0.02; done
+  ready=0
+  if [ -s "$gate.ready" ]; then
+    if [ "$kind" = symlink ]; then
+      if [ "$(readlink "$aside")" = bee-cache ] && [ ! -e "$aside" ]; then ready=1; fi
+    elif [ -f "$aside/obj" ]; then ready=1; fi
+  fi
+  kill -TERM "$wrapper" 2>/dev/null || :
+  rc=0; wait "$wrapper" || rc=$?
+  if [ "$kind" = symlink ]; then
+    check "wrapper-only TERM drains the blocked save and restores the dangling Bee link" \
+      '[ "$ready" = 1 ] && [ "$rc" = 143 ] && [ ! -e "$gate.finished" ] && [ "$(readlink "$proj/Library/Bee")" = bee-cache ] && grep -qx linked "$proj/Library/Bee/obj" && [ ! -L "$aside" ] && [ ! -e "$aside" ]'
+  else
+    check "wrapper-only TERM drains the blocked save and restores Bee" \
+      '[ "$ready" = 1 ] && [ "$rc" = 143 ] && [ ! -e "$gate.finished" ] && grep -qx new "$proj/Library/Bee/obj" && [ ! -e "$aside" ]'
+  fi
+done
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
