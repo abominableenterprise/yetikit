@@ -26,6 +26,14 @@ qr_worker_await() {
   return 1
 }
 
+# Orphaned device lock owners and wrappers can remain as zombies.
+qr_lock_process_busy() {
+  local state
+  [[ "$1" =~ ^[1-9][0-9]*$ ]] && kill -0 "$1" 2>/dev/null || return 1
+  state="$(ps -p "$1" -o stat= 2>/dev/null)" || { kill -0 "$1" 2>/dev/null; return $?; }
+  [[ "$state" != *Z* ]]
+}
+
 # KILL does not remove an unreaped zombie or guarantee immediate exit.
 # Bound polling even if ps keeps failing and kill -0 still sees the group.
 qr_group_escalate() {

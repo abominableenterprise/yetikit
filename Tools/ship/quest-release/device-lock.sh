@@ -11,13 +11,13 @@ qr_device_locked() (
   [ -d "$root" ] && [ ! -L "$root" ] && [ -O "$root" ] \
     || qr_die "device lock: unsafe lock root $root"
   device_lock="$root/$key.lock"
-  local owner_pid=""
-  if [ "$1" = qr_doctor_reconnect ]; then
-    # Doctor has no release step. This shell owns and supervises recovery even
-    # if the top-level doctor dies. $$ still names that top-level shell.
-    owner_pid="$(exec sh -c 'printf "%s\n" "$PPID"')" || exit 1
-    [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] || exit 1
-  else
+  local owner_pid="$$" supervisor previous_supervisor
+  local QR_DEVICE_WORKER_ROOT QR_DEVICE_SUPERVISOR QR_DEVICE_LOCK_READ=1
+  # The wrapper can outlive the release owner, including during registration.
+  # $$ is not this subshell's PID (and Bash 3.2 has no BASHPID).
+  supervisor="$(exec sh -c 'printf "%s\n" "$PPID"')" || exit 1
+  [[ "$supervisor" =~ ^[1-9][0-9]*$ ]] || exit 1
+  if [ "$1" != qr_doctor_reconnect ]; then
     repo_lock="$(qr_lock_dir)"
     [ ! -f "$repo_lock/group" ] || group="$(cat "$repo_lock/group")"
   fi
@@ -30,32 +30,39 @@ qr_device_locked() (
     qr_group_alive "$group" || group_status=$?
   fi
   if [ "$group_status" = 1 ]; then
-    # Perf cancellation runs after draining. The cancelled worker may have
-    # handed its still-owned lock back to this same live run owner.
+    # Perf cancellation runs after draining. Resume only if the old wrapper
+    # and every isolated group have stopped, even for this same run owner.
+    previous_supervisor="$(cat "$device_lock/supervisor" 2>/dev/null)"
+    if qr_lock_process_busy "$previous_supervisor" ||
+       ! (cd "$device_lock" && ! qr_lock_workers_busy "$group"); then
+      qr_log 'error: cannot resume device lock while its previous workers may be active'
+      exit 1
+    fi
+    printf '%s\n' "$supervisor" > "$device_lock/supervisor.tmp" &&
+      mv -f "$device_lock/supervisor.tmp" "$device_lock/supervisor" || exit 1
     QR_LOCK_HELD=1
   else
-    # The outer release lock owns invocation publication; doctor has no release invocation.
-    qr_lock_acquire 0 "$owner_pid" || exit 1
+    # Publish the wrapper and enclosing step before allowing any mutation.
+    qr_lock_acquire 0 "$owner_pid" "$supervisor" "$group" || exit 1
   fi
   # Cancellation TERM reaches this shell and adb together. Leave the generation
   # for stale reclamation until the outer owner has drained every worker; an
   # EXIT release here would authorize a second consumer during that drain.
   local cancelled=0
   trap 'cancelled=1; exit 143' HUP INT TERM
-  # Doctor's timebox exits through this trap. On a failed drain, keep its
-  # worker record for the next caller's liveness check.
+  # A failed drain keeps this generation visible to other checkouts. The
+  # wrapper itself is still in the step group, so inspect only isolated groups.
   trap '
-    if [ "$cancelled" != 1 ] &&
-       { [ -z "$owner_pid" ] || (cd "$device_lock" && ! qr_lock_workers_busy ""); }; then
-      qr_lock_release "$owner_pid"
+    if [ "$cancelled" != 1 ]; then
+      if (cd "$device_lock" && ! qr_lock_workers_busy ""); then
+        qr_lock_release "$owner_pid"
+      else
+        exit 1
+      fi
     fi
   ' EXIT
-  # Record the cancellable worker group too: an owner killed before its workers
-  # finish must not authorize a second consumer to mutate the same headset.
-  case "$group" in
-    ''|0|*[!0-9]*) ;;
-    *) printf '%s\n' "$group" > "$device_lock/group" || exit 1 ;;
-  esac
+  QR_DEVICE_WORKER_ROOT="$(mktemp -d "$device_lock/step.XXXXXXXXXX")" || exit 1
+  QR_DEVICE_SUPERVISOR="$supervisor"
   # A manual capture reserves the headset between invocations. Check the
   # reservation only under the normal lock, including for competing repos.
   local QR_DEVICE_MANUAL="$root/$key.manual"

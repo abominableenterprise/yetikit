@@ -4,11 +4,9 @@
 qr_doctor_reconnect() {
   local remaining=$((deadline - SECONDS))
   [ "$remaining" -gt 0 ] || return 124
-  # Run in the lock-owning shell. Publish the isolated worker in this lock's
-  # generation before it can reconnect, even if the supervisor later dies.
-  local QR_TIMEBOX_WORKERS
-  QR_TIMEBOX_WORKERS="$(mktemp -d "$device_lock/step.XXXXXXXXXX")" || return 1
-  qr_timebox_supervise "$remaining" 0 qr_doctor_reconnect_probe "$1" </dev/null
+  # Keep the lock wrapper separate from the timebox supervisor so its EXIT
+  # trap still checks the device worker records after recovery.
+  ( qr_timebox_supervise "$remaining" 0 qr_doctor_reconnect_probe "$1" </dev/null )
 }
 
 qr_doctor_reconnect_probe() {
