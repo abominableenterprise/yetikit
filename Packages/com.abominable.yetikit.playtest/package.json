@@ -6,7 +6,7 @@
   "description": "Dev-only durable local playtest recording.",
   "license": "MIT",
   "dependencies": {
-    "com.abominable.yetikit.core": "0.1.12",
+    "com.abominable.yetikit.core": "0.1.13",
     "com.unity.modules.jsonserialize": "1.0.0"
   }
 }

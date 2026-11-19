@@ -13,7 +13,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.abominable.yetikit.core": "0.1.12",
+        "com.abominable.yetikit.core": "0.1.13",
         "com.unity.inputsystem": "1.20.0",
         "com.unity.xr.interaction.toolkit": "3.6.1",
         "com.unity.xr.hands": "1.9.0"
@@ -50,7 +50,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.abominable.yetikit.core": "0.1.12",
+        "com.abominable.yetikit.core": "0.1.13",
         "com.unity.modules.jsonserialize": "1.0.0"
       }
     },
