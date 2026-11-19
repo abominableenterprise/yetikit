@@ -11,8 +11,14 @@ from urllib.parse import unquote, urlsplit
 
 import numpy as np
 
+from audit_paths import resolve
 
-def load_meshes(path):
+JSON_CHUNK = 0x4E4F534A
+BIN_CHUNK = 0x004E4942
+STATIC_PRIMITIVE_METADATA = {"KHR_materials_variants"}
+
+
+def load_meshes(path, *, inputs=None):
     path = Path(path)
     blob = path.read_bytes()
     binary = None
@@ -20,16 +26,30 @@ def load_meshes(path):
         magic, version, size = struct.unpack_from("<4sII", blob)
         if magic != b"glTF" or version != 2 or size != len(blob):
             raise ValueError("invalid GLB header")
-        chunks, offset = {}, 12
+        text, offset, chunk = None, 12, 0
         while offset < size:
+            if size - offset < 8:
+                raise ValueError("truncated GLB chunk header")
             length, kind = struct.unpack_from("<II", blob, offset)
             offset += 8
             if offset + length > size or length % 4:
                 raise ValueError("invalid GLB chunk")
-            chunks[kind] = blob[offset:offset + length]
+            if chunk == 0 and kind != JSON_CHUNK:
+                raise ValueError("GLB JSON chunk must be first")
+            if kind == JSON_CHUNK:
+                if chunk != 0:
+                    raise ValueError("duplicate GLB JSON chunk")
+                text = blob[offset:offset + length]
+            elif kind == BIN_CHUNK:
+                if chunk != 1:
+                    raise ValueError("GLB BIN chunk must occur at most once, immediately after JSON")
+                binary = blob[offset:offset + length]
+            # glTF requires clients to ignore unknown chunk types.
             offset += length
-        doc = json.loads(chunks[0x4E4F534A])
-        binary = chunks.get(0x004E4942)
+            chunk += 1
+        if text is None:
+            raise ValueError("missing GLB JSON chunk")
+        doc = json.loads(text)
     else:
         doc = json.loads(blob)
     if not isinstance(doc, dict) or not isinstance(doc.get("asset"), dict):
@@ -49,9 +69,11 @@ def load_meshes(path):
             parts = urlsplit(uri)
             if parts.scheme or parts.netloc or parts.query or parts.fragment:
                 raise ValueError("buffer must be a local relative URI")
-            target = (path.parent / unquote(parts.path)).resolve()
-            if not target.is_relative_to(path.parent.resolve()):
+            target = resolve(path.parent / unquote(parts.path))
+            if not target.is_relative_to(resolve(path.parent)):
                 raise ValueError("buffer URI escapes asset directory")
+            if inputs is not None:
+                inputs.add(target)
             data = target.read_bytes()
         if data is None or len(data) < spec["byteLength"]:
             raise ValueError("missing or truncated buffer")
@@ -75,6 +97,10 @@ def load_meshes(path):
         stride = view.get("byteStride", dtype.itemsize * width)
         start = view.get("byteOffset", 0)
         offset = a.get("byteOffset", 0)
+        if offset % dtype.itemsize or (start + offset) % dtype.itemsize:
+            raise ValueError("misaligned accessor or buffer view offset")
+        if "byteStride" in view and (not position or type(stride) is not int or not 4 <= stride <= 252 or stride % 4):
+            raise ValueError("invalid vertex stride or stride on an index buffer view")
         count = a["count"]
         end = offset + (count - 1) * stride + dtype.itemsize * width
         data = reference(buffers, view["buffer"])
@@ -88,8 +114,11 @@ def load_meshes(path):
     for index, mesh in enumerate(doc.get("meshes", [])):
         verts, tris = [], []
         for primitive in mesh["primitives"]:
-            if primitive.get("mode", 4) != 4 or primitive.get("extensions"):
-                raise ValueError("only uncompressed TRIANGLES primitives are supported")
+            extensions = primitive.get("extensions", {})
+            if primitive.get("mode", 4) != 4:
+                raise ValueError("only TRIANGLES primitives are supported")
+            if not isinstance(extensions, dict) or extensions.keys() - STATIC_PRIMITIVE_METADATA:
+                raise ValueError("unsupported glTF primitive extensions")
             positions = accessor(primitive["attributes"]["POSITION"], True)
             indices = accessor(primitive["indices"]).ravel() if "indices" in primitive else np.arange(len(positions))
             if len(indices) % 3 or not len(indices) or np.max(indices) >= len(positions):
