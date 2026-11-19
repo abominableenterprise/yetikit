@@ -85,10 +85,11 @@ qr_lock_snapshot() {
   fi
   if [ "${QR_WAIT_SAMPLE:-}" = 1 ] && [ -z "$pid" ]; then
     # Capture the preceding pointer inside the pending lock's generation check.
-    # A producer that publishes after we read pid needs a fresh sample instead.
+    # A legacy writer can leave an empty pid file while publishing it. Retry
+    # only if PID data actually appeared after the first read.
     previous="$(cat "$pointer" 2>/dev/null)" || previous=""
     unpublished_at="$(qr_lock_mtime .)"
-    [ ! -f pid ] || return 3
+    [ -z "$(cat pid 2>/dev/null)" ] || return 3
   fi
   printf '%s\n' "$pid" "$invocation" "$group" "$(cat run_dir 2>/dev/null)"
   if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then workers=busy; fi

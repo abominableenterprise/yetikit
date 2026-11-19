@@ -127,7 +127,10 @@ start_during_reconciliation() {
     rm "$QR_LOGS/last-result" || return 1
   fi
   case "$outcome" in
-    first-*) mkdir "$QR_LOGS/run.lock" || return 1; did_start=1 ;;
+    first-*)
+      mkdir "$QR_LOGS/run.lock" || return 1
+      if [ "$outcome" = first-empty ]; then : > "$QR_LOGS/run.lock/pid" || return 1; fi
+      did_start=1 ;;
     completed-deadline) wait_minutes=0 ;;
   esac
   qr_lock_read() {
@@ -180,9 +183,9 @@ start_during_reconciliation() {
       1:completed) publish_third_release || exit 99 ;;
       1:first-legacy-finished)
         rmdir "$QR_LOGS/run.lock" && qr_lock_acquire 0 && finish_failed_successor || exit 99 ;;
-      1:unpublished|1:first-unpublished|1:first-legacy|1:handoff)
+      1:unpublished|1:first-unpublished|1:first-empty|1:first-legacy|1:handoff)
         # An abandoned startup must not send the waiter back to the old pointer.
-        rmdir "$QR_LOGS/run.lock" || exit 99 ;;
+        rm -f "$QR_LOGS/run.lock/pid" && rmdir "$QR_LOGS/run.lock" || exit 99 ;;
     esac
   }
   finish_failed_successor() {
@@ -203,7 +206,7 @@ start_during_reconciliation() {
         grep -Fq "(pid $dead_pid) ended (lock gone) without writing its result" "$tmp/err" ;;
     first-legacy-finished)
       [ "$wait_rc" = 1 ] && grep -q '^synthetic successor failed$' "$tmp/out" ;;
-    unpublished|first-unpublished|first-legacy|handoff)
+    unpublished|first-unpublished|first-empty|first-legacy|handoff)
       [ "$wait_rc" = 124 ] && [ "$(cat "$QR_LOGS/polls")" = 3 ] && grep -q 'timed out after 1 min' "$tmp/err" ;;
   esac
 }
@@ -221,6 +224,7 @@ check 'a successor that completes before reconciliation overrides the sampled po
 check 'the final poll can report a successor that completed during reconciliation' start_during_reconciliation completed-deadline
 check 'retrying an unpublished successor is bounded and never returns the old result' start_during_reconciliation unpublished
 check 'a fresh lock seen on the first poll stays pending after disappearing' start_during_reconciliation first-unpublished
+check 'an empty legacy PID file keeps an abandoned startup pending' start_during_reconciliation first-empty
 check 'an abandoned startup also suppresses a historical legacy result' start_during_reconciliation first-legacy
 check 'a first-poll pending lock can resolve through a newly published key' start_during_reconciliation first-fast
 check 'a legacy startup can publish a fresh result and unlock between polls' start_during_reconciliation first-legacy-finished
