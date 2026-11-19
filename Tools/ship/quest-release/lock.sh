@@ -17,9 +17,9 @@ qr_lock_mtime() { perl -MTime::HiRes=stat -e '@s = stat $ARGV[0]; print "$s[9]\n
 # 1 when there is no lock, 2 when it is stale. An unknown group status is treated as live.
 # A lock with no PID counts as alive for its first minute
 # (another run is writing it), stale after that. For wait, status 1 can
-# still carry pending-generation evidence (FD 18 pins the directory when available).
+# still carry generation evidence (FD 18 pins the directory when available).
 qr_lock_read() {
-  local d group status=0 workers="" metadata pending_metadata="" attempt; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
+  local d group status=0 workers="" metadata retry_evidence="" attempt stamp; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
   case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
   QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
   QR_LOCK_PREV_PID=""; QR_LOCK_PREV_INVOCATION=""; QR_LOCK_UNPUBLISHED_AT=""; QR_LOCK_UNPUBLISHED_ID=""
@@ -32,11 +32,19 @@ qr_lock_read() {
       if { exec 20< "$d"; } 2>/dev/null; then
         metadata="$(cd "$d" 2>/dev/null && qr_lock_snapshot "$d" pinned)" || status=$?
         if [ -n "$metadata" ]; then
-          case "${metadata##*$'\n'}" in
-            *' unpinned') exec 18<&- ;;
-            *) exec 18<&20 ;;
-          esac
-          if [ "$status" = 3 ]; then pending_metadata="$metadata"; fi
+          stamp="${metadata##*$'\n'}"
+          # If a same-generation retry now sees no PID, the numeric owner
+          # already sampled is stronger evidence than the PID-less teardown.
+          if [[ "$retry_evidence" = [1-9]* && "$metadata" = $'\n'* && "$stamp" != *' unpinned' ]] &&
+             [ "${stamp#* }" = "${retry_evidence##* }" ]; then
+            status=1
+          else
+            case "$stamp" in
+              *' unpinned') exec 18<&- ;;
+              *) exec 18<&20 ;;
+            esac
+            if [ "$status" = 3 ]; then retry_evidence="$metadata"; fi
+          fi
         fi
         exec 20<&-
       else
@@ -46,12 +54,12 @@ qr_lock_read() {
       metadata="$(qr_lock_snapshot "$d")" || status=$?
     fi
     # A generation removed during the read may have lost some of its files.
-    # Retry for a complete sample, keeping only pending evidence if it vanished.
+    # Retry for a complete sample, keeping generation evidence if it vanished.
     [ "$status" = 3 ] || break
   done
   if [ "$status" != 0 ]; then
-    [ -n "$pending_metadata" ] || return 1
-    metadata="$pending_metadata"
+    [ -n "$retry_evidence" ] || return 1
+    metadata="$retry_evidence"
   fi
   {
     IFS= read -r QR_LOCK_PID
@@ -88,10 +96,11 @@ qr_lock_stamp() {
 }
 
 # Pin the directory generation while sampling it. Status 3 means retry;
-# its only possible output is evidence of an observed pending generation.
+# its only possible output is evidence of an incomplete sample.
 qr_lock_snapshot() {
   local pid group invocation run_dir workers="" previous="" unpublished_at="" stamp="" pid_arrived="" replaced=""
-  local pointer="${1%/*}/current-invocation"
+  local pointer="${1%/*}/current-invocation" pid_at="" pid_lost="" pointer_pid="" pointer_key="" pointer_at="" previous_identity=""
+  local published_pid published_key
   if [ "${2:-}" != pinned ]; then cd "$1" 2>/dev/null || return 1; fi
   # Sample the entered directory before PID/metadata reads. If pathname
   # replacement made FD 20 pin its predecessor, only use this directory's
@@ -103,6 +112,23 @@ qr_lock_snapshot() {
     pinned_stamp="$(qr_lock_stamp <&20)"
     if [ "${stamp#* }" != "${pinned_stamp#* }" ]; then
       replaced=1; stamp="${stamp% *} unpinned"
+    elif [ -f pid ]; then
+      pid_at="$(qr_lock_mtime pid)"
+      # A keyed teardown may delete both metadata files during the read.
+      # Sample its pointer while the PID file still provides an ordering check.
+      if [ "${1##*/}" = run.lock ] && [ -n "$pid_at" ]; then
+        previous_identity="$(perl -MTime::HiRes=stat -e '
+          open my $f, "<", $ARGV[0] or exit;
+          my @s = stat $f; my $line = <$f>;
+          print "$s[9] $line" if @s && defined $line;
+        ' "$pointer")"
+        read -r pointer_at pointer_pid pointer_key <<< "$previous_identity"
+        if [ "$1" -ef . ]; then
+          previous="$pointer_pid $pointer_key"
+        else
+          pointer_key=""
+        fi
+      fi
     fi
   fi
   pid="$(cat pid 2>/dev/null)"
@@ -116,14 +142,15 @@ qr_lock_snapshot() {
     # Older producers could unlink invocation before removing the directory.
     # A keyed producer publishes its pointer after pid. An older pointer isn't
     # evidence for this lock (a genuine legacy owner may reuse the same PID).
-    local published_pid published_key
-    [ -f pid ] || return 3
-    if [ "${1##*/}" = run.lock ] && [ -f "$pointer" ] && [ ! pid -nt "$pointer" ] &&
+    if [ -f pid ] && [ "${1##*/}" = run.lock ] && [ -f "$pointer" ] && [ ! pid -nt "$pointer" ] &&
        read -r published_pid published_key < "$pointer" && [ "$published_pid" = "$pid" ] &&
        [[ "$published_key" =~ ^run\.[a-zA-Z0-9]{10}$ ]]; then
       invocation="$published_key"
     fi
-    [ -f pid ] || return 3
+    if [ ! -f pid ]; then
+      [ -n "$stamp" ] || return 3
+      pid_lost=1
+    fi
   fi
   if [ "${QR_WAIT_SAMPLE:-}" = 1 ] && [ -z "$pid" ]; then
     # Capture the preceding pointer inside the pending lock's generation check.
@@ -135,11 +162,19 @@ qr_lock_snapshot() {
   fi
   run_dir="$(cat run_dir 2>/dev/null)"
   if [ "$workers" = busy ] || qr_lock_workers_busy "$group"; then workers=busy; fi
-  if [ -n "$replaced$pid_arrived" ] || [ ! "$1" -ef . ]; then
-    # Preserve the pending boundary, not any torn owner or run metadata.
-    # A sampled invocation key can only be used with a matching pointer and
-    # that key's own saved result to recognize keyed teardown.
-    [ -z "$unpublished_at" ] || printf '\n%s\n\n\n\n%s\n%s\n' "$invocation" "$previous" "$unpublished_at"
+  if [ -n "$replaced$pid_arrived$pid_lost" ] || [ ! "$1" -ef . ]; then
+    if [ -n "$stamp" ] && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+      # The PID came from the pinned generation, even if teardown has now
+      # removed its files. Use its captured cutoff, not a new pathname stat.
+      if [ -z "$invocation" ] && [ "$pointer_pid" = "$pid" ] && [[ "$pointer_key" =~ ^run\.[a-zA-Z0-9]{10}$ ]] &&
+         perl -e 'exit !($ARGV[0] > $ARGV[1])' "$pointer_at" "$pid_at"; then
+        invocation="$pointer_key"
+      fi
+      printf '%s\n%s\n\n%s\n\n%s\n%s\n' "$pid" "$invocation" "$run_dir" "$previous" "${pid_at:-${stamp% *}} ${stamp#* }"
+    elif [ -n "$unpublished_at" ]; then
+      # A pending sample has no owner to pin; keep its generation boundary.
+      printf '\n%s\n\n\n\n%s\n%s\n' "$invocation" "$previous" "$unpublished_at"
+    fi
     return 3
   fi
   printf '%s\n' "$pid" "$invocation" "$group" "$run_dir" "$workers" "$previous" "$unpublished_at"

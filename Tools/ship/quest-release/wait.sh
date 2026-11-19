@@ -141,7 +141,7 @@ qr_wait_sample() {
 
 qr_wait() (
   local minutes="${1:-45}" poll="${QUEST_WAIT_POLL:-5}" grace="${QUEST_WAIT_GRACE:-15}" t0 now deadline
-  local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict
+  local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict torn_legacy=""
   local pointer="$QR_LOGS/current-invocation" pointer_pid pointer_key sampled_pid sampled_key
   local pending=0 superseded_pid="" superseded_key="" retry_pointer legacy_start="" legacy_lock=""
   local QR_WAIT_SAMPLE=1
@@ -186,8 +186,14 @@ qr_wait() (
     if [ -z "$wpid" ] && [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
       wpid="$QR_LOCK_PID"; key="$QR_LOCK_INVOCATION"; seen=1; run=""
       if [ -z "$key" ]; then
-        start="$(qr_lock_mtime "$(qr_lock_dir)/pid")"
-        [ -n "$start" ] || start="$(qr_lock_mtime "$(qr_lock_dir)")"
+        if [ "$st" = 1 ]; then
+          # The numeric owner survived only as snapshot evidence. Never stat
+          # a replacement lock or accept an unbounded compatibility result.
+          start="$QR_LOCK_UNPUBLISHED_AT"; torn_legacy=pending
+        else
+          start="$(qr_lock_mtime "$(qr_lock_dir)/pid")"
+          [ -n "$start" ] || start="$(qr_lock_mtime "$(qr_lock_dir)")"
+        fi
       fi
     elif [ -z "$wpid" ] && [ "$pending" = 1 ] && [ "$retry_pointer" = 0 ] &&
          [ -n "$legacy_start" ] && [ "$st" = 1 ] && [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ]; then
@@ -219,7 +225,7 @@ qr_wait() (
       fi
       if [ "$seen" = 1 ]; then
         # Without an observed lock, current.env supplies the earliest valid result time and the run identity.
-        if [ -n "$res" ] || res="$(qr_wait_result "$wpid" "$start" "$run" "$key")"; then
+        if [ -n "$res" ] || res="$(qr_wait_result "$wpid" "$start" "$run" "$key" "$torn_legacy")"; then
           [ -n "$run" ] || run="${res%%$'\n'*}"
           res="${res#*$'\n'}"
           terminal="${res%%$'\n'*}"

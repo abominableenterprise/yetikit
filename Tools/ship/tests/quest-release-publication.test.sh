@@ -165,6 +165,12 @@ start_during_reconciliation() {
     rm "$QR_LOGS/last-result" || return 1
   fi
   case "$outcome" in
+    first-keyed-legacy-race-vanished-owner*)
+      # Reuse A's PID, but its pointer predates B's PID file and lock.
+      touch -t 200001010000 "$QR_LOGS/current-invocation" && mkdir "$QR_LOGS/run.lock" &&
+        printf '%s\n' "$$" > "$QR_LOGS/run.lock/pid" &&
+        touch -t "$startup_stamp" "$QR_LOGS/run.lock/pid" "$QR_LOGS/run.lock" || return 1
+      did_start=1 ;;
     first-keyed-legacy-race-created|first-keyed-legacy-race-in-snapshot|first-keyed-legacy-race-vanished-recheck) ;;
     first-keyed-legacy-race-vanished-keyed|first-keyed-legacy-race-vanished-mismatch)
       mkdir "$QR_LOGS/run.lock" && printf '%s\n' "$previous_key" > "$QR_LOGS/run.lock/invocation" || return 1
@@ -191,7 +197,18 @@ start_during_reconciliation() {
   }
   cat() {
     command cat "$@"; local cat_rc=$?
-    if [ "$outcome" = first-keyed-legacy-race-vanished-early ] &&
+    if [[ "$outcome" = *vanished-owner* ]] && [ . -ef "$QR_LOGS/run.lock" ]; then
+      # Finish just after sampling a numeric PID (or after its metadata checks).
+      if { [ "$*" = run_dir ] && [[ "$outcome" = *-final ]]; } ||
+         { [ "$*" = pid ] && [ "$cat_rc" = 0 ] && [[ "$outcome" != *-final ]]; }; then
+        finish_legacy_in_place && touch "$QR_LOGS/vanished" || exit 99
+        if [[ "$outcome" != *-retained-dir ]]; then rmdir "$QR_LOGS/run.lock" || exit 99; fi
+        case "$outcome" in
+          *-wrong-pid) printf 'pid=%s\ncmd=prepare\nrc=0\nrun=%s\nverdict=0\n' "$dead_pid" "$QR_RUN_DIR" > "$QR_LOGS/last-result" || exit 99 ;;
+          *-old-result) touch -t "$startup_stamp" "$QR_LOGS/last-result" || exit 99 ;;
+        esac
+      fi
+    elif [ "$outcome" = first-keyed-legacy-race-vanished-early ] &&
        [ "$*" = "$QR_LOGS/current-invocation" ] && [ . -ef "$QR_LOGS/run.lock" ]; then
       finish_legacy_in_place && rmdir "$QR_LOGS/run.lock" && touch "$QR_LOGS/vanished" || exit 99
     elif [[ "$outcome" = first-keyed-legacy-race-vanished* && "$outcome" != *vanished-early ]] &&
@@ -347,6 +364,9 @@ start_during_reconciliation() {
       [ -f "$QR_LOGS/vanished" ] && [ "$wait_rc" = 0 ] && grep -q '^synthetic previous success$' "$tmp/out" ;;
     first-keyed-legacy-race-vanished-stale)
       [ -f "$QR_LOGS/vanished" ] && [ "$wait_rc" = 124 ] && [ ! -s "$tmp/out" ] ;;
+    first-keyed-legacy-race-vanished-owner-wrong-pid|first-keyed-legacy-race-vanished-owner-old-result)
+      [ -f "$QR_LOGS/vanished" ] && [ "$wait_rc" = 1 ] && [ ! -s "$tmp/out" ] &&
+        grep -Fq "(pid $$) ended (lock gone) without writing its result" "$tmp/err" ;;
     first-keyed-legacy-race-vanished*)
       [ -f "$QR_LOGS/vanished" ] && [ ! -f "$QR_LOGS/polls" ] && [ "$wait_rc" = 1 ] && grep -q 'exited 1' "$tmp/err" &&
         grep -q '^synthetic successor failed$' "$tmp/out" && grep -qF "$previous_key" "$QR_LOGS/current-invocation" ;;
@@ -400,5 +420,10 @@ check 'a vanished pending lock cannot claim the preceding compatibility result' 
 check 'a PID appearing on recheck does not erase pending evidence if the lock vanished' start_during_reconciliation first-keyed-legacy-race-vanished-pid
 check 'a legacy result written before the pointer read uses the earlier generation cutoff' start_during_reconciliation first-keyed-legacy-race-vanished-early
 check 'a keyed teardown that vanishes during sampling retains its own result' start_during_reconciliation first-keyed-legacy-race-vanished-keyed
+check 'a legacy owner that unlinks its sampled PID still reports its failure' start_during_reconciliation first-keyed-legacy-race-vanished-owner
+check 'a legacy owner that unlocks after the PID checks still reports its failure' start_during_reconciliation first-keyed-legacy-race-vanished-owner-final
+check 'a PID-less retry of the same legacy lock retains the sampled numeric owner' start_during_reconciliation first-keyed-legacy-race-vanished-owner-retained-dir
+check 'a vanished legacy owner rejects a fresh result for another PID' start_during_reconciliation first-keyed-legacy-race-vanished-owner-wrong-pid
+check 'a vanished legacy owner rejects a stale result for the same PID' start_during_reconciliation first-keyed-legacy-race-vanished-owner-old-result
 check 'a vanished successor entered after FD open overrides the preceding keyed success' start_during_reconciliation first-keyed-legacy-race-vanished-mismatch
 [ "$fails" = 0 ]
