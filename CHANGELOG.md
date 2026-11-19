@@ -19,7 +19,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
   respawn rules, and grip hand-off and carry helpers.
 
 ### Fixed
-- None.
+- Release cleanup preserves worktrees with `assume-unchanged` or `skip-worktree`
+  entries instead of removing them and losing hidden edits.
 
 ### Behaviour changes
 - None.

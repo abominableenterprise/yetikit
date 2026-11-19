@@ -95,4 +95,18 @@ race_at=remove run cleanup
 check 'Git HEAD writer is excluded before non-forced removal starts' \
   '[ "$rc" = 0 ] && [ ! -e "$tmp/head-moved" ] && grep -qi "cannot lock ref" "$tmp/writer.err" && [ ! -d "$test_wt" ]'
 
+# Real Git hides these edits from both status and non-forced worktree removal.
+for flag in assume-unchanged skip-worktree; do
+  reset_test_worktree
+  git -C "$test_wt" update-index "--$flag" -- "$mat" || exit 1
+  printf '  m_Floats:\n  - _ZTest: 8\n' > "$tmp/edited.mat" || exit 1
+  cp "$tmp/edited.mat" "$test_wt/$mat" || exit 1
+  git -C "$test_wt" status --porcelain > "$tmp/hidden-status" || exit 1
+  [ ! -s "$tmp/hidden-status" ] || exit 1
+  run cleanup
+  check "plain cleanup preserves a tracked edit hidden by --$flag" \
+    '[ "$rc" != 0 ] && out_has "kept (hidden index entry)" && [ -d "$test_wt" ] &&
+     cmp -s "$tmp/edited.mat" "$test_wt/$mat"'
+done
+
 qr_flow_finish
