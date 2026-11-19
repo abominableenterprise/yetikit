@@ -131,13 +131,16 @@ namespace YetiKit.Interaction
         }
 
         /// <summary>The launch speed along <paramref name="dir"/> whose arc passes through <paramref name="to"/>
-        /// (+infinity when that direction can never get there: aimed below the target or straight up).</summary>
+        /// (+infinity when that direction cannot reach the target with any finite speed).</summary>
         public static float SpeedToReach(Vector3 to, Vector3 dir, float gravity)
         {
             var flatDir = new Vector3(dir.x, 0f, dir.z);
             var cos = flatDir.magnitude;
             var x = new Vector3(to.x, 0f, to.z).magnitude;
-            if (cos < 1e-3f) return float.PositiveInfinity;
+            if (cos < 1e-3f)
+                return cos == 0f && x == 0f && dir.y > 0f && to.y > 0f
+                    ? Mathf.Sqrt(2f * gravity * to.y) // minimum speed to reach that height at the apex
+                    : float.PositiveInfinity;
             var tan = dir.y / cos;
             var drop = x * tan - to.y;
             if (drop <= 1e-4f) return float.PositiveInfinity;

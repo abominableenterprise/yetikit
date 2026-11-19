@@ -65,6 +65,57 @@ namespace YetiKit.Interaction.Tests
         }
 
         [Test]
+        public void PlayerBufferFitsLateWindowAndSmoothingAt120Hz()
+        {
+            const int rate = 120;
+            const float smoothing = .04f;
+            var oldestPeak = Mathf.FloorToInt(ThrowHistory.LateWindow * rate);
+            var precedingSamples = Mathf.FloorToInt(smoothing * rate);
+            Assert.That(ThrowHistory.PlayerCapacity, Is.GreaterThanOrEqualTo(1 + oldestPeak + precedingSamples + 1),
+                "retain the window anchor, its lookback and a possible post-hitch frame");
+        }
+
+        [Test]
+        public void LatePeakAt120HzRetainsItsSmoothingSamples()
+        {
+            const int rate = 120, releaseFrame = 120, peakFrame = releaseFrame - rate / 4;
+            var h = new ThrowHistory();
+            for (var frame = 0; frame <= releaseFrame; frame++)
+            {
+                var speed = frame >= peakFrame - 4 && frame <= peakFrame && frame != peakFrame - 1 ? 8f : 3f;
+                h.Add(new ThrowSample((float)frame / rate, Vector3.forward * speed, Vector3.zero));
+            }
+
+            Assert.That(h.Release(1f, out var peak, .04f), Is.True);
+            Assert.That(peak.Time, Is.EqualTo((float)peakFrame / rate));
+            Assert.That(peak.Linear.z, Is.EqualTo(8f));
+        }
+
+        [TestCase(1f, 0f, TestName = "ClockResetDoesNotKeepPriorTimeline")]
+        [TestCase(1f, .99f, TestName = "OutOfOrderSampleDoesNotKeepFuturePeak")]
+        [TestCase(1f, 1f, TestName = "DuplicateTimestampDoesNotKeepIncompatiblePeak")]
+        public void NonMonotonicInputStartsAFreshTimeline(float latest, float next)
+        {
+            var h = new ThrowHistory();
+            h.Add(new ThrowSample(latest - Dt, Vector3.forward * 8f, Vector3.zero));
+            h.Add(new ThrowSample(latest, Vector3.forward * 9f, Vector3.zero));
+            h.Add(new ThrowSample(next, Vector3.zero, Vector3.zero));
+
+            Assert.That(h.Release(next, out var peak), Is.True);
+            Assert.That(peak.Time, Is.EqualTo(next));
+            Assert.That(peak.Linear, Is.EqualTo(Vector3.zero));
+            Assert.That(h.Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ReleaseBeforeLatestSampleIsNotFresh()
+        {
+            var h = Swing(3f, 6f, 8f);
+            Assert.That(h.Release(Dt, out _, .04f), Is.False);
+            Assert.That(h.HandSwingPeak(Dt, .04f, out _), Is.False);
+        }
+
+        [Test]
         public void TheDirectionIsTheAverageOfTheFastestFrames()
         {
             // One noisy frame at the peak points 30° up; the frames either side point straight ahead.

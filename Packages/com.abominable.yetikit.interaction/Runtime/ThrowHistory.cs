@@ -1,5 +1,7 @@
 using UnityEngine;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("YetiKit.Interaction.Tests")]
+
 namespace YetiKit.Interaction
 {
     /// <summary>One frame of a controller's tracked motion (world space), and where its linear velocity came from.</summary>
@@ -27,13 +29,17 @@ namespace YetiKit.Interaction
     /// </summary>
     public sealed class ThrowHistory
     {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
         const int MaxSampleRate = 120;
+        const float PlayerSmoothingSeconds = 0.04f;
+        // The anchor itself, its late window and smoothing lookback, and one post-hitch sample.
+        internal const int PlayerCapacity = (int)(LateWindow * MaxSampleRate) +
+            (int)(PlayerSmoothingSeconds * MaxSampleRate) + 2;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         const float MaxSmoothingSeconds = 0.1f;
         // Include the oldest candidate's smoothing lookback, a possible hitch anchor, and boundary samples.
         public const int Capacity = (int)((ThrowTuning.MaxForgiveness + MaxSmoothingSeconds + HitchGap) * MaxSampleRate) + 2;
 #else
-        public const int Capacity = 32; // Preserve the shipped release history and defaults.
+        public const int Capacity = PlayerCapacity;
 #endif
         /// <summary>s back from the release the peak is looked for.</summary>
         public const float PeakWindow = 0.15f;
@@ -74,7 +80,9 @@ namespace YetiKit.Interaction
         readonly Vector3[] smoothedSpin = new Vector3[Capacity];
         readonly bool[] sparse = new bool[Capacity];
         readonly bool[] trajectory = new bool[Capacity];
+        readonly uint[] segments = new uint[Capacity];
         int next, count, continuousFrames;
+        uint segment;
         bool needsMotion;
 
         public int Count => count;
@@ -100,7 +108,7 @@ namespace YetiKit.Interaction
         {
             get
             {
-                for (var i = 1; i < count; i++)
+                for (var i = 1; i < count && Segment(i) == segment; i++)
                 {
                     var sample = Back(i);
                     if (Latest.Time - sample.Time > (i == 1 ? MaxAge : ThrowTuning.Forgiveness)) break;
@@ -115,11 +123,11 @@ namespace YetiKit.Interaction
         }
 
         /// <summary>The newest position is supported by speed-consistent motion, not only sample continuity.</summary>
-        public bool LatestMotionEstablished => EstablishedMotion(0, true);
+        public bool LatestMotionEstablished => count > 0 && Segment(0) == segment && EstablishedMotion(0, true);
 
         bool EstablishedMotion(int at, bool consistentSpeed = false)
         {
-            if (at + MinSmoothFrames > count) return false;
+            if (at + MinSmoothFrames > count || !SameSegment(at, at + MinSmoothFrames - 1)) return false;
             var direction = Back(at).Linear;
             var supportedSpeedSquared = direction.sqrMagnitude;
             // A displaced baseline needs independent support for the fastest step, not slow samples
@@ -148,17 +156,29 @@ namespace YetiKit.Interaction
             count > 0 && (smoothing <= 0f || continuousFrames >= MinSmoothFrames);
 
         /// <summary>The position baseline jumped without a usable velocity (for example a discarded tracking snap).
-        /// Keep the older smoothed throw, but require fresh moving samples before promoting a raw return from that
-        /// new baseline. Stationary frames (including tracking jitter) do not establish a trajectory.</summary>
-        public void Discontinuity() { continuousFrames = 0; needsMotion = true; }
+        /// Keep the older smoothed throw, but never use its frames to support motion on the new baseline.
+        /// Stationary frames (including tracking jitter) do not establish a trajectory.</summary>
+        public void Discontinuity()
+        {
+            // Repeated discontinuities before the next sample only need one boundary.
+            if (count > 0 && Segment(0) == segment) segment++;
+            continuousFrames = 0;
+            needsMotion = true;
+        }
 
         public void Add(ThrowSample s)
         {
-            if (count > 0 && (s.Time <= Latest.Time || s.Time - Latest.Time > MaxAge)) Discontinuity();
+            if (count > 0)
+            {
+                var elapsed = s.Time - Latest.Time;
+                if (elapsed <= 0f) Clear();
+                if (elapsed <= 0f || elapsed > MaxAge) Discontinuity();
+            }
             continuousFrames = needsMotion && s.Linear.sqrMagnitude < HandReleaseVelocity.StillSpeed * HandReleaseVelocity.StillSpeed
                 ? 0 : Mathf.Min(continuousFrames + 1, Capacity);
             if (continuousFrames >= MinSmoothFrames) needsMotion = false;
             trajectory[next] = continuousFrames >= MinSmoothFrames;
+            segments[next] = segment;
             samples[next] = s;
             next = (next + 1) % Capacity;
             if (count < Capacity) count++;
@@ -168,11 +188,16 @@ namespace YetiKit.Interaction
         {
             next = count = continuousFrames = 0;
             needsMotion = false;
+            segment = 0;
             RawPeak = 0f;
             RawDirection = Vector3.zero;
         }
 
-        ThrowSample Back(int i) => samples[(next - 1 - i + Capacity) % Capacity];
+        int Slot(int back) => (next - 1 - back + Capacity) % Capacity;
+        ThrowSample Back(int i) => samples[Slot(i)];
+        uint Segment(int i) => segments[Slot(i)];
+        bool SameSegment(int a, int b) => Segment(a) == Segment(b);
+        bool Fresh(float now) => count > 0 && now >= Latest.Time && now - Latest.Time <= MaxAge;
 
         /// <summary>The release sample: the peak speed in the window, aimed along the average of the fastest frames;
         /// false when nothing recent was recorded.</summary>
@@ -198,8 +223,7 @@ namespace YetiKit.Interaction
         public bool Release(float now, out ThrowSample peak, float smoothing)
         {
             peak = default;
-            if (count == 0) return false;
-            if (now - Back(0).Time > MaxAge) return false;
+            if (!Fresh(now)) return false;
             var m = Window(WindowEnd(now), smoothing, out var best);
             RawPeak = 0f;
             RawDirection = Vector3.zero;
@@ -252,7 +276,7 @@ namespace YetiKit.Interaction
         {
             peak = default;
             windowStart = float.NegativeInfinity;
-            if (count < 3 || now - Latest.Time > MaxAge) return false;
+            if (count < 3 || !Fresh(now)) return false;
             // Supported raw segments avoid median lag at the apex. Else retain smoothed turn
             // evidence: skipping a whole abrupt forward flick could expose its older wind-up.
             var m = Window(WindowEnd(now), smoothing, out _, validatedHandTurns: true);
@@ -296,7 +320,7 @@ namespace YetiKit.Interaction
                 if (Back(i).Time != time) continue;
                 if (!SupportedHandFrame(i, count)) return false;
                 var olderPeak = Back(i).Linear.magnitude;
-                for (var j = i + 1; j < count && time - Back(j).Time <= ThrowTuning.Forgiveness; j++)
+                for (var j = i + 1; j < count && SameSegment(i, j) && time - Back(j).Time <= ThrowTuning.Forgiveness; j++)
                 {
                     var before = Back(j).Linear;
                     if (before.magnitude <= HandReleaseVelocity.StillSpeed)
@@ -307,11 +331,12 @@ namespace YetiKit.Interaction
                         // not lose to its wind-up over a sub-m/s difference. Retain the strength
                         // guard so settling reverse recoil cannot become a new throw.
                         // Only validated motion supplies either speed; raw spikes are diagnostic.
-                        if (Latest.Linear.magnitude <= HandReleaseVelocity.StillSpeed) return true;
+                        if (SameSegment(0, i) && Latest.Linear.magnitude <= HandReleaseVelocity.StillSpeed) return true;
                         for (var k = MinSmoothFrames; k < i; k++)
                         {
                             var swing = Back(k).Linear;
-                            if (!SupportedHandFrame(k, count) || Vector3.Dot(swing, Back(i).Linear) >= 0f ||
+                            if (!SameSegment(0, k) || !SameSegment(k, i) ||
+                                !SupportedHandFrame(k, count) || Vector3.Dot(swing, Back(i).Linear) >= 0f ||
                                 swing.magnitude + 1f < .6f * olderPeak) continue;
                             var settled = true;
                             for (var tail = 0; tail < MinSmoothFrames; tail++)
@@ -337,11 +362,11 @@ namespace YetiKit.Interaction
             var candidate = Back(i);
             var speed = candidate.Linear.magnitude;
             if (candidate.Source != ThrowSources.HandPalm ||
-                !trajectory[(next - 1 - i + Capacity) % Capacity] || !PlausibleAcceleration(i) ||
+                !trajectory[Slot(i)] || !PlausibleAcceleration(i) ||
                 speed > ThrowSources.MaxHandStep) return false;
             for (var j = Mathf.Max(0, i - 1); j <= Mathf.Min(limit - 1, i + 1); j++)
             {
-                if (j == i || !PlausibleAcceleration(j)) continue;
+                if (j == i || !SameSegment(i, j) || !PlausibleAcceleration(j)) continue;
                 var neighbour = Back(j);
                 var neighbourSpeed = neighbour.Linear.magnitude;
                 if (neighbour.Source != ThrowSources.HandPalm ||
@@ -356,7 +381,7 @@ namespace YetiKit.Interaction
         // Validate the supporting frame too: two frames on a jumped baseline are not a real apex.
         bool PlausibleAcceleration(int i)
         {
-            if (i + 1 >= count) return false;
+            if (i + 1 >= count || !SameSegment(i, i + 1)) return false;
             var sample = Back(i);
             var before = Back(i + 1);
             var dt = sample.Time - before.Time;
@@ -442,7 +467,7 @@ namespace YetiKit.Interaction
             if (window <= 0f) return true;
             n = 0;
             for (var j = i; j < count; j++, n++)
-                if (s.Time - Back(j).Time > window - 1e-4f && j > i) break;
+                if (j > i && (!SameSegment(i, j) || s.Time - Back(j).Time > window - 1e-4f)) break;
             linear = Trimmed(i, n, false);
             angular = Trimmed(i, n, true);
             return n >= MinSmoothFrames || i + n < count;
