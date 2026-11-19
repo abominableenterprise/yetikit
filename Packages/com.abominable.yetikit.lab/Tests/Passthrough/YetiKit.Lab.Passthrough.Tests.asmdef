@@ -1,0 +1,14 @@
+{
+  "name": "YetiKit.Lab.Passthrough.Tests",
+  "rootNamespace": "YetiKit.Lab.Tests",
+  "references": ["YetiKit.Lab.Passthrough", "YetiKit.Hands", "Unity.XR.ARFoundation", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": false,
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"],
+  "defineConstraints": ["UNITY_INCLUDE_TESTS", "YETIKIT_AR_FOUNDATION", "YETIKIT_META_OPENXR"],
+  "versionDefines": [
+    { "name": "com.unity.xr.arfoundation", "expression": "", "define": "YETIKIT_AR_FOUNDATION" },
+    { "name": "com.unity.xr.meta-openxr", "expression": "", "define": "YETIKIT_META_OPENXR" }
+  ]
+}

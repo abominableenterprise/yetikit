@@ -1,0 +1,11 @@
+{
+  "name": "YetiKit.Lab.Passthrough",
+  "rootNamespace": "YetiKit.Lab",
+  "references": ["YetiKit.Hands", "Unity.XR.ARFoundation"],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_EDITOR || DEVELOPMENT_BUILD", "UNITY_EDITOR || YETIKIT_DEV", "YETIKIT_AR_FOUNDATION", "YETIKIT_META_OPENXR"],
+  "versionDefines": [
+    { "name": "com.unity.xr.arfoundation", "expression": "", "define": "YETIKIT_AR_FOUNDATION" },
+    { "name": "com.unity.xr.meta-openxr", "expression": "", "define": "YETIKIT_META_OPENXR" }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "YetiKit.Lab.Editor",
+  "rootNamespace": "YetiKit.Lab.Editor",
+  "references": ["YetiKit.Lab", "YetiKit.Interaction"],
+  "includePlatforms": ["Editor"],
+  "defineConstraints": ["UNITY_EDITOR || YETIKIT_DEV"],
+  "autoReferenced": false
+}
