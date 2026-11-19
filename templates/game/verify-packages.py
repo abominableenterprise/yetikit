@@ -10,7 +10,11 @@ KIT_PREFIX = "com.abominable.yetikit."
 KIT_REMOTE = "https://github.com/abominableenterprise/yetikit.git"
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[\w.-]+)?(?:\+[\w.-]+)?", re.ASCII)
 REVISION = re.compile(r"[0-9a-f]{40}|v[0-9]+\.[0-9]+\.[0-9]+(?:-[\w.-]+)?", re.ASCII)
-REMOTE = re.compile(r"(?:git\+)?(?:https?|ssh)://[^/\s]+(?:/\S*)?|git://[^/\s]+/\S+")
+# Require user@host in the SCP form so local paths with colons remain rejected.
+REMOTE = re.compile(
+    r"(?:git\+)?(?:https?|ssh)://[^/\s]+(?:/\S*)?|git://[^/\s]+/\S+"
+    r"|[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:[^#\s]\S*"
+)
 
 
 def entries(path):

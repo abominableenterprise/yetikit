@@ -34,10 +34,19 @@ def write(path, entries):
     path.write_text(json.dumps({'dependencies': entries}), encoding='utf-8')
 
 
+# Validate the same synthetic Git dependency before and after resolution.
+ssh = 'git@host.invalid:fixture/utility.git#' + 'a' * 40
+write(manifest, {**direct, 'fixture.utility': ssh})
+verify(None, '--manifest-only')
+write(lock, {**locked, 'fixture.utility': {'version': ssh, 'source': 'git'}})
+verify()
+
+write(manifest, direct)
 write(lock, locked)
 verify()
 for version in ('file:../../Packages/example', '../Packages/example', '/tmp/example',
-                r'C:\packages\example', 'Packages/example'):
+                r'C:\packages\example', 'C:packages/example', 'Packages/example',
+                'local:packages/example', 'git@host.invalid:'):
     # A non-kit path must fail too; the kit check has the additional canonical-URL rule.
     write(manifest, {**direct, 'fixture.local': version})
     verify('manifest.json: fixture.local', '--manifest-only')
