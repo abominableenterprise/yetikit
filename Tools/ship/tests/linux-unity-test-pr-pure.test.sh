@@ -52,6 +52,58 @@ check 'multiline RenderTool category after a complete attribute excludes the exp
   '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests "* ]] && ! grep -Fq "pure selected ShipFixtures.MultilineCaptureTests" "$stages"'
 rm "$t/Props/MultilineCaptureTests.cs"
 
+cat > "$t/Props/CaptureTests.cs" <<'CS'
+using NUnit.Framework;
+namespace ShipFixtures
+{
+    [Explicit, Category("RenderTool")] public partial
+    class CaptureTests { [Test] public void Capture() {} }
+}
+CS
+pr HEAD
+check 'split class modifiers keep an explicit RenderTool fixture out of the headless filter' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests "* ]]'
+rm "$t/Props/CaptureTests.cs"
+
+cat > "$t/Props/CommentedCaptureTests.cs" <<'CS'
+using NUnit.Framework;
+namespace ShipFixtures
+{
+    [Explicit, Category("RenderTool")] /* Single-line trailing comment. */
+    public class SingleLineCaptureTests { [Test] public void Capture() {} }
+
+    [Description(@"Literal ""//"" and /* markers"), Explicit, Category("RenderTool")] /* Multi-line trailing comment:
+        } [Category("Gfx")] class Decoy {}
+    */ public class MultiLineCaptureTests { [Test] public void Capture() {} }
+    public class AfterCommentTests { [Test] public void Rule() {} }
+}
+CS
+pr HEAD
+check 'trailing block comments keep explicit RenderTool fixtures out of the headless filter' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.AfterCommentTests "* ]] && [ "$(wc -l < "$tmp/runs")" = 1 ]'
+rm "$t/Props/CommentedCaptureTests.cs"
+
+cat > "$t/Props/MethodCaptureTests.cs" <<'CS'
+using NUnit.Framework;
+namespace ShipFixtures;
+public class MethodCaptureTests
+{
+    [Test, Explicit, Category("RenderTool")] /* Method only, not a closing brace: } */ public
+    void Capture() {}
+    [Test] public void Rule()
+    {
+        string value = null;
+        var label = $"{value ?? "// fixture"}";
+        Assert.IsNotEmpty(label);
+    }
+}
+public class SiblingPureTests { [Test] public void Rule() {} }
+CS
+pr HEAD
+check 'a method category and comment-like text in an interpolated string do not hide pure classes' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.MethodCaptureTests;ShipFixtures.SiblingPureTests "* ]]'
+rm "$t/Props/MethodCaptureTests.cs"
+
 printf 'using NUnit.Framework;\nnamespace ShipFixtures { public class MixedInlineTests { [Test] public void Rule() {} [Test, Category("Gfx")] public void Render() {} } }\n' > "$t/Props/MixedInlineTests.cs"
 pr HEAD
 check 'inline method Gfx category keeps the fixture in both passes, with Gfx excluded headlessly' \

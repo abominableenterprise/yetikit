@@ -14,13 +14,59 @@ cs_classes() {
       BEGIN {
         category = "Category[[:space:]]*\\([[:space:]]*\"" cat "\"[[:space:]]*\\)"
         inline_tag = "\\[[^]]*" category
+        modifiers = "((public|internal|protected|private|file|abstract|sealed|static|unsafe|new|partial|record)[[:space:]]+)*"
       }
       function fq(c) { return ns == "" ? c : ns "." c }
       function braces(s,   o, c) { o = gsub(/\{/, "{", s); c = gsub(/\}/, "}", s); depth += o - c }
+      function literal_length(s) {
+        return match(s, /^(@"([^"]|"")*"|"([^"\\]|\\.)*"|\047([^\047\\]|\\.)*\047)/) ? RLENGTH : 0
+      }
+      # Replace comments with whitespace before scanning attributes, declarations
+      # or braces. Leave quoted arguments intact for category matching.
+      function without_comments(s,   out, token, n) {
+        while (s != "") {
+          if (block_comment) {
+            if (!match(s, /\*\//)) return out
+            s = substr(s, RSTART + RLENGTH)
+            block_comment = 0
+          } else if (verbatim) {
+            match(s, /^([^"]|"")*/)
+            if (RLENGTH == length(s)) return out s
+            out = out substr(s, 1, RLENGTH + 1)
+            s = substr(s, RLENGTH + 2)
+            verbatim = 0
+          } else {
+            if (!match(s, /\/\/|\/\*|\$@?"|@\$"|@"|["\047]/)) return out s
+            out = out substr(s, 1, RSTART - 1)
+            token = substr(s, RSTART, RLENGTH)
+            s = substr(s, RSTART)
+            # Do not treat quotes or comment markers inside interpolation
+            # expressions as top-level tokens. Keep the rest of the line as
+            # written so its braces are counted as before.
+            if (token ~ /\$/) return out s
+            if (token == "//") return out
+            if (token == "/*") {
+              out = out " "
+              s = substr(s, 3)
+              block_comment = 1
+            } else if (token == "@\"") {
+              out = out token
+              s = substr(s, 3)
+              verbatim = 1
+            } else {
+              n = literal_length(s)
+              if (!n) n = 1
+              out = out substr(s, 1, n)
+              s = substr(s, n + 1)
+            }
+          }
+        }
+        return out
+      }
       # Consume one leading attribute section, ignoring brackets in literals
       # and retaining nested brackets (for example typeof(int[]) in a fixture).
       # Only a complete section can contribute a tag to the next declaration.
-      function attribute_end(s,   i, ch, rest, level, tagged) {
+      function attribute_end(s,   i, ch, level, tagged, n) {
         for (i = 1; i <= length(s); i++) {
           ch = substr(s, i, 1)
           if (ch == "[") level++
@@ -28,17 +74,16 @@ cs_classes() {
             if (tagged) pending = 1
             return i
           } else if (ch == "@" || ch == "\"" || ch == "\047") {
-            rest = substr(s, i)
-            if (match(rest, /^(@"([^"]|"")*"|"([^"\\]|\\.)*"|\047([^\047\\]|\\.)*\047)/)) i += RLENGTH - 1
+            n = literal_length(substr(s, i))
+            if (n) i += n - 1
           } else if (gfx && ch == "C" && substr(s, i - 1, 1) !~ /[[:alnum:]_]/ && substr(s, i) ~ ("^" category)) {
             tagged = 1
           }
         }
         return 0
       }
-      /^[[:space:]]*\/\// { next }
       {
-        line = $0
+        line = without_comments($0)
         if (match(line, /^[[:space:]]*namespace[[:space:]]+[A-Za-z0-9_.]+/)) {
           ns = substr(line, RSTART, RLENGTH)
           line = substr(line, RSTART + RLENGTH)
@@ -47,7 +92,6 @@ cs_classes() {
           # Consume the namespace delimiter, not declarations on the rest of the line.
           if (sub(/^[[:space:]]*;/, "", line)) nsdepth = depth
           else if (sub(/^[[:space:]]*\{/, "", line)) depth++
-          if (line ~ /^[[:space:]]*\/\//) next
         }
         # Class-only selection never searches bodies for class-level tags.
         if (scope == "class" && depth > nsdepth) { braces(line); next }
@@ -59,12 +103,13 @@ cs_classes() {
           end = attribute_end(line)
           if (!end) { attributes = line " "; break }
           line = substr(line, end + 1)
-          # A same-line block comment after a section is not a declaration.
-          while (sub(/^[[:space:]]*\/\*([^*]|\*+[^*/])*\*+\//, "", line)) {}
         }
-        if (attributes != "" || line ~ /^[[:space:]]*(\/\/.*)?$/) next
+        if (attributes != "" || line ~ /^[[:space:]]*$/) next
         if (scope == "class") {
-          if (pending && match(line, /^[[:space:]]*((public|internal|protected|private|file|abstract|sealed|static|unsafe|new|partial|record)[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]+/)) {
+          # Modifier-only lines do not consume a tag. A non-class declaration
+          # does, and tags in class bodies never reach this branch.
+          if (pending && (line " ") ~ ("^[[:space:]]*" modifiers "$")) next
+          if (pending && match(line, "^[[:space:]]*" modifiers "class[[:space:]]+[A-Za-z0-9_]+")) {
             c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
             print fq(c)
           }
