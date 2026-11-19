@@ -112,7 +112,7 @@ start_during_wait() {
 }
 
 start_during_reconciliation() {
-  local outcome="$1" wait_rc=0 polls=0 did_start=0 fake_now=0 samples=0
+  local outcome="$1" wait_rc=0 polls=0 did_start=0 fake_now=0 samples=0 wait_minutes=1
   local dead_pid=2147483647
   QR_LOGS="$tmp/pending-$outcome"
   QR_RUN_DIR="$QR_LOGS/run"
@@ -120,7 +120,7 @@ start_during_reconciliation() {
   printf 'synthetic previous success\n' > "$QR_RUN_DIR/summary.txt" || return 1
   start_release && qr_lock_result prepare 0 0 && qr_lock_release || return 1
   local previous_key="$QR_INVOCATION"
-  if [ "$outcome" = first-legacy ]; then
+  if [ "$outcome" = first-legacy ] || [ "$outcome" = first-legacy-finished ]; then
     # With only legacy state, an abandoned startup must not reactivate last-result either.
     rm "$QR_LOGS/current-invocation" && printf 'QR_RUN_DIR=%q\n' "$QR_RUN_DIR" > "$QR_LOGS/current.env" || return 1
   else
@@ -128,13 +128,18 @@ start_during_reconciliation() {
   fi
   case "$outcome" in
     first-*) mkdir "$QR_LOGS/run.lock" || return 1; did_start=1 ;;
+    completed-deadline) wait_minutes=0 ;;
   esac
   qr_lock_read() {
     local observed=0
     samples=$((samples + 1))
-    if [ "$samples:$outcome" = 2:completed ]; then
+    if [ "$samples" = 2 ] && [[ "$outcome" = completed* ]]; then
       # A has been read, but B publishes, fails and unlocks before reconciliation samples the lock.
       start_release && finish_failed_successor || exit 99
+    fi
+    if [ "$samples:$outcome" = 1:handoff ]; then
+      start_release && finish_release && mkdir "$QR_LOGS/run.lock" || exit 99
+      did_start=1
     fi
     real_lock_read || observed=$?
     if [ "$samples:$outcome" = 2:stale ]; then
@@ -151,7 +156,7 @@ start_during_reconciliation() {
         if [ "$outcome" = stale ]; then
           printf '%s\n' "$dead_pid" > "$QR_LOGS/run.lock/pid" || exit 99
         fi
-      elif [ "$outcome" != completed ]; then
+      elif [[ "$outcome" != completed* ]]; then
         mkdir "$QR_LOGS/run.lock" || exit 99
       fi
       did_start=1
@@ -172,7 +177,10 @@ start_during_reconciliation() {
       1:before-pointer)
         mv "$QR_LOGS/next-pointer" "$QR_LOGS/current-invocation" && finish_failed_successor &&
           publish_third_release || exit 99 ;;
-      1:unpublished|1:first-unpublished|1:first-legacy)
+      1:completed) publish_third_release || exit 99 ;;
+      1:first-legacy-finished)
+        rmdir "$QR_LOGS/run.lock" && qr_lock_acquire 0 && finish_failed_successor || exit 99 ;;
+      1:unpublished|1:first-unpublished|1:first-legacy|1:handoff)
         # An abandoned startup must not send the waiter back to the old pointer.
         rmdir "$QR_LOGS/run.lock" || exit 99 ;;
     esac
@@ -184,16 +192,18 @@ start_during_reconciliation() {
   publish_third_release() {
     printf 'synthetic third success\n' > "$QR_RUN_DIR/summary.txt" && start_release && finish_release
   }
-  QUEST_WAIT_GRACE=0 qr_main wait 1 || wait_rc=$?
+  QUEST_WAIT_GRACE=0 qr_main wait "$wait_minutes" || wait_rc=$?
   ! grep -Eq '^synthetic (previous|third) success$' "$tmp/out" || return 1
   case "$outcome" in
-    failure|fast|first-fast|before-pointer|completed)
+    failure|fast|first-fast|before-pointer|completed*)
       [ "$wait_rc" = 1 ] && grep -q '^synthetic successor failed$' "$tmp/out" &&
         ! grep -qF "$previous_key" "$QR_LOGS/current-invocation" ;;
     stale)
       [ "$wait_rc" = 1 ] && [ ! -s "$tmp/out" ] &&
         grep -Fq "(pid $dead_pid) ended (lock gone) without writing its result" "$tmp/err" ;;
-    unpublished|first-unpublished|first-legacy)
+    first-legacy-finished)
+      [ "$wait_rc" = 1 ] && grep -q '^synthetic successor failed$' "$tmp/out" ;;
+    unpublished|first-unpublished|first-legacy|handoff)
       [ "$wait_rc" = 124 ] && [ "$(cat "$QR_LOGS/polls")" = 3 ] && grep -q 'timed out after 1 min' "$tmp/err" ;;
   esac
 }
@@ -208,8 +218,11 @@ check 'a successor that completes between polls replaces the provisional result'
 check 'a live owner seen at reconciliation stays pinned after a third release' start_during_reconciliation before-pointer
 check 'a stale owner seen at reconciliation fails if its keyed result is missing' start_during_reconciliation stale
 check 'a successor that completes before reconciliation overrides the sampled pointer' start_during_reconciliation completed
+check 'the final poll can report a successor that completed during reconciliation' start_during_reconciliation completed-deadline
 check 'retrying an unpublished successor is bounded and never returns the old result' start_during_reconciliation unpublished
 check 'a fresh lock seen on the first poll stays pending after disappearing' start_during_reconciliation first-unpublished
 check 'an abandoned startup also suppresses a historical legacy result' start_during_reconciliation first-legacy
 check 'a first-poll pending lock can resolve through a newly published key' start_during_reconciliation first-fast
+check 'a legacy startup can publish a fresh result and unlock between polls' start_during_reconciliation first-legacy-finished
+check 'a pointer published before an abandoned startup does not certify it' start_during_reconciliation handoff
 [ "$fails" = 0 ]
