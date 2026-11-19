@@ -77,6 +77,7 @@ namespace Game.Dev
             var direct = DevBoot.Consume(scene.path);
             if (Known(direct)) lab.Bind(direct);
             StarterLabPanel.Build(lab);
+            StarterWristPanel.Build(lab, turn.transform);
         }
 
         public bool Select(string id)

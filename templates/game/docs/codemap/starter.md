@@ -6,5 +6,6 @@
 - Route thrown-prop contacts to room targets: `Assets/Starter/Runtime/SandboxBindings.cs`.
 - Play the synthetic local tone: `Assets/Starter/Runtime/ImpactCue.cs`.
 - Install dev-only direct boot and snap-turn tuning: `Assets/Starter/Dev/StarterLab.cs`.
-- Preview the desktop start and tuning controls: `Assets/Starter/Dev/StarterLabPanel.cs`.
+- Share start and tuning controls between desktop and wrist: `Assets/Starter/Dev/StarterLabPanel.cs`.
+- Attach the dev-only wrist UI and route pointing or poking before room selections: `Assets/Starter/Dev/StarterWristPanel.cs`.
 - Integration tests live in the kit Host and stage the generated files as a consumer would import them.

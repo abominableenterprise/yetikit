@@ -7,7 +7,6 @@ using UnityEngine.UI;
 
 namespace Game.Dev
 {
-    // Desktop controls only. XR wrist input is not routed to this canvas.
     public sealed class StarterLabPanel : MonoBehaviour
     {
         StarterLab lab;
@@ -16,32 +15,35 @@ namespace Game.Dev
         GameObject tuning;
         Button decrease, increase, reset;
         Font font;
+        bool desktop;
+        internal RectTransform Card => card;
 
         internal static void Build(StarterLab lab)
         {
             var panel = lab.gameObject.AddComponent<StarterLabPanel>();
-            panel.lab = lab;
-            panel.CreateControls();
-        }
-
-        void CreateControls()
-        {
-            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            var canvas = Item("Starter Lab Canvas", transform).gameObject.AddComponent<Canvas>();
+            var canvas = Item("Starter Lab Canvas", lab.transform).gameObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.gameObject.AddComponent<GraphicRaycaster>();
             if (!EventSystem.current)
             {
                 var input = new GameObject("Starter Lab Input");
-                input.transform.SetParent(transform, false);
+                input.transform.SetParent(lab.transform, false);
                 input.AddComponent<EventSystem>();
                 input.AddComponent<InputSystemUIInputModule>();
             }
 
+            panel.CreateControls(lab, canvas, true);
+        }
+
+        internal void CreateControls(StarterLab model, Canvas canvas, bool screenSpace)
+        {
+            lab = model;
+            desktop = screenSpace;
+            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             card = Item("Starter Lab", canvas.transform);
-            Place(card, 16, 16, 304, 230);
+            Place(card, desktop ? 16 : 0, desktop ? 16 : 0, 304, 230);
             card.gameObject.AddComponent<Image>().color = new Color(0.07f, 0.10f, 0.13f, 0.95f);
-            Label(card, "Starter Lab  |  F8 to toggle", 12, 6, 280, 28);
+            Label(card, desktop ? "Starter Lab  |  F8 to toggle" : "Starter Lab  |  Wrist controls", 12, 6, 280, 28);
             Label(card, "Choose a snap-turn experiment", 12, 35, 280, 24);
             compact = Button(card, "Compact turn", 12, 65, 136, () => lab.Select(StarterLab.Compact)).GetComponentInChildren<Text>();
             wide = Button(card, "Wide turn", 156, 65, 136, () => lab.Select(StarterLab.Wide)).GetComponentInChildren<Text>();
@@ -62,11 +64,12 @@ namespace Game.Dev
 
         void Update()
         {
-            if (Keyboard.current?.f8Key.wasPressedThisFrame == true) card.gameObject.SetActive(!card.gameObject.activeSelf);
+            if (desktop && Keyboard.current?.f8Key.wasPressedThisFrame == true)
+                card.gameObject.SetActive(!card.gameObject.activeSelf);
             Refresh();
         }
 
-        void Refresh()
+        internal void Refresh()
         {
             compact.text = "Compact turn" + Suffix(StarterLab.Compact);
             wide.text = "Wide turn" + Suffix(StarterLab.Wide);

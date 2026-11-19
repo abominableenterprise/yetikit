@@ -73,6 +73,15 @@ namespace YetiKit.Starter.HostTests
         }
 
         [UnityTest]
+        public IEnumerator WristInputRoutesWithoutRoomActions()
+        {
+            SandboxBuilder.Build(PrepareBake());
+            yield return new EnterPlayMode();
+            yield return StarterWristChecks.Drive(SessionState.GetString(OutputKey, "") + "/Sandbox.unity");
+            yield return new ExitPlayMode();
+        }
+
+        [UnityTest]
         public IEnumerator EmptySavedTuningDisablesControls() => DriveUnreadableTuning("", "Empty");
 
         [UnityTest]
