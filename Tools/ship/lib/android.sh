@@ -149,8 +149,11 @@ apk_bee_restore() {
   # A relative Bee link can dangle after it is moved out of Library.
   [ -n "$APK_BEE_ID" ] && { [ -L "$aside" ] || [ -d "$aside" ]; } || return 0
   identity="$(stat -c '%d:%i' -- "$aside")" || return "$?"
-  # If move-out failed and another aside appeared, it isn't ours to restore.
-  [ "$identity" = "$APK_BEE_ID" ] || return 0
+  # If the aside was replaced (or move-out lost a race), don't move it back.
+  if [ "$identity" != "$APK_BEE_ID" ]; then
+    log "error: refusing to restore an unexpected Bee aside at $aside"
+    return 1
+  fi
   apk_bee_move "$aside" "$PROJECT/Library/Bee" || {
     local rc=$?
     log "error: could not restore Library/Bee; recover it from $aside"
@@ -177,17 +180,16 @@ apk_cache_cleanup() {
 # Save the cache without ~7 GB of Bee intermediates. Keep it on the project
 # filesystem so moving it aside and back doesn't copy those files.
 apk_cache_save() {
-  local bee="$PROJECT/Library/Bee" aside="$PROJECT/Temp/apk-bee-aside" save_rc=0 monitor=0 temp_device bee_device
+  local bee="$PROJECT/Library/Bee" aside="$PROJECT/Temp/apk-bee-aside" save_rc=0 monitor=0 temp_device bee_device identity
   if [ -e "$aside" ] || [ -L "$aside" ]; then
     log "error: refusing to overwrite existing Bee aside $aside"
     return 1
   fi
   if [ -d "$bee" ]; then
     mkdir -p -- "$PROJECT/Temp" || return
-    # Only an atomic rename preserves Bee's identity across cancellation.
     temp_device="$(stat -Lc '%d' -- "$PROJECT/Temp")" || return
-    APK_BEE_ID="$(stat -c '%d:%i' -- "$bee")" || return
-    bee_device="${APK_BEE_ID%%:*}"
+    identity="$(stat -c '%d:%i' -- "$bee")" || return
+    bee_device="${identity%%:*}"
     # Overlayfs can report different device IDs for a symlink and its parent.
     # We're renaming the link's directory entry, not its target.
     if [ -L "$bee" ]; then bee_device="$(stat -Lc '%d' -- "${bee%/*}")" || return; fi
@@ -195,6 +197,14 @@ apk_cache_save() {
       log "error: Library/Bee and Temp are on different filesystems; not moving Bee"
       return 1
     fi
+    if [ -L "$bee" ] && [ "${identity%%:*}" != "$bee_device" ]; then
+      # Force overlay copy-up at the source using the link's own timestamps.
+      # Record its new identity before rename, so even EXIT during mv can
+      # restore it without trusting whatever happens to be at the aside path.
+      touch -ch -r "$bee" -- "$bee" || return
+      identity="$(stat -c '%d:%i' -- "$bee")" || return
+    fi
+    APK_BEE_ID="$identity"
     apk_bee_move "$bee" "$aside" || {
       local rc=$?
       log "error: could not move Library/Bee aside to $aside"
