@@ -15,11 +15,37 @@ cs_classes() (
     awk -v gfx="$([ "$cat" = 0 ] && echo 0 || echo 1)" -v cat="$cat" -v scope="${2:-}" '
       BEGIN {
         category = "Category[[:space:]]*\\([[:space:]]*\"" cat "\"[[:space:]]*\\)"
-        inline_tag = "\\[[^]]*" category
         modifiers = "((public|internal|protected|private|file|abstract|sealed|static|unsafe|new|partial|record)[[:space:]]+)*"
+        identifier = "[A-Za-z_][A-Za-z0-9_]*"
+        class_kw = "^" modifiers "class([[:space:]]|$)"
+        depth = nsdepth = 0
       }
       function fq(c) { return ns == "" ? c : ns "." c }
-      function braces(s,   o, c) { o = gsub(/\{/, "{", s); c = gsub(/\}/, "}", s); depth += o - c }
+      function namespace_name(s,   parts, n, i, name) {
+        if (!sub(/^namespace[[:space:]]+/, "", s)) exit 2
+        n = split(s, parts, /[.]/)
+        for (i = 1; i <= n; i++) {
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", parts[i])
+          if (parts[i] !~ ("^" identifier "$")) exit 2
+          name = i == 1 ? parts[i] : name "." parts[i]
+        }
+        if (name == "") exit 2
+        return name
+      }
+      # Stop at one structural delimiter, not the net brace count on the line.
+      # Quoted arguments have survived scan_line for category matching.
+      function delimiter(s,   offset, n, i) {
+        offset = 0
+        while (match(s, /[{};"\047]/)) {
+          i = RSTART
+          if (substr(s, i, 1) ~ /[{};]/) return offset + i
+          n = literal_length(substr(s, i))
+          if (!n) exit 2
+          offset += i + n - 1
+          s = substr(s, i + n)
+        }
+        return 0
+      }
       function literal_length(s) {
         return match(s, /^(@"([^"]|"")*"|"([^"\\]|\\.)*"|\047([^\047\\]|\\.)*\047)/) ? RLENGTH : 0
       }
@@ -108,54 +134,74 @@ cs_classes() (
         return 0
       }
       {
+        if (NR == 1) sub(/^\357\273\277/, "") # UTF-8 BOM
         line = scan_line($0)
-        if (match(line, /^[[:space:]]*namespace[[:space:]]+[A-Za-z0-9_.]+/)) {
-          ns = substr(line, RSTART, RLENGTH)
-          line = substr(line, RSTART + RLENGTH)
-          sub(/^[[:space:]]*namespace[[:space:]]+/, "", ns)
-          nsdepth = depth + 1
-          # Consume the namespace delimiter, not declarations on the rest of the line.
-          if (sub(/^[[:space:]]*;/, "", line)) nsdepth = depth
-          else if (sub(/^[[:space:]]*\{/, "", line)) depth++
-        }
-        # Class-only selection never searches bodies for class-level tags.
-        if (scope == "class" && depth > nsdepth) { braces(line); next }
-        # Consume each complete section, carrying only an unfinished section
-        # to the next line. Leave any following declaration for selection.
-        line = attributes line
-        attributes = ""
-        while (line ~ /^[[:space:]]*\[/) {
-          end = attribute_end(line)
-          if (!end) { attributes = line " "; break }
-          line = substr(line, end + 1)
-        }
-        if (attributes != "" || line ~ /^[[:space:]]*$/) next
-        if (scope == "class") {
-          # Modifier-only lines do not consume a tag. A non-class declaration
-          # does, and tags in class bodies never reach this branch.
-          if (pending && (line " ") ~ ("^[[:space:]]*" modifiers "$")) next
-          if (pending && match(line, "^[[:space:]]*" modifiers "class[[:space:]]+[A-Za-z0-9_]+")) {
-            c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
-            print fq(c)
-          }
-          pending = 0
-          braces(line)
+        # Conditional branches can change which namespaces and braces are active.
+        if (line ~ /^[[:space:]]*#/) {
+          if (line ~ /^[[:space:]]*#[[:space:]]*(if|elif|else|endif)([[:space:]]|$)/) exit 2
           next
         }
-        # Keep recognizing tags on methods written inline in a class body.
-        if (gfx && line ~ inline_tag) pending = 1
-        if (match(line, /(^|[^A-Za-z0-9_])class[[:space:]]+[A-Za-z0-9_]+/)) {
-          c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
-          if (depth <= nsdepth) { top = c; if (!gfx) print fq(top) }
-          if (pending && gfx) print fq(top)
-          pending = 0
-        } else if (pending) {
-          if (gfx && top != "") print fq(top)
-          pending = 0
+        line = attributes ns_header line
+        attributes = ns_header = ""
+        while (line != "") {
+          sub(/^[[:space:]]+/, "", line)
+          if (line == "") break
+          # Consume complete attribute sections before looking at delimiters.
+          # Tags inside a fixture cannot qualify it in class-only mode.
+          if (line ~ /^\[/) {
+            end = attribute_end(line)
+            if (!end) { attributes = line " "; break }
+            line = substr(line, end + 1)
+            if (scope == "class" && depth > nsdepth) pending = 0
+            continue
+          }
+          end = delimiter(line)
+          code = end ? substr(line, 1, end - 1) : line
+          token = end ? substr(line, end, 1) : ""
+          if (code ~ /^namespace([^A-Za-z0-9_]|$)/) {
+            if (depth != nsdepth || top != "") exit 2
+            if (!end) { ns_header = code " "; break }
+            name = namespace_name(code)
+            if (token == ";" && ns == "" && !block_namespace) ns = name
+            else if (token == "{") {
+              # A namespace body opens a frame at its parent brace depth.
+              block_namespace = 1
+              parent_ns[depth] = ns
+              parent_depth[depth] = nsdepth
+              ns = fq(name)
+              nsdepth = ++depth
+            } else exit 2
+            pending = 0
+          } else {
+            if (code != "" && (end || (code " ") !~ ("^" modifiers "$"))) {
+              if (depth == nsdepth && code ~ class_kw) {
+                sub(class_kw, "", code)
+                sub(/^[[:space:]]+/, "", code)
+                if (!match(code, "^" identifier "([[:space:]<:]|$)")) exit 2
+                match(code, "^" identifier)
+                top = fq(substr(code, 1, RLENGTH))
+                if (!gfx || pending) print top
+              } else if (pending && scope != "class" && top != "") print top
+              pending = 0
+            }
+            if (token == "{") depth++
+            else if (token == "}") {
+              if (depth == 0) exit 2
+              if (depth == nsdepth) {
+                ns = parent_ns[depth - 1]
+                nsdepth = parent_depth[depth - 1]
+              }
+              if (--depth == nsdepth) top = ""
+              pending = 0
+            } else if (token == ";") {
+              if (depth == nsdepth) top = ""
+              pending = 0
+            }
+          }
+          line = end ? substr(line, end + 1) : ""
         }
-        braces(line)
       }
-      END { if (level || block_comment) exit 2 }
+      END { if (level || block_comment || depth || attributes != "" || ns_header != "") exit 2 }
     ' "$f" || { printf 'test selection: could not scan %s reliably\n' "$f" >&2; return 1; }
   done | sort -u
 )
