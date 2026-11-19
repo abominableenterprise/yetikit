@@ -15,7 +15,7 @@ The baked rig uses the Input System and the kit’s hands and prop interaction. 
 - **Tracked hands:** use the kit’s near-grab gesture. To teleport, hold a forward index point with the thumb up until the arc appears, then drop the thumb. For a snap turn, briefly hold a still fist with the thumb pointing sideways. The kit handles the gesture thresholds and cooldown.
 - **Scene wiring:** pads use XRI’s Default interaction layer; props and near grabbers use bit 1 of the XRI interaction mask. Reserve that bit if you name layers in the consumer project. These are interaction masks, not physics layers. An arc hitting the floor or an obstruction is not a valid landing.
 
-The project uses one pinned kit revision and leaves the existing Unity and XRI versions unchanged. No OpenXR package, loader, controller profile or hand-tracking feature is configured: a consumer must configure a provider to receive live XR input. The bindings are tested in the Host with synthetic input only. No mic, capture or upload is configured; voice is off. The scene, prefabs, materials and tone belong to the generated project, not a package sample. Each generation gets fresh asset GUIDs. If you already baked a sandbox, the builder will not upgrade it in place; keep your old assets and generate a fresh project to inspect or adopt the new rig.
+The project uses one pinned kit revision and leaves the existing Unity and XRI versions unchanged. No OpenXR package, loader, controller profile or hand-tracking feature is configured: a consumer must configure a provider to receive live XR input. The bindings are tested in the Host with synthetic input only. Voice is off; there is no microphone capture or upload. The scene, prefabs, materials and tone belong to the generated project, not a package sample. Each generation gets fresh asset GUIDs. If you already baked a sandbox, the builder will not upgrade it in place; keep your old assets and generate a fresh project to inspect or adopt the new rig.
 
 ### Desktop Starter Lab
 
@@ -29,6 +29,10 @@ In the Editor or a dev-enabled player, the same controls appear above the tracke
 
 The wrist panel does not take over an existing prop hold. While pointing at it, the right controller cannot start a prop grab or teleport; a held grip or trigger stays captured until released. The tracked hand suppresses room gestures near the panel. These routes are checked with synthetic input; live behavior and placement comfort are pending hardware validation.
 
+### Local photo snap
+
+After choosing an experiment, press **Photo snap** on either panel. It takes a still from the sandbox camera and saves a `starter-photo-*.png` with a same-name `.json` sidecar in Unity’s `Application.persistentDataPath`. The sidecar records the active experiment, effective and default snap angles in degrees, whether an override is active, and whether tuning persistence is available. Both panels report success or a capture/storage error. Photos are never queued for upload; only the explicit button takes a still. Keep captures out of source control.
+
 ## Remaining day-0 checklist
 
 1. **Clean-cache resolution and smoke/adapter tests:** Host tests cover generated scripts and scene wiring; verify resolution from the generated project’s remote pins and add consumer adapter tests.
@@ -38,8 +42,8 @@ The wrist panel does not take over an existing prop hold. While pointing at it, 
 5. **Throw/impact:** starter targets and cue are wired; validate the physical throw/impact event band on hardware.
 6. **Locomotion:** pads and snap turn are wired and motion is checked in the synthetic Host; live inputs and comfort remain unverified.
 7. **Direct experiment boot:** desktop direct selection and desktop/XR start panels are wired; verify XR UI on separately authorized hardware.
-8. **Persistent tuning:** desktop and wrist snap-angle tuning share per-experiment defaults, local persistence, reset and override visibility; local capture context remains pending.
-9. **Local photo:** wire and verify local-only photo snap; no upload or voice by default.
+8. **Persistent tuning:** desktop and wrist snap-angle tuning share per-experiment defaults, local persistence, reset and override visibility.
+9. **Local photo:** desktop and wrist photo controls and local storage are checked in the synthetic Host; live XR capture remains unverified. No upload or voice.
 10. **Release and frame timing:** wire dev stripping and BuildAudit; finish project rendering/comfort defaults, pinned lock, vendored Ship tools, CI and release notes; measure frame time on separately authorized hardware, including the Quest 2 floor.
 
 Targets of ≤2 hours to local capture, ≤4 hours including release, and ≤10 minutes of headset verification are unmeasured until real use. Record queue, cold import and device wait separately.

@@ -57,8 +57,18 @@ namespace YetiKit.Starter.HostTests
             Assert.That(Turn(scene).turnAmount, Is.EqualTo(40f));
             yield return null;
             Assert.That(Status(lab), Does.Contain("40° (override)").And.Contain("default: 30°"));
-            Capture(scene, lab, "Override");
-            yield return null;
+            using (var photo = new StarterPhotoChecks(lab))
+            {
+                Click(lab, "Photo snap");
+                photo.AssertLocalSnap(lab, StarterLab.Compact, 40f, 30f, hasOverride: true);
+                yield return null;
+                Assert.That(PhotoStatus(lab), Is.EqualTo("Photo saved locally."));
+                Capture(scene, lab, "Override");
+                yield return null;
+                photo.AssertDestinationErrors(lab, () => Click(lab, "Photo snap"));
+                yield return null;
+                Assert.That(PhotoStatus(lab), Is.EqualTo("Could not write photo."));
+            }
 
             Click(lab, "Wide turn");
             Assert.That(Turn(scene).turnAmount, Is.EqualTo(45f), "The other experiment has its own default.");
@@ -99,6 +109,11 @@ namespace YetiKit.Starter.HostTests
             yield return null;
             Capture(scene, lab, fixture);
             AssertUnreadable(scene, lab);
+            using (var photo = new StarterPhotoChecks(lab))
+            {
+                Click(lab, "Photo snap");
+                photo.AssertLocalSnap(lab, StarterLab.Compact, 30f, 30f, hasOverride: false, canPersist: false);
+            }
 
             Click(lab, "Wide turn");
             yield return null;
@@ -142,6 +157,8 @@ namespace YetiKit.Starter.HostTests
         static SnapTurnProvider Turn(Scene scene) => StarterSandboxTests.Root(scene, "XR Origin").GetComponent<SnapTurnProvider>();
         static string Status(StarterLab lab) => Panel(lab).GetComponentsInChildren<Text>()
             .Single(text => text.name == "Tuning status").text;
+        static string PhotoStatus(StarterLab lab) => Panel(lab).GetComponentsInChildren<Text>()
+            .Single(text => text.name == "Photo status").text;
         static Button Button(StarterLab lab, string name) => Panel(lab).GetComponentsInChildren<Button>()
             .Single(button => button.name == name);
         static void Click(StarterLab lab, string name) => Button(lab, name).onClick.Invoke();

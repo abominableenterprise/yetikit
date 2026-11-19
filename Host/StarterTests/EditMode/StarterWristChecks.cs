@@ -104,7 +104,14 @@ namespace YetiKit.Starter.HostTests
                 yield return Click("+5°");
                 Assert.That(lab.Angle.Get(), Is.EqualTo(50f));
                 Assert.That(Status(), Does.Contain("50° (override)").And.Contain("default: 45°"));
-                Capture(origin.Camera, lab, "Wrist-Override");
+                using (var photo = new StarterPhotoChecks(lab))
+                {
+                    yield return Click("Photo snap");
+                    photo.AssertLocalSnap(lab, StarterLab.Wide, 50f, 45f, hasOverride: true);
+                    Assert.That(canvas.GetComponentsInChildren<Text>().Single(text => text.name == "Photo status").text,
+                        Is.EqualTo("Photo saved locally."));
+                    Capture(origin.Camera, lab, "Wrist-Override");
+                }
 
                 Aim("Reset", trigger: true);
                 yield return Frames(3);

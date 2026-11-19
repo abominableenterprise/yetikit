@@ -3,6 +3,7 @@
   "references": [
     "Game.Starter",
     "YetiKit.Lab",
+    "YetiKit.Playtest",
     "YetiKit.Hands",
     "Unity.InputSystem",
     "UnityEngine.UI",
