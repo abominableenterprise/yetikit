@@ -37,6 +37,49 @@ Results and logs are in ignored `Host/build/`. Use `-testFilter` for focused
 iterations; run the full command once at the end. The normal EditMode runner
 executes pure tests without graphics and a second Gfx-category pass.
 
+## Generated starter integration (opt-in)
+
+The [starter fixture](StarterTests/) lives outside `Assets` so the ordinary Host
+compiles without generated code. With the Host editor closed, add these entries
+once to the checkout's local Git exclude file (`git rev-parse --git-path info/exclude`):
+
+```gitignore
+/Host/Assets/Starter/
+/Host/Assets/Starter.meta
+/Host/Assets/StarterTests/
+/Host/Assets/StarterTests.meta
+```
+
+From the repository root:
+
+```sh
+bash Host/StarterTests/stage.sh
+PROJECT="$PWD/Host" Tools/ship/linux-unity.sh test editmode -testCategory Gfx -testFilter YetiKit.Starter.HostTests
+```
+
+Staging runs the real generator twice in temporary directories, checks input
+rejection and GUID isolation, then copies `Assets/Starter` with its generated
+metadata and installs the test assembly. Run `bash Host/StarterTests/stage.sh
+--check-only` on one line to validate the generator without staging or opening
+Unity, even if the Host already has staged assets. It does not copy the generated package
+manifest or project settings. The EditMode test bakes and reopens the sandbox in
+an isolated subfolder of `Assets/StarterTests`, then briefly enters Play Mode to
+check the sandbox's runtime bindings, drive the kit grab/release through XRI,
+and verify one accepted hit per throw using synthetic contacts. No headset or
+XR input device is required. Use the same activation/return
+procedure as above.
+
+The test deletes its bake; to remove staging (including any assets left by an
+interrupted test), close the Host editor and run this from the repository root:
+
+```sh
+rm -rf -- Host/Assets/Starter Host/Assets/Starter.meta \
+  Host/Assets/StarterTests Host/Assets/StarterTests.meta
+```
+
+Staging refuses to overwrite these paths. Clean and stage again after changes to
+the generator or test source. Do not commit the staged copies.
+
 ## No player builds
 
 [Ship configuration](yetikit.json) includes schema-required build fields pointing
