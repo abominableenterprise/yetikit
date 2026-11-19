@@ -16,6 +16,8 @@ mv() {
   if [ "${QR_MANUAL_BLOCK:-}" = committed-start ] && [ "${3:-}" = "$(marker_for a)" ] &&
      jq -e 'has("start")' "$3" >/dev/null; then
     qr_fixture_block_until_term "$tmp/blocker"
+  elif [ "${QR_MANUAL_BLOCK:-}" = stop-journal ] && [[ "${3:-}" = */run.lock/perf-manual/*.manual ]]; then
+    qr_fixture_block_until_term "$tmp/blocker"
   fi
 }
 serial_id() {
@@ -29,6 +31,7 @@ adb() {
   [ "${1:-}" = -s ] && [ "$#" -ge 3 ] || return 99
   id="$(serial_id "$2")" || return 99; shift 2
   printf '%s|%s\n' "$id" "$*" >> "$tmp/events"
+  if [ -e "$tmp/$id.offline" ] && [ "$*" != 'shell am broadcast -a com.oculus.vrpowermanager.automation_disable' ]; then return 1; fi
   case "$*" in
     get-state) echo device ;;
     'shell getprop ro.product.manufacturer') echo Oculus ;;
@@ -46,7 +49,7 @@ adb() {
     'shell am broadcast -a com.oculus.vrpowermanager.automation_disable')
       lock="$(marker_for "${id}")"; lock="${lock%.manual}.lock"
       if [ "$(command cat "$lock/pid" 2>/dev/null)" != "$$" ]; then : > "$tmp/unlocked-restore"; fi
-      [ ! -e "$tmp/$id.restore-fails" ] || return 1
+      [ ! -e "$tmp/$id.restore-fails" ] && [ ! -e "$tmp/$id.offline" ] || return 1
       rm -f "$tmp/$id.override" ;;
     'logcat -d -v epoch -v usec --pid=4242 -s VrApi')
       if [ "${QR_MANUAL_BLOCK:-}" = stop ]; then qr_fixture_block_until_term "$tmp/blocker"; fi
@@ -147,10 +150,19 @@ check 'missing gate input stays unavailable and both sensors are restored under 
 run "$a" perf stop
 check 'a completed stop cannot reuse its start' '[ "$rc" = 3 ] && grep -q "no matching perf start" "$tmp/out"'
 
+# Drop DAC overrides in root-run workers so real mode bits still apply.
+permission_shell=(bash)
+if [ "$UID" = 0 ]; then permission_shell=(setpriv --bounding-set=-dac_override,-dac_read_search bash); fi
 cancel() {
   local action="$1" block="${2:-$1}" fault="${3:-}"
   rm -f "$tmp/blocker.started" "$tmp/blocker.terminated"
-  ( export QUEST_SERIAL="$a" QR_MANUAL_BLOCK="$block"; qr_fixture_bash "$0" --worker "$action" ) > "$tmp/out" 2>&1 & owner=$!
+  (
+    export QUEST_SERIAL="$a" QR_MANUAL_BLOCK="$block"
+    if [ "$block" = stop-journal ]; then
+      exec "${permission_shell[@]}" "$0" --worker "$action"
+    fi
+    qr_fixture_bash "$0" --worker "$action"
+  ) > "$tmp/out" 2>&1 & owner=$!
   if qr_fixture_wait_ready "$tmp/blocker.started" "$owner"; then
     # Fail the recovery write even when this fixture runs as root, without
     # interfering with the device lock or the ability to unlink the record.
@@ -259,6 +271,44 @@ clock a 1700000166.000000000 22000
 run "$a" perf stop
 check 'only the fresh window can publish PASS after the triple failure' \
   '[ "$rc" = 0 ] && json '\''.overall == "PASS" and .seconds == 2 and .samples == 2 and .p95AppMs == 5'\'' && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ]'
+# Exercise both failed guard lookups and failed writes from another run.
+for interruption in stop cancel; do
+  clock a 1700000300.000000000 30000
+  ( qr_config && qr_new_run '4444444444444444' synthetic ) || exit 1
+  run "$a" perf start
+  inaccessible_dir="$run_dir"
+  guard="$inaccessible_dir/${key_a##*/}.armed"
+  original_owner="$(jq -er .owner "$key_a")" || exit 1
+  check "$interruption fixture starts with a committed window" '[ "$rc" = 0 ] && [ -s "$guard" ]'
+  ( qr_config && qr_new_run '5555555555555555' synthetic ) || exit 1
+  : > "$tmp/a.offline"
+  : > "$tmp/events"
+  clock a 1700000302.000000000 32000
+  if [ "$interruption" = stop ]; then
+    chmod 000 "$inaccessible_dir" || exit 1
+    rc=0; QUEST_SERIAL="$a" "${permission_shell[@]}" "$0" --worker stop > "$tmp/out" 2>&1 || rc=$?
+    report="$(. "$QUEST_LOG_ROOT/current.env" && printf '%s' "$QR_RUN_DIR")/perf-summary.json"
+    check 'offline stop from another run reports INFRA' '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0'\'''
+  else
+    chmod 400 "$guard" && chmod 500 "$inaccessible_dir" || exit 1
+    cancel stop stop-journal
+    check 'offline cancellation drains the journaled stop before recovery' \
+      '[ "$rc" = 1 ] && [ -e "$tmp/blocker.terminated" ] && grep -q "retry perf stop" "$tmp/out"'
+  fi
+  chmod 700 "$inaccessible_dir" && chmod 600 "$guard" || exit 1
+  check "$interruption invalidates the reservation without losing restoration ownership" \
+    '[ -s "$guard" ] && jq -e --arg owner "$original_owner" --arg dir "$inaccessible_dir" '\''.owner == $owner and .dir == $dir and (has("start") | not)'\'' "$key_a" >/dev/null && [ -e "$tmp/a.override" ] && grep -q "automation_disable" "$tmp/events" && ! grep -q "logcat" "$tmp/events"'
+  rm -f "$tmp/a.offline"
+  : > "$tmp/events"
+  clock a 1700000304.000000000 34000
+  {
+    sample 1700000300.500000 'App=5ms'; sample 1700000301.500000 'App=5ms'
+    sample 1700000302.500000 'App=5ms'; sample 1700000303.500000 'App=5ms'
+  } > "$tmp/a.samples"
+  run "$a" perf stop
+  check "retry after $interruption restores only and requires a fresh capture despite passing post-stop samples" \
+    '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0 and (.message | contains("stop boundary unknown") and contains("fresh perf start"))'\'' && ! grep -Eq "shell date|logcat" "$tmp/events" && [ ! -e "$key_a" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/unlocked-restore" ]'
+done
 # A directory at the root report path defeats rm -f even as root, without
 # blocking the per-device reports or the reservation cleanup.
 list="$a,$b"

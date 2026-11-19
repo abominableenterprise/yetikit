@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Manual sessions reserve the serial in the shared device-lock root. The file is
 # modified only under the device lock. A committed window also needs a nonempty
-# guard in its original run. Stop consumes that guard without allocating space.
+# guard in its original run. Stop consumes that guard or invalidates the record.
 qr_perf_manual_save() {
   jq -n --arg owner "$manual_owner" --arg dir "$QR_RUN_DIR" "$@" \
     > "$marker.tmp" && mv -f "$marker.tmp" "$marker"
@@ -19,11 +19,17 @@ qr_perf_manual_note() {
     mv -f "$journal/${marker##*/}.tmp" "$journal/${marker##*/}"
 }
 
-# Shrink the existing guard rather than allocating a replacement reservation
-# or a cancellation marker. Keep ownership in the shared record for recovery.
+# Consume the guard without allocating space when possible. Let rm distinguish
+# a missing guard from one we cannot reach; a negative size check cannot.
 qr_perf_manual_disarm() {
   local guard="$1/${marker##*/}.armed"
-  [ ! -s "$guard" ] || : > "$guard" || rm -f "$guard"
+  [ -s "$guard" ] && : > "$guard" || rm -f "$guard"
+}
+
+# The run directory can be inaccessible while the shared reservation is still
+# writable. Drop the start edge but keep ownership for proximity restoration.
+qr_perf_manual_invalidate() {
+  jq -e 'del(.start)' "$marker" > "$marker.tmp" && mv -f "$marker.tmp" "$marker"
 }
 
 qr_perf_manual_begin() {
@@ -66,9 +72,10 @@ qr_perf_manual_end() {
   qr_perf_manual_note || noted=0
   perf_prox=1
   start_dir="$(jq -er '.dir | strings | select(length > 0)' <<< "$record")" || start_dir=''
-  if [ -n "$start_dir" ] && [ -s "$start_dir/${marker##*/}.armed" ]; then
-    armed=1
-    if ! qr_perf_manual_disarm "$start_dir"; then
+  if [ -n "$start_dir" ] && [ -s "$start_dir/${marker##*/}.armed" ]; then armed=1; fi
+  if [ -z "$start_dir" ] || ! qr_perf_manual_disarm "$start_dir"; then
+    armed=0
+    if ! qr_perf_manual_invalidate; then
       perf_error='could not disarm manual capture; stop boundary unknown; do not use results from a retry stop'
       return 3
     fi
@@ -160,7 +167,7 @@ qr_perf_manual_recover_locked() {
   owner="$(qr_perf_manual_owner)" || return 3
   QR_RUN_DIR="$(jq -er --arg owner "$owner" 'select(.owner == $owner) | .dir | strings' "$marker")" || return 3
   # Invalidate the window before attempting restoration, even if adb is down.
-  if ! qr_perf_manual_disarm "$QR_RUN_DIR"; then
+  if ! qr_perf_manual_disarm "$QR_RUN_DIR" && ! qr_perf_manual_invalidate; then
     printf 'WARN: could not disarm manual capture for %s; do not use results from a retry stop\n' "$QUEST_SERIAL"
   fi
   qr_perf_restore
