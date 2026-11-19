@@ -4,7 +4,9 @@
       "version": "file:../../Packages/com.abominable.yetikit.core",
       "depth": 0,
       "source": "local",
-      "dependencies": {}
+      "dependencies": {
+        "com.unity.modules.jsonserialize": "1.0.0"
+      }
     },
     "com.abominable.yetikit.hands": {
       "version": "file:../../Packages/com.abominable.yetikit.hands",

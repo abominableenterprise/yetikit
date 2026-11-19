@@ -5,5 +5,7 @@
   "displayName": "YetiKit Core",
   "description": "Build identity, release notes, profiler counters and lightweight utilities without XR dependencies.",
   "license": "MIT",
-  "dependencies": {}
+  "dependencies": {
+    "com.unity.modules.jsonserialize": "1.0.0"
+  }
 }
