@@ -277,7 +277,7 @@ idle_release_retired() {
         && [ "$(cat "$SEAT_STATE")" = "$acquisition" ]; then
         if ! IDLE_RELEASING=1 seat_release; then activation_unlock; return 2; fi
       fi
-      rm -f "$IDLE_DIR/retire.$context"
+      if ! rm -f "$IDLE_DIR/retire.$context"; then activation_unlock; return 2; fi
       activation_unlock
       return 0
     fi
@@ -380,7 +380,19 @@ idle_watch() {
   mkdir -p "$OUT_DIR"
   # An old launcher may reach us after its successor already owns the watcher
   # lock. Honour its seat retirement before waiting or rejecting its context.
-  (flock -x 9; idle_release_retired) 9> "$IDLE_ACTIVITY_LOCK" && return 0
+  # Retry retirement outside the watcher lock: a successor may already hold
+  # that lock and have a different seat context.
+  while :; do
+    rc=0
+    (flock -x 9; idle_release_retired) 9> "$IDLE_ACTIVITY_LOCK" || rc=$?
+    case "$rc" in
+      0) return 0 ;;
+      1) break ;;
+      2) delay=$((delay * 2)); [ "$delay" -le 60 ] || delay=60; sleep "$delay" ;;
+      *) return "$rc" ;;
+    esac
+  done
+  delay=5
   exec 8> "$IDLE_WATCH_LOCK"
   if [ -n "${IDLE_WATCH_CONTEXT:-}" ]; then
     # Only background replacements wait here; CLI commands never wait on the watcher lock.
@@ -396,8 +408,10 @@ idle_watch() {
     [ "$(cut -d' ' -f1 "$IDLE_LAUNCH" 2>/dev/null)" != "$$" ] || rm -f "$IDLE_LAUNCH"
   ) 9> "$IDLE_ACTIVITY_LOCK" || return 0
   trap '[ "$(cut -d" " -f1 "$IDLE_PID" 2>/dev/null)" != "$$" ] || rm -f "$IDLE_PID"' EXIT
+  rc=0
   while :; do
-    if [ -f "$ULF" ]; then sleep "$delay"; fi
+    # After a failure, back off even if cleanup already removed the ULF.
+    if [ "$rc" = 2 ] || [ -f "$ULF" ]; then sleep "$delay"; fi
     rc=0
     (
       flock -x 9

@@ -267,6 +267,7 @@ unity() {
   start="$(date +%s.%N)"
   supervise xvfb-run -a -s "-screen 0 1280x1024x24" timeout -s KILL "$UNITY_TIMEOUT" \
     "$UNITY_BIN" -batchmode -projectPath "$PROJECT" "$@" || rc=$?
+  activation_unlock
   if [ "$rc" = 137 ]; then
     elapsed="$(LC_ALL=C awk -v start="$start" -v end="$(date +%s.%N)" 'BEGIN { printf "%.6f", end - start }')"
     report_killed "$elapsed" "$events" "$baseline"
