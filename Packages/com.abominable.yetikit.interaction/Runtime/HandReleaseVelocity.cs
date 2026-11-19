@@ -53,6 +53,9 @@ namespace YetiKit.Interaction
         /// <see cref="ReacquireTime"/> s more.</summary>
         public void TrackingBack(float now) => carryUntil = Mathf.Min(carryUntil, now + ReacquireTime);
 
+        // Reorient the cached velocity without extending its lifetime.
+        internal void Rotate(Quaternion rotation) => carry = carry.Rotated(rotation);
+
         /// <summary>Forget the carried velocity (a controller took over).</summary>
         public void Clear() => carryAt = carryUntil = carryEnd = float.NegativeInfinity;
 

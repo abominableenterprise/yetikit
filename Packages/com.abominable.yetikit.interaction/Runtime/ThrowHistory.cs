@@ -18,6 +18,9 @@ namespace YetiKit.Interaction
             Angular = angular;
             Source = source;
         }
+
+        internal ThrowSample Rotated(Quaternion rotation) =>
+            new ThrowSample(Time, rotation * Linear, rotation * Angular, Source);
     }
 
     /// <summary>
@@ -182,6 +185,18 @@ namespace YetiKit.Interaction
             samples[next] = s;
             next = (next + 1) % Capacity;
             if (count < Capacity) count++;
+        }
+
+        // Rotate only occupied slots. Timestamps, continuity and the raw speed diagnostic stay intact;
+        // the smoothing scratch buffers are recomputed on the next selection.
+        internal void Rotate(Quaternion rotation)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var slot = Slot(i);
+                samples[slot] = samples[slot].Rotated(rotation);
+            }
+            RawDirection = rotation * RawDirection;
         }
 
         public void Clear()
