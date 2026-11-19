@@ -2,11 +2,12 @@ using System.Collections.Generic;
 
 namespace YetiKit.Hands
 {
-    /// <summary>UI hover suppresses new near grabs. Each UI adapter clears only its own hover.</summary>
+    /// <summary>UI hover suppresses teleport and new near grabs. Each UI adapter clears only its own hover.</summary>
     public sealed class HandFarInteraction
     {
         readonly HashSet<object> uiOwners = new HashSet<object>();
         public bool UiHover => uiOwners.Count != 0;
+        public bool AllowsTeleport(bool held) => !held && !UiHover;
 
         public void Hover(object owner, bool hovering)
         {
