@@ -1,11 +1,11 @@
 # Code map index
 
-Adoption placeholders only: none of these paths asserts an existing game implementation.
 Search this small index for your area, then read only its map. Add a row when adopting an area.
-Kit integrations are [planned API, see docs/design.md](https://github.com/abominableenterprise/yetikit/blob/main/docs/design.md), not shipped.
+Only the starter sandbox exists in this slice; other paths are adoption placeholders.
 
-| Area | Area map (placeholder) | Starting point (placeholder) |
+| Area | Area map | Starting point |
 | --- | --- | --- |
+| Starter sandbox | [`docs/codemap/starter.md`](codemap/starter.md) | `Assets/Starter/Editor/SandboxBuilder.cs` |
 | Bootstrap / kit hooks | `docs/codemap/bootstrap.md` | `Assets/Game/Bootstrap/CompositionRoot.cs` |
 | Gameplay feature | `docs/codemap/<area>.md` | `Assets/Game/Features/<Area>/` |
 | Dev / playtest | `docs/codemap/dev.md` | `Assets/Game/Dev/` (`Game.Dev`, `YETIKIT_DEV`) |
