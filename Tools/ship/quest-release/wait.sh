@@ -105,52 +105,68 @@ qr_wait_result() {
 qr_wait() {
   local minutes="${1:-45}" poll="${QUEST_WAIT_POLL:-5}" grace="${QUEST_WAIT_GRACE:-15}" t0 now deadline
   local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict
-  local pointer_pid pointer_key superseded_pid="" superseded_key=""
+  local pointer="$QR_LOGS/current-invocation" prior_pid prior_key pointer_pid pointer_key checked_pid checked_key
+  local pending=0 superseded_pid="" superseded_key="" retry_pointer
   case "$minutes" in ''|*[!0-9]*) qr_wait_say "usage: wait [minutes]"; return 2 ;; esac
   minutes=$((10#$minutes))
   t0="$(qr_wait_now)"; deadline=$((t0 + minutes * 60)); last_line="$t0"
   while :; do
-    st=0; qr_lock_read || st=$?
-    # Pin the first numeric owner, including a stale lock. A later owner means this invocation ended, not a new
-    # invocation to follow. Keep its start and run folder too (prepare may fill in the folder while it holds the lock).
+    retry_pointer=0
     if [ -z "$wpid" ]; then
-      case "$QR_LOCK_PID" in
-        ''|*[!0-9]*)
-          # A short-lived invocation can finish before our first poll, without ever preparing a run folder.
-          # Its published identity, not historical current.env, selects the required terminal result.
-          if [ "$st" != 0 ] && [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$QR_LOGS/current-invocation" ]; then
-            read -r pointer_pid pointer_key < "$QR_LOGS/current-invocation"
-            case "$pointer_pid" in ''|*[!0-9]*) qr_wait_say "invalid invocation identity"; return 1 ;; esac
-            if [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
-              start="$(qr_wait_mtime "$QR_LOGS/current-invocation")"
-              # The lock may have appeared after the no-lock sample. A live
-              # mismatch (including an unpublished owner) supersedes the pointer.
-              st=0; qr_lock_read || st=$?
-              if [ "$st" = 0 ] && { [ "$QR_LOCK_PID" != "$pointer_pid" ] || [ "$QR_LOCK_INVOCATION" != "$pointer_key" ]; }; then
-                superseded_pid="$pointer_pid"; superseded_key="$pointer_key"
-              else
-                wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
-              fi
+      # Sample before the lock: if we find a producer that has not published a PID yet,
+      # the old pointer must stay ineligible even if that lock vanishes on the next poll.
+      prior_pid=""; prior_key=""
+      [ ! -f "$pointer" ] || read -r prior_pid prior_key 2>/dev/null < "$pointer" || true
+    fi
+    st=0; qr_lock_read || st=$?
+    if [ -z "$wpid" ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
+      if [ "$st" = 0 ]; then
+        pending=1; superseded_pid="$prior_pid"; superseded_key="$prior_key"
+      elif [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$pointer" ]; then
+        # A run can finish between samples, without ever preparing a folder. Use its
+        # published identity, not historical current.env, to select its result.
+        if ! read -r pointer_pid pointer_key 2>/dev/null < "$pointer"; then
+          retry_pointer=1
+        elif ! [[ "$pointer_pid" =~ ^[0-9]+$ ]]; then
+          qr_wait_say "invalid invocation identity"; return 1
+        elif [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
+          start="$(qr_wait_mtime "$pointer")"
+          st=0; qr_lock_read || st=$?
+          if ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
+            if [ "$st" = 0 ]; then
+              pending=1; superseded_pid="$pointer_pid"; superseded_key="$pointer_key"
+            elif read -r checked_pid checked_key 2>/dev/null < "$pointer" &&
+                 [ "$checked_pid" = "$pointer_pid" ] && [ "$checked_key" = "$pointer_key" ]; then
+              wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
+            else
+              # A successor may have completed and unlocked during reconciliation.
+              # Retry through the normal poll and deadline, not through legacy state.
+              retry_pointer=1
             fi
-          fi ;;
-        *) wpid="$QR_LOCK_PID"; key="$QR_LOCK_INVOCATION"; seen=1; run=""
-           if [ -z "$key" ]; then
-             start="$(qr_wait_mtime "$(qr_lock_dir)/pid")"
-             [ -n "$start" ] || start="$(qr_wait_mtime "$(qr_lock_dir)")"
-           fi ;;
-      esac
+          fi
+        fi
+      fi
+    fi
+    # Either sample can pin the first numeric owner, including a stale lock. Keep its
+    # start and run folder too (prepare may fill in the folder while it holds the lock).
+    if [ -z "$wpid" ] && [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
+      wpid="$QR_LOCK_PID"; key="$QR_LOCK_INVOCATION"; seen=1; run=""
+      if [ -z "$key" ]; then
+        start="$(qr_wait_mtime "$(qr_lock_dir)/pid")"
+        [ -n "$start" ] || start="$(qr_wait_mtime "$(qr_lock_dir)")"
+      fi
     fi
     # Never cache current.env for a pinned pending prepare: it may describe the previous run. Once concrete,
     # keep the folder even if the lock disappears; only this PID's lock or validated result may resolve it.
     if [ -z "$wpid" ]; then
-      if [ "$st" = 0 ]; then run=""; else run="$(qr_wait_run_dir)"; fi
+      if [ "$st" = 0 ] || [ "$pending" = 1 ] || [ "$retry_pointer" = 1 ]; then run=""; else run="$(qr_wait_run_dir)"; fi
     elif [ "$QR_LOCK_PID" != "$wpid" ] || [ "$QR_LOCK_INVOCATION" != "$key" ]; then
       st=1
     elif [ -z "$run" ] && [ -d "${QR_LOCK_RUN:-}" ]; then
       run="$QR_LOCK_RUN"
     fi
     now="$(qr_wait_now)"
-    if [ "$st" != 0 ] && { [ "$seen" = 1 ] || [ -z "$superseded_pid" ]; }; then
+    if [ "$st" != 0 ] && { [ "$seen" = 1 ] || { [ "$pending" = 0 ] && [ "$retry_pointer" = 0 ]; }; }; then
       # No lock at all: the run is over, or (just after a nohup start) not locked yet; after a short grace the run's
       # start is when prepare wrote current.env.
       if [ "$seen" = 0 ] && [ $((now - t0)) -ge "$grace" ]; then
