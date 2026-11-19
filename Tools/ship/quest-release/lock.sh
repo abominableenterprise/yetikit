@@ -21,7 +21,7 @@ qr_lock_read() {
   local d group status=0 workers="" metadata attempt; d="${QR_LOCK_READ_DIR:-$(qr_lock_dir)}"
   case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
   QR_LOCK_PID=""; QR_LOCK_RUN=""; QR_LOCK_INVOCATION=""
-  QR_LOCK_PREV_PID=""; QR_LOCK_PREV_INVOCATION=""; QR_LOCK_UNPUBLISHED_AT=""
+  QR_LOCK_PREV_PID=""; QR_LOCK_PREV_INVOCATION=""; QR_LOCK_UNPUBLISHED_AT=""; QR_LOCK_UNPUBLISHED_ID=""
   for attempt in 1 2; do
     status=0
     metadata="$(qr_lock_snapshot "$d")" || status=$?
@@ -37,7 +37,7 @@ qr_lock_read() {
     IFS= read -r QR_LOCK_RUN
     IFS= read -r workers || true
     read -r QR_LOCK_PREV_PID QR_LOCK_PREV_INVOCATION || true
-    IFS= read -r QR_LOCK_UNPUBLISHED_AT || true
+    read -r QR_LOCK_UNPUBLISHED_AT QR_LOCK_UNPUBLISHED_ID || true
   } <<< "$metadata"
   QR_LOCK_RUN="${QR_LOCK_RUN:--}"
   [ "$workers" != busy ] || return 0
@@ -56,6 +56,11 @@ qr_lock_read() {
   esac
   kill -0 "$QR_LOCK_PID" 2>/dev/null && return 0
   return 2
+}
+
+# Emit mtime and device:inode together, from the sampled directory or an open descriptor.
+qr_lock_stamp() {
+  perl -MTime::HiRes=stat -e 'my @s = @ARGV ? stat($ARGV[0]) : stat(*STDIN); print "$s[9] $s[0]:$s[1]\n" if @s' "$@"
 }
 
 # Pin the directory generation while sampling it; status 3 means the lock
@@ -88,7 +93,7 @@ qr_lock_snapshot() {
     # A legacy writer can leave an empty pid file while publishing it. Retry
     # only if PID data actually appeared after the first read.
     previous="$(cat "$pointer" 2>/dev/null)" || previous=""
-    unpublished_at="$(qr_lock_mtime .)"
+    unpublished_at="$(qr_lock_stamp .)"
     [ -z "$(cat pid 2>/dev/null)" ] || return 3
   fi
   printf '%s\n' "$pid" "$invocation" "$group" "$(cat run_dir 2>/dev/null)"

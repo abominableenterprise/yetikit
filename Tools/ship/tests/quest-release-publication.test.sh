@@ -114,6 +114,11 @@ start_during_wait() {
 start_during_reconciliation() {
   local outcome="$1" wait_rc=0 polls=0 did_start=0 fake_now=0 samples=0 wait_minutes=1
   local dead_pid=2147483647
+  # Use past, recent directory times so real_lock_read treats PID-less samples as live.
+  local startup_stamp result_stamp teardown_stamp
+  read -r startup_stamp result_stamp teardown_stamp < <(perl -MPOSIX=strftime -e '
+    $now = time; print join(" ", map { strftime "%Y%m%d%H%M.%S", localtime($now - $_) } (30, 20, 10)), "\n";
+  ')
   QR_LOGS="$tmp/pending-$outcome"
   QR_RUN_DIR="$QR_LOGS/run"
   mkdir -p "$QR_RUN_DIR" || return 1
@@ -131,6 +136,9 @@ start_during_reconciliation() {
     rm "$QR_LOGS/last-result" || return 1
   fi
   case "$outcome" in
+    first-keyed-legacy-teardown|first-keyed-legacy-replaced)
+      mkdir "$QR_LOGS/run.lock" && touch -t "$startup_stamp" "$QR_LOGS/run.lock" || return 1
+      did_start=1 ;;
     first-*)
       mkdir "$QR_LOGS/run.lock" || return 1
       if [ "$outcome" = first-empty ]; then : > "$QR_LOGS/run.lock/pid" || return 1; fi
@@ -205,6 +213,20 @@ start_during_reconciliation() {
         fi
         # Strict freshness should not depend on timestamp resolution.
         perl -e 'utime time + 2, time + 2, $ARGV[0] or die $!' "$QR_LOGS/last-result" || exit 99 ;;
+      1:first-keyed-legacy-teardown|1:first-keyed-legacy-replaced)
+        # Publish and unlink the PID between polls, leaving a PID-less directory.
+        local lock="$QR_LOGS/run.lock"
+        printf '%s\n' "$$" > "$lock/pid" && printf 'QR_RUN_DIR=%q\n' "$QR_RUN_DIR" > "$QR_LOGS/current.env" &&
+          printf 'synthetic successor failed\n' > "$QR_RUN_DIR/summary.txt" &&
+          ( QR_INVOCATION="" QR_LOCK_HELD=1; qr_lock_result prepare 1 0 ) &&
+          touch -t "$result_stamp" "$QR_LOGS/last-result" && rm "$lock/pid" || exit 99
+        if [ "$outcome" = first-keyed-legacy-replaced ]; then
+          # Leave no sampled gap but present a different pending lock generation.
+          rmdir "$lock" && mkdir "$lock" || exit 99
+        fi
+        touch -t "$teardown_stamp" "$lock" || exit 99 ;;
+      2:first-keyed-legacy-teardown|2:first-keyed-legacy-replaced)
+        rmdir "$QR_LOGS/run.lock" || exit 99 ;;
       1:unpublished|1:first-unpublished|1:first-empty|1:first-legacy|1:first-keyed-stale-copy|1:handoff)
         # An abandoned startup must not send the waiter back to the old pointer.
         rm -f "$QR_LOGS/run.lock/pid" && rmdir "$QR_LOGS/run.lock" || exit 99 ;;
@@ -230,6 +252,11 @@ start_during_reconciliation() {
         grep -Fq "(pid $dead_pid) ended (lock gone) without writing its result" "$tmp/err" ;;
     teardown)
       [ "$wait_rc" = 0 ] && [ "$(cat "$QR_LOGS/polls")" = 1 ] && grep -q '^synthetic previous success$' "$tmp/out" ;;
+    first-keyed-legacy-replaced)
+      [ "$wait_rc" = 124 ] && [ ! -s "$tmp/out" ] && grep -Fq "$previous_key" "$QR_LOGS/current-invocation" ;;
+    first-keyed-legacy-teardown)
+      [ "$wait_rc" = 1 ] && [ "$(cat "$QR_LOGS/polls")" = 2 ] && grep -q 'exited 1' "$tmp/err" &&
+        grep -q '^synthetic successor failed$' "$tmp/out" && grep -Fq "$previous_key" "$QR_LOGS/current-invocation" ;;
     first-legacy-finished|first-keyed-legacy-finished)
       [ "$wait_rc" = 1 ] && grep -q '^synthetic successor failed$' "$tmp/out" &&
         { [ "$outcome" = first-legacy-finished ] || grep -qF "$previous_key" "$QR_LOGS/current-invocation"; } ;;
@@ -264,4 +291,6 @@ check 'a new pointer after reconciliation needs a fresh lock sample' start_durin
 check 'a keyed compatibility copy cannot resolve a later pending startup' start_during_reconciliation first-keyed-stale-copy
 check 'a fresh legacy result can follow an unchanged keyed pointer' start_during_reconciliation first-keyed-legacy-finished
 check 'a fresh legacy failure before prepare needs no folder or new pointer' start_during_reconciliation first-keyed-legacy-early
+check 'a PID-less legacy teardown preserves the observed startup boundary' start_during_reconciliation first-keyed-legacy-teardown
+check 'a replacement PID-less lock cannot claim the preceding legacy result' start_during_reconciliation first-keyed-legacy-replaced
 [ "$fails" = 0 ]
