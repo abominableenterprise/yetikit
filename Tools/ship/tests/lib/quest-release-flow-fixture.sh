@@ -164,6 +164,7 @@ fake_shell() {
         '      android.permission.CAMERA' \
         '      android.permission.BLUETOOTH_CONNECT' \
         '      android.permission.POST_NOTIFICATIONS' \
+        '      android.permission.READ_EXTERNAL_STORAGE: restricted=true' \
         '    install permissions:' \
         '      android.permission.BLUETOOTH_CONNECT: granted=true' \
         '    User 0: installed=true hidden=false' \

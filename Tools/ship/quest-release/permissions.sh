@@ -39,8 +39,10 @@ qr_permission_states() {
         } else section = "ignore"
       } else if (section == "user" && $1 == "runtime" && $2 == "permissions:") {
         runtime_indent = indent
-      } else if (section == "requested" && NF == 1) {
-        requested[$1 ":"] = 1
+      } else if (section == "requested" && (NF == 1 || $1 ~ /:$/)) {
+        permission = $1
+        sub(/:$/, "", permission)
+        requested[permission] = 1
       } else if ($1 ~ /:$/ && $2 ~ /^granted=(true|false),?$/) {
         sub(/,$/, "", $2)
         if (runtime_indent) runtime[$1] = $2
@@ -56,7 +58,7 @@ qr_permission_states() {
         if (installed && !timed_out) {
           if (key in runtime) state = runtime[key]
           else if (key in install) state = install[key]
-          else if (saw_requested && !(key in requested)) state = "not requested"
+          else if (saw_requested && !(names[i] in requested)) state = "not requested"
         }
         printf "%s%s %s", (i == 1 ? "" : "; "), names[i], state
       }
