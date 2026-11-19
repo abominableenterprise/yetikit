@@ -142,9 +142,9 @@ namespace YetiKit.Starter.HostTests
 
                 var initialSequence = grab.ReleaseSequence;
                 Assert.That(prop.Held, Is.False);
-                manager.SelectEnter(interactor, grab);
+                manager.SelectEnter((IXRSelectInteractor)interactor, grab);
                 Assert.That(prop.Held && interactor.hasSelection, Is.True);
-                manager.SelectExit(interactor, grab);
+                manager.SelectExit((IXRSelectInteractor)interactor, grab);
                 grab.ProcessInteractable(XRInteractionUpdateOrder.UpdatePhase.Late);
                 Assert.That(prop.Held || interactor.hasSelection, Is.False);
                 Assert.That(grab.PendingLateRelease, Is.False);
