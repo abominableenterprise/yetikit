@@ -123,6 +123,9 @@ namespace YetiKit.Playtest.Tests
                 Assert.IsTrue(pump.Drain(5000));
                 StringAssert.Contains("\"lost\":{\"count\":2,\"first\":9,\"last\":10", File.ReadAllText(Path.Combine(session.Dir, FileChunkStore.MetaFile)));
                 Assert.That(TempDir.Gunzip(Path.Combine(session.Dir, FileChunkStore.ChunkName(1))).Count(c => c == '\n'), Is.EqualTo(5));
+                var marker = File.ReadAllText(Path.Combine(session.Dir, DoneMarker.FileName));
+                StringAssert.Contains("\"lostRecords\":2", marker);
+                Assert.AreEqual(0, DoneMarker.Parse(marker).context.lost, "rejected records are not a character count");
             }
         }
 

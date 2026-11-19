@@ -25,6 +25,8 @@ buffers plus a reserved pause/end slot. `BackpressureDrops` counts the
 producer-side losses. `meta.json` checkpoints `lost.count` and the earliest
 and latest lost record times (`lost.first` / `lost.last`, null if unavailable).
 `lost.torn` counts interrupted journal tails whose records cannot be read.
+In `session.done`, `context.lostRecords` counts worker and producer losses;
+`context.lost` remains the legacy worker-only count of uncompressed characters.
 
 Recordings stay under `<root>/outbox/<session>/`. They contain `meta.json`,
 gzip JSON Lines chunks rotated every 60 seconds, and `session.done` after
@@ -34,7 +36,9 @@ that support directory sync. Each in-flight chunk uses a temporary `.journal`: a
 little-endian length followed by a UTF-8 record. Length prefixes keep recovery
 independent of gzip member parsing. Startup recovery publishes the complete
 records as one ordinary gzip chunk, counts any torn tail, and removes the
-journal. It still handles old gzip temporaries and skips unknown formats.
+journal. It still handles old gzip temporaries and skips unknown formats. A
+malformed metadata temp is discarded only when supported committed metadata
+is available; explicitly unsupported formats are left untouched.
 
 Set `pendingDiskBudgetBytes` on the store to opt into pruning. The pump checks
 at session start, rotation and completion; only completed sessions with no

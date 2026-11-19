@@ -89,6 +89,7 @@ namespace YetiKit.Playtest
             handMinutes = Round(HandSeconds / 60.0),
             controllerMinutes = Round(ControllerSeconds / 60.0),
             lost = Lost,
+            lostRecords = LostRange.Count,
         };
 
         static float Round(double v) => (float)Math.Round(v, 2);
