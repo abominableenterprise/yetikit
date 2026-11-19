@@ -13,6 +13,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using UnityEngine.XR.Interaction.Toolkit.Locomotion.Teleportation;
 using YetiKit.Hands;
 using YetiKit.Interaction;
+using YetiKit.Lab;
 using static YetiKit.Starter.HostTests.StarterRigChecks;
 using static YetiKit.Starter.HostTests.StarterSandboxTests;
 
@@ -157,6 +158,38 @@ namespace YetiKit.Starter.HostTests
                 yield return Frames(3);
                 Assert.That(right.FarInteraction.UiHover, Is.False);
                 Assert.That(grabEntries, Is.Zero);
+
+                // One continuous poke passes well behind the collider-free card, then returns through it.
+                yield return PlaceTip(0.07f);
+                yield return PlaceTip(0.01f);
+                Assert.That(lab.Angle.Get(), Is.EqualTo(50f), "The approach activates +5°.");
+                yield return PlaceTip(-0.07f);
+                yield return PlaceTip(-0.20f); // Also leave the guard's reach, but on the back side.
+                yield return PlaceTip(-0.01f);
+                yield return PlaceTip(0.01f);
+                yield return PlaceTip(0.07f);
+                yield return new WaitForSecondsRealtime(0.5f);
+                var savedAngle = 45f;
+                new Tuning("starter-sandbox." + StarterLab.Wide).Float("Snap turn",
+                    () => savedAngle, value => savedAngle = value, 45f, 15f, 90f, 5f);
+                Capture(origin.Camera, lab, "Wrist-Poke");
+                Assert.That(savedAngle, Is.EqualTo(50f), "One through-and-back poke must save just one +5° edit.");
+
+                // A full withdrawal rearms; crossing only the inner threshold does not.
+                yield return PlaceTip(0.01f);
+                Assert.That(lab.Angle.Get(), Is.EqualTo(55f), "A new approach activates +5° again.");
+                yield return PlaceTip(0.023f);
+                yield return PlaceTip(0.01f);
+                Assert.That(lab.Angle.Get(), Is.EqualTo(55f), "Jitter within the exit margin does not rearm.");
+                yield return PlaceTip(0.04f);
+                yield return PlaceTip(0.01f);
+                Assert.That(lab.Angle.Get(), Is.EqualTo(60f), "Withdrawal within UI reach can rearm too.");
+
+                IEnumerator PlaceTip(float frontDepth)
+                {
+                    fingers.Tip = space.InverseTransformPoint(Center("+5°") - canvas.transform.forward * frontDepth);
+                    return Frames(3);
+                }
 
                 yield return Click("Compact turn");
                 Assert.That(lab.CurrentId, Is.EqualTo(StarterLab.Compact));
