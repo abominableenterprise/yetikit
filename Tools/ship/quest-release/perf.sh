@@ -287,7 +287,7 @@ qr_perf_options() {
 }
 
 qr_perf() {
-  local serial path run="$QR_RUN_DIR" total=0 rc previous
+  local serial path run="$QR_RUN_DIR" total=0 rc previous summary='per-device performance captures (see below)'
   QR_PERF_RUN_ROOT="$QR_RUN_DIR"
   QR_PERF_CURSOR="$(qr_lock_dir)/perf-device"
   qr_set device_results ''; qr_set multi_command ''; qr_set overall ''
@@ -296,11 +296,17 @@ qr_perf() {
   # before a device cursor can send cancellation reporting to a subfolder.
   if ! rm -f "$run/perf-summary.json" "$run/perf-summary.txt"; then
     qr_log 'error: cannot remove previous single-device performance reports'
-    qr_set perf 'INFRA: cannot remove previous single-device performance reports'
+    summary='INFRA: cannot remove previous single-device performance reports'
     qr_set perf_result 3
-    return 3
+    # Stop still owns the job of consuming reservations and restoring sensors.
+    # Carry the cleanup failure into the list verdict rather than stranding them.
+    if [ "$QR_PERF_ACTION" != stop ]; then
+      qr_set perf "$summary"
+      return 3
+    fi
+    total=3
   fi
-  qr_set perf 'per-device performance captures (see below)'
+  qr_set perf "$summary"
   qr_set multi_command perf; qr_set multi_result 3
   for serial in "${QR_SERIALS[@]}"; do
     path="$(qr_serial_path "$serial")"
