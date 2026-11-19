@@ -28,17 +28,22 @@ percentages (maximum per-mesh share, summed topology counts). Each mesh must pas
 | `maxOverEdges` | 0 | Edges shared by more than two faces |
 | `maxSameWayEdges` | 0 | Neighbors using a shared edge in the same direction |
 
-Whole inside-out closed components (negative signed volume) and zero-area
-triangles always fail. The volume check is necessary: rays through an entirely
-inverted closed cube can still see its far wall front-first. Exact position
-welding joins UV/normal splits for topology only; it does not hide small cracks.
+Closed shells with the wrong winding and zero-area triangles always fail.
+Within a mesh, disjoint closed shells alternate winding by containment depth:
+outer solids and solid islands wind outward (positive signed volume), and
+cavity walls wind inward. Outside rays alone can miss a wholly reversed shell,
+especially one hidden inside a solid. Exact position welding joins UV/normal
+splits for topology only; it does not hide small cracks.
 Ray sampling preserves the existing 64-direction Fibonacci sphere and 64×64
 grid behavior. Rays behind another front face are not holes. A missing face can
 be caught by topology even when ray votes alone miss it.
 
 The Blender-only [winding](mesh/winding.py) and [watertight](mesh/watertight.py)
-repair helpers are also available; their behavior is preserved, but the CLI
-**only audits** and never repairs or overwrites assets. The
+repair helpers are also available. Hole repair uses the same shell-depth rule
+and works without UVs. If no triangles survive, `close_holes()` raises without
+replacing the mesh. Before exporting a successful repair, require
+`unclosed(report)` to return `None`. The CLI **only audits** and never
+repairs or overwrites assets. The
 [headless driver](mesh/winding_audit.py) retains normal disagreement and level-view
 ray diagnostics as additional report fields.
 
@@ -81,17 +86,26 @@ merge base. In GitHub Actions, use `actions/checkout` with `fetch-depth: 0`
 needed. `pipefail` makes selection errors fail the step rather than silently
 passing an empty file list to the checker.
 
+Both recipes audit changed `.glb`, `.gltf`, and `.fbx` files that remain in
+`HEAD`. Any changed `.bin` (including a deletion or rename) also selects all
+`.gltf` and `.glb` files in `HEAD`, since either format can use external buffers.
+This conservative fallback does not detect buffer-only changes to files with
+other extensions; explicitly audit their owning models. Run on a clean checkout:
+selection compares committed trees, but the checker reads the working tree.
+Both recipes preserve literal filenames and skip the checker if nothing is selected.
+
 ```sh
 set -o pipefail
-git diff --name-only origin/main... -- '*.glb' '*.fbx' | xargs python3 Tools/quality/mesh/check_meshes.py
+python3 Tools/quality/mesh/select_changed_meshes.py origin/main |
+  xargs -0 -r python3 Tools/quality/mesh/check_meshes.py --
 ```
 
-For names containing whitespace, deleted assets, and deterministic CI Blender
-availability, use the null-delimited variant:
+To require Blender for FBX and write a JSON report when there are selected models:
 
 ```sh
 set -o pipefail
-git diff --name-only --diff-filter=ACMR -z origin/main... -- '*.glb' '*.gltf' '*.fbx' | xargs -0 -r python3 Tools/quality/mesh/check_meshes.py --require-blender --config yetikit-quality.json --json mesh-report.json
+python3 Tools/quality/mesh/select_changed_meshes.py origin/main |
+  xargs -0 -r python3 Tools/quality/mesh/check_meshes.py --require-blender --config yetikit-quality.json --json mesh-report.json --
 ```
 
 These commands assume the changed set fits one invocation; for very large sets,

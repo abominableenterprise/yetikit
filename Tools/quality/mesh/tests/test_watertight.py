@@ -66,6 +66,64 @@ inward = sum(1 for l in me.loops if me.corner_normals[l.index].vector.dot(me.ver
 print("RESULT", r["same_way"][0], r["same_way"][1], inward)
 """
 
+# Remove the top of a cube, leaving a four-edge rim but no fins and no UV layer.
+UNTEXTURED_HOLE = """
+import sys, bpy, bmesh
+sys.path.insert(0, sys.argv[-1])
+from watertight import close_holes, unclosed
+bm = bmesh.new()
+bmesh.ops.create_cube(bm, size=1.0)
+bm.normal_update()
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
+me = bpy.data.meshes.new("open_cube")
+bm.to_mesh(me)
+bm.free()
+obj = bpy.data.objects.new("open_cube", me)
+bpy.context.scene.collection.objects.link(obj)
+r = close_holes(obj)
+assert unclosed(r) is None, r
+assert r["open"] == (4, 0) and r["tris"] == (10, 12), r
+assert r["fill_tris"] == 2 and r["flat_uv"] == 0, r
+assert not me.uv_layers, "repair must not add a UV layer"
+cap = [p for p in me.polygons if all(me.vertices[i].co.z > 0 for i in p.vertices)]
+assert len(cap) == 2 and all(p.use_smooth for p in cap), "fill faces must still be smoothed"
+assert all(p.normal.z > 0 for p in cap), "cap winding must face outward"
+print("RESULT untextured hole filled")
+"""
+
+# Both sheets disappear during fin removal; even shared mesh data must stay intact on failure.
+EMPTY_REPAIR = """
+import sys, bpy
+sys.path.insert(0, sys.argv[-1])
+from watertight import close_holes
+
+def snapshot(me):
+    return ([tuple(v.co) for v in me.vertices], [tuple(e.vertices) for e in me.edges],
+            [tuple(p.vertices) for p in me.polygons], [tuple(n.vector) for n in me.corner_normals],
+            [a.name for a in me.attributes], [tuple(uv.vector) for uv in me.uv_layers.active.uv])
+
+verts, faces = GEOMETRY
+me = bpy.data.meshes.new("sheet")
+me.from_pydata(verts, [], faces)
+me.update()
+uv_layer = me.uv_layers.new()
+for i, uv in enumerate(uv_layer.uv):
+    uv.vector = (i / len(me.loops), 0.5)
+me.normals_split_custom_set([(0.6, 0, 0.8)] * len(me.loops))
+obj = bpy.data.objects.new("sheet", me)
+other = bpy.data.objects.new("shared_sheet", me)
+before = snapshot(me)
+try:
+    close_holes(obj)
+except ValueError as exc:
+    assert "no triangles" in str(exc), str(exc)
+else:
+    raise AssertionError("repair accepted a result with no triangles")
+assert obj.data == me and other.data == me, "repair replaced the shared mesh data"
+assert snapshot(me) == before, "empty repair modified the source mesh"
+print("RESULT empty repair rejected")
+"""
+
 # A closed cube wound wholly inside out: wind_outward() reverses it, and leaves an outward one alone.
 INSIDE_OUT = """
 import sys, bmesh
@@ -93,11 +151,14 @@ def run_blender(script):
 
 
 class UnclosedTest(unittest.TestCase):
-    def report(self, open_=(9, 0), over=(3, 0), same=(5, 0)):
-        return {"open": open_, "over": over, "same_way": same}
+    def report(self, open_=(9, 0), over=(3, 0), same=(5, 0), tris=(10, 12)):
+        return {"open": open_, "over": over, "same_way": same, "tris": tris}
 
     def test_a_closed_mesh_passes(self):
         self.assertIsNone(unclosed(self.report()))
+
+    def test_empty_result_fails_even_with_no_bad_edges(self):
+        self.assertIn("no triangles", unclosed(self.report(tris=(1, 0))))
 
     def test_over_used_edges_left_fail(self):
         self.assertIn("'over': 1", unclosed(self.report(over=(1, 1))))
@@ -109,6 +170,21 @@ class UnclosedTest(unittest.TestCase):
 
 @unittest.skipUnless(BLENDER, "no Blender (set BLENDER=path/to/blender)")
 class CloseHolesBlenderTest(unittest.TestCase):
+    def test_fills_a_hole_without_a_uv_layer(self):
+        r, line = run_blender(UNTEXTURED_HOLE)
+        self.assertEqual(r.returncode, 0, r.stdout[-2000:] + r.stderr[-2000:])
+        self.assertEqual(line, "RESULT untextured hole filled")
+
+    def test_empty_repair_does_not_modify_the_source(self):
+        triangle = ([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [(0, 1, 2)])
+        grid = ([(x, y, 0) for y in range(4) for x in range(4)],
+                [(i, i + 1, i + 5, i + 4) for i in (4 * y + x for y in range(3) for x in range(3))])
+        for name, geometry in (("triangle", triangle), ("plane_grid", grid)):
+            with self.subTest(name=name):
+                r, line = run_blender(EMPTY_REPAIR.replace("GEOMETRY", repr(geometry)))
+                self.assertEqual(r.returncode, 0, r.stdout[-2000:] + r.stderr[-2000:])
+                self.assertEqual(line, "RESULT empty repair rejected")
+
     def test_shells_split_at_a_shared_edge_stay_apart(self):
         r, line = run_blender(TWO_SHELLS)
         self.assertIsNotNone(line, r.stdout[-2000:] + r.stderr[-2000:])
