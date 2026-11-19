@@ -63,12 +63,13 @@ the lab preview or committed override wins over `gripProfiles`, which wins over
 `grip`. The authored and baked data are never edited.
 
 Use `station.Adjuster.Begin(slot, mode, competingInputs)` to select an edit target.
-Supply only behaviours competing for adjustment input. Do not include the active
-holding interactor, which would release the prop if disabled. `Stage(profile)`
+Supply only behaviours competing for adjustment input. The guard disables them,
+except for tracked-hand interactors, where it blocks selection without stopping
+tracking. Do not include the active holding interactor. `Stage(profile)`
 previews a grip and refits any matching hold in place. `Commit()` saves the
 preview. `Undo()` discards an active preview, or restores the last committed
 state for that slot and mode. `Reset()` removes the override for that key and
-can itself be undone. `End()` discards uncommitted changes. Input enabled states
+can itself be undone. `End()` discards uncommitted changes. Borrowed input states
 are restored on end, on Back, on station or slot disable, and on an adjuster
 exception. The station's Reset button still returns props to their slots; it
 does not delete saved grips.

@@ -16,6 +16,7 @@ namespace YetiKit.Lab
         internal GripLabAdjuster(GripLabStation station) => this.station = station;
 
         /// <summary>Discard any previous preview, then suppress the supplied input components until End.
+        /// Tracked-hand interactors are gated at selection so tracking can continue.
         /// Supply only competing input handlers, not the interactor that owns the current hold.</summary>
         public void Begin(GripLabSlot target, HandMode mode, params Behaviour[] inputs)
         {

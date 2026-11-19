@@ -205,6 +205,45 @@ namespace YetiKit.Lab.Tests
             CleanUp();
         }
 
+        [UnityTest]
+        public IEnumerator BorrowedInputsAreCapturedBeforeCallbacksAndStayGatedDuringTracking()
+        {
+            yield return new EnterPlayMode();
+            VerifyCoupledAndTrackedInput();
+            yield return new ExitPlayMode();
+        }
+
+        void VerifyCoupledAndTrackedInput()
+        {
+            Populate(new MemoryStore());
+            var first = Input("First input");
+            var coupled = Input("Coupled input");
+            void DisableCoupled(InteractorUnregisteredEventArgs _) { if (coupled) coupled.enabled = false; }
+            first.unregistered += DisableCoupled;
+            var hand = Child("Tracked hand").AddComponent<PlayerHand>();
+            var child = Child("Tracked input");
+            child.transform.SetParent(hand.transform, false);
+            child.AddComponent<BoxCollider>().isTrigger = true;
+            var tracked = child.AddComponent<HandGrabInteractor>();
+            hand.grabber = tracked;
+            hand.Tracking = new SyntheticTracking();
+
+            var adjust = station.Adjuster;
+            try
+            {
+                adjust.Begin(Slot(First), Tracked, first, coupled, tracked);
+                hand.Tick(1f);
+                Assert.That(hand.HandTracked, Is.True);
+                Assert.That(tracked.enabled, Is.True, "Tracking owns the interactor's lifetime.");
+                Assert.That(tracked.allowSelect, Is.False, "A valid tracking update must not restore borrowed selection.");
+                adjust.End();
+                Assert.That(first.enabled, Is.True);
+                Assert.That(coupled.enabled, Is.True, "Capture the second input before the first one's disable callback.");
+                Assert.That(tracked.allowSelect, Is.True);
+            }
+            finally { first.unregistered -= DisableCoupled; CleanUp(); }
+        }
+
         [Test]
         public void LocalStoreSeparatesCatalogScopesPropIdsAndModes()
         {
@@ -274,6 +313,15 @@ namespace YetiKit.Lab.Tests
         sealed class Catalog : IInteractableCatalog
         {
             public IReadOnlyList<InteractableEntry> Entries { get; set; }
+        }
+
+        sealed class SyntheticTracking : IHandTracking
+        {
+            public bool TryGetHand(bool right, Vector3[] points, out Pose wrist)
+            {
+                wrist = Pose.identity;
+                return true;
+            }
         }
 
         sealed class GripVisual : IHandVisual, IHeldVisual
