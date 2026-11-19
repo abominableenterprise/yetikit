@@ -152,6 +152,22 @@ namespace YetiKit.Interaction.Tests
         }
 
         [Test]
+        public void OpposingSwingSelectionWithoutFacingIsInvariantUnderHalfTurn()
+        {
+            var speeds = new[] { 0f, 0f, 2f, 5f, 9f, 11f, 10f, 9f, 3f, -1f, -4.5f, -6f, -4.5f, -2f, -1f, -1f };
+            var original = new ThrowHistory();
+            var rotated = new ThrowHistory();
+            for (var i = 0; i < speeds.Length; i++)
+            {
+                Add(original, i / 72f, Vector3.forward * speeds[i]);
+                Add(rotated, i / 72f, Vector3.back * speeds[i]);
+            }
+            Assert.That(HandReleaseVelocity.Choose(15 / 72f, original, .04f, out var first), Is.True);
+            Assert.That(HandReleaseVelocity.Choose(15 / 72f, rotated, .04f, out var second), Is.True);
+            Assert.That(Vector3.Distance(first.Linear, -second.Linear), Is.LessThan(.01f));
+        }
+
+        [Test]
         public void OneFrameLaterSettlingRecoilMustNotReverseForwardThrow()
         {
             const float dt = 1f / 72f;
@@ -216,7 +232,7 @@ namespace YetiKit.Interaction.Tests
         [Test]
         public void BoundaryRecoilMustNotBecomeWindup()
         {
-            AssertSelectedSpeed(new[] { 0f, 0f, 2f, 5f, 9f, 11f, 10f, 9f, 3f, -1f, -4.5f, -6f, -4.5f, -2f, -1f, -1f }, 10f);
+            AssertFacingSelectedSpeed(new[] { 0f, 0f, 2f, 5f, 9f, 11f, 10f, 9f, 3f, -1f, -4.5f, -6f, -4.5f, -2f, -1f, -1f }, 10f);
         }
 
         [TestCase(1)]
@@ -225,13 +241,13 @@ namespace YetiKit.Interaction.Tests
         {
             var speeds = new[] { 0f, 0f, -4f, -8f, -10f, -10f, -10f, -6f, -2f, 3f, 6f, 4.5f, 1f, 1f };
             System.Array.Resize(ref speeds, 12 + tailFrames);
-            AssertSelectedSpeed(speeds, 6f);
+            AssertFacingSelectedSpeed(speeds, 6f);
         }
 
         [Test]
         public void NeutralTailFrameMustNotRestoreBackswing()
         {
-            AssertSelectedSpeed(new[] { 0f, 0f, -4f, -8f, -10f, -10f, -10f, -6f, -2f, 3f, 6f, 4.5f, 1f, 0f, 1f }, 6f);
+            AssertFacingSelectedSpeed(new[] { 0f, 0f, -4f, -8f, -10f, -10f, -10f, -6f, -2f, 3f, 6f, 4.5f, 1f, 0f, 1f }, 6f);
         }
 
         [TestCase(0f, 10f)]
@@ -262,11 +278,11 @@ namespace YetiKit.Interaction.Tests
             Assert.That(Vector3.Dot(PropThrow.Launch(chosen, Vector3.zero), direction), Is.EqualTo(15f).Within(.01f));
         }
 
-        static void AssertSelectedSpeed(float[] speeds, float expected)
+        static void AssertFacingSelectedSpeed(float[] speeds, float expected)
         {
             var history = new ThrowHistory();
             for (var i = 0; i < speeds.Length; i++) Add(history, i / 72f, Vector3.forward * speeds[i]);
-            Assert.That(HandReleaseVelocity.Choose((speeds.Length - 1) / 72f, history, .04f, out var chosen), Is.True);
+            Assert.That(HandReleaseVelocity.Choose((speeds.Length - 1) / 72f, history, .04f, out var chosen, Vector3.forward), Is.True);
             Assert.That(chosen.Linear.z, Is.EqualTo(expected).Within(.01f));
             Assert.That(PropThrow.Launch(chosen, Vector3.zero).z, Is.EqualTo(expected * 1.5f).Within(.01f));
         }

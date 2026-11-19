@@ -66,6 +66,29 @@ namespace YetiKit.Interaction.Tests
         }
 
         [Test]
+        public void AlreadyLedThrowIsNotNudgedBehindMovingTarget()
+        {
+            var from = new Vector3(0f, 1.5f, 0f);
+            var thrown = new Vector3(0f, G * .5f, 7f);
+            var targets = new[] { new ThrowTarget(from + Vector3.forward * 4f, Vector3.forward * 3f, true) };
+
+            var assisted = ThrowAssist.ApplyMoving(from, thrown, targets, G, out _);
+            Assert.That(Vector3.Distance(assisted, thrown), Is.LessThan(.001f));
+        }
+
+        [Test]
+        public void AssistSkipsTargetWithNoHorizontalIntercept()
+        {
+            var at = Vector3.forward * 4f;
+            var thrown = Off(ThrowAssist.Aim(at, 8f, G) * 8f, 4f);
+            var targets = new[] { new ThrowTarget(at, Vector3.forward * 9f, true) };
+
+            var assisted = ThrowAssist.ApplyMoving(Vector3.zero, thrown, targets, G, out var applied);
+            Assert.That(applied, Is.False);
+            Assert.That(assisted, Is.EqualTo(thrown));
+        }
+
+        [Test]
         public void AThrowWellOffTargetIsUntouched()
         {
             var thrown = Off(ThrowAssist.Aim(PrimaryTarget - Hand, 7f, G) * 7f, 15f);

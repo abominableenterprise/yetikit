@@ -83,9 +83,9 @@ namespace YetiKit.Interaction
             var normalTime = sample.Time;
             var bodyChoice = sample;
             var preferSwing = false;
-            var bodyDecides = haveSwing && Vector3.Dot(sample.Linear, swing.Linear) < 0f &&
+            var bodyDecides = headForward.HasValue && haveSwing && Vector3.Dot(sample.Linear, swing.Linear) < 0f &&
                 history.SupportedHandSample(sample.Time) &&
-                PreferByFacing(sample.Linear, swing.Linear, headForward ?? Vector3.forward, out preferSwing);
+                PreferByFacing(sample.Linear, swing.Linear, headForward.Value, out preferSwing);
             if (bodyDecides && preferSwing) bodyChoice = swing;
             // Exclusion alone is not wind-up evidence: median lag can also exclude an abrupt
             // forward flick. Only dismiss a supported wind-up, not a swing accelerated from rest.

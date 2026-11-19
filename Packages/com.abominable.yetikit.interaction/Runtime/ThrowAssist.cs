@@ -24,9 +24,6 @@ namespace YetiKit.Interaction
         /// <summary>m/s: a target whose velocity is unknown (<see cref="ThrowTarget.Known"/> false) moving faster than
         /// this is never assisted: without a lead the nudge would pull a correctly led throw back behind it.</summary>
         public const float MaxUnledSpeed = 0.3f;
-        /// <summary>Lead passes: each re-times the flight to the target's predicted spot (two converge to millimetres at
-        /// walking speed).</summary>
-        public const int LeadPasses = 2;
 
         /// <summary>
         /// The assisted launch velocity of a prop leaving <paramref name="from"/> at <paramref name="velocity"/> under
@@ -68,7 +65,9 @@ namespace YetiKit.Interaction
                 if (!target.Known && target.Velocity.sqrMagnitude > MaxUnledSpeed * MaxUnledSpeed) continue;
                 // Out of range now: never assisted, even when the target is predicted to move into range.
                 if ((target.Position - from).sqrMagnitude > Range * Range) continue;
-                var at = Lead(from, target, dir, speed);
+                var lead = Intercept(from, target, dir, speed);
+                if (!lead.HasValue) continue;
+                var at = lead.Value;
                 var to = at - from;
                 if (to.sqrMagnitude > Range * Range || to.sqrMagnitude < 0.01f) continue;
                 var aim = Aim(to, speed, gravity);
@@ -91,22 +90,26 @@ namespace YetiKit.Interaction
         /// <summary>
         /// Where <paramref name="target"/> will be when a prop thrown from <paramref name="from"/> along
         /// <paramref name="dir"/> at <paramref name="speed"/> reaches it: its position plus its velocity times the flight
-        /// time, the horizontal distance over the throw's horizontal speed (speed · cos θ). A still target (or an
-        /// unknown velocity) stays where it is.
+        /// time at the throw's horizontal speed (speed · cos θ). Returns the current position for unknown velocity
+        /// or when there is no horizontal intercept.
         /// </summary>
-        public static Vector3 Lead(Vector3 from, ThrowTarget target, Vector3 dir, float speed)
+        public static Vector3 Lead(Vector3 from, ThrowTarget target, Vector3 dir, float speed) =>
+            Intercept(from, target, dir, speed) ?? target.Position;
+
+        static Vector3? Intercept(Vector3 from, ThrowTarget target, Vector3 dir, float speed)
         {
             if (!target.Known || target.Velocity.sqrMagnitude < 1e-6f) return target.Position;
-            var flat = speed * new Vector3(dir.x, 0f, dir.z).magnitude;
-            if (flat < 1e-3f) return target.Position;
-            var at = target.Position;
-            for (var k = 0; k < LeadPasses; k++)
-            {
-                var to = at - from;
-                var time = new Vector3(to.x, 0f, to.z).magnitude / flat;
-                at = target.Position + target.Velocity * time;
-            }
-            return at;
+            var flat = speed * new Vector2(dir.x, dir.z).magnitude;
+            var offset = new Vector2(target.Position.x - from.x, target.Position.z - from.z);
+            var motion = new Vector2(target.Velocity.x, target.Velocity.z);
+            if (offset.sqrMagnitude == 0f) return target.Position;
+            if (flat < 1e-3f) return null;
+            // Solve |offset + motion * t|² = (flat * t)² for the earliest positive time.
+            var b = Vector2.Dot(offset, motion);
+            var disc = b * b + (flat * flat - motion.sqrMagnitude) * offset.sqrMagnitude;
+            if (disc < 0f) return null;
+            var divisor = Mathf.Sqrt(disc) - b;
+            return divisor > 0f ? target.Position + target.Velocity * (offset.sqrMagnitude / divisor) : (Vector3?)null;
         }
 
         /// <summary>
