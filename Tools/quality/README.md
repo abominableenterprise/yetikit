@@ -15,7 +15,8 @@ Exit 1 means at least one FAIL; invalid CLI/configuration exits 2. An empty file
 list is a successful no-op. Each file gets one PASS/FAIL/SKIP line; JSON includes
 per-mesh metrics, failures, thresholds and applied exception reasons. Choose a
 report path separate from the inputs: aliases of input assets, the config, or
-external buffers opened by the audit are rejected.
+local buffers referenced by a parsed glTF document are rejected, even when the
+audit fails before reading those buffers.
 
 ## Checks and defaults
 

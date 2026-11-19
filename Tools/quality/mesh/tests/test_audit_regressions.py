@@ -148,6 +148,35 @@ class AuditRegressionTest(unittest.TestCase):
                         self.assertIn("aliases", errors.getvalue())
                         self.assertEqual(source.read_bytes(), original)
 
+    def test_report_protects_buffers_even_when_loading_fails_early(self):
+        text, binary = cube_parts()
+        for failure, message in (
+            ({"extensionsRequired": ["EXT_dummy"]}, "required glTF extensions"),
+            (None, "missing.bin"),
+            ({"asset": {"version": "1.0"}}, "requires glTF 2.0"),
+        ):
+            with self.subTest(failure=failure):
+                doc = json.loads(text)
+                split = self.write_split_cube(doc, binary, uri="cube%2Ebin")
+                buffer = split.with_suffix(".bin")
+                if failure is None:
+                    doc["buffers"].insert(0, {"uri": "missing.bin", "byteLength": 4})
+                else:
+                    doc.update(failure)
+                split.write_text(json.dumps(doc))
+                report = self.root / "out.json"
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["--json", str(report), str(split)]), 1)
+                row, = json.loads(report.read_text())["files"]
+                self.assertEqual(row["status"], "FAIL")
+                self.assertIn(message, row["message"])
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as errors:
+                    with self.assertRaises(SystemExit) as exit_code:
+                        main(["--json", str(buffer), str(split)])
+                self.assertEqual(exit_code.exception.code, 2)
+                self.assertIn("aliases an input", errors.getvalue())
+                self.assertEqual(buffer.read_bytes(), binary)
+
     def test_looping_buffer_and_asset_are_reported_without_aborting_batch(self):
         text, binary = cube_parts()
         split = self.write_split_cube(json.loads(text), binary, uri="loop")

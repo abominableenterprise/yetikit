@@ -18,6 +18,31 @@ BIN_CHUNK = 0x004E4942
 STATIC_PRIMITIVE_METADATA = {"KHR_materials_variants"}
 
 
+def _local_buffer_path(parent, uri):
+    parts = urlsplit(uri)
+    if parts.scheme or parts.netloc or parts.query or parts.fragment:
+        raise ValueError("buffer must be a local relative URI")
+    path = unquote(parts.path)
+    if "\0" in path:
+        raise ValueError("buffer URI contains a null byte")
+    return parent / path
+
+
+def _protect_buffer_paths(doc, parent, inputs):
+    specs = doc.get("buffers") if isinstance(doc, dict) else None
+    if not isinstance(specs, list):
+        return
+    # Collect paths without reading buffers or depending on validation order.
+    # A malformed entry must not hide local paths in subsequent entries.
+    for spec in specs:
+        uri = spec.get("uri") if isinstance(spec, dict) else None
+        if isinstance(uri, str):
+            try:
+                inputs.add(_local_buffer_path(parent, uri))
+            except ValueError:
+                continue  # Nonlocal or invalid URI; the audit handles validation.
+
+
 def load_meshes(path, *, inputs=None):
     path = Path(path)
     blob = path.read_bytes()
@@ -52,6 +77,8 @@ def load_meshes(path, *, inputs=None):
         doc = json.loads(text)
     else:
         doc = json.loads(blob)
+    if inputs is not None:
+        _protect_buffer_paths(doc, path.parent, inputs)
     if not isinstance(doc, dict) or not isinstance(doc.get("asset"), dict):
         raise ValueError("invalid glTF document")
     if doc.get("asset", {}).get("version") != "2.0":
@@ -66,14 +93,9 @@ def load_meshes(path, *, inputs=None):
         elif uri.startswith("data:") and ";base64," in uri:
             data = base64.b64decode(uri.split(",", 1)[1], validate=True)
         else:
-            parts = urlsplit(uri)
-            if parts.scheme or parts.netloc or parts.query or parts.fragment:
-                raise ValueError("buffer must be a local relative URI")
-            target = resolve(path.parent / unquote(parts.path))
+            target = resolve(_local_buffer_path(path.parent, uri))
             if not target.is_relative_to(resolve(path.parent)):
                 raise ValueError("buffer URI escapes asset directory")
-            if inputs is not None:
-                inputs.add(target)
             data = target.read_bytes()
         if data is None or len(data) < spec["byteLength"]:
             raise ValueError("missing or truncated buffer")
