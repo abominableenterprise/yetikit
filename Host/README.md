@@ -65,8 +65,10 @@ Unity, even if the Host already has staged assets. It does not copy the generate
 manifest or project settings. The EditMode test bakes and reopens the sandbox in
 an isolated subfolder of `Assets/StarterTests`, then briefly enters Play Mode to
 check the sandbox's runtime bindings, drive the kit grab/release through XRI,
-and verify one accepted hit per throw using synthetic contacts. No headset or
-XR input device is required. Use the same activation/return
+and verify one accepted hit per throw using synthetic contacts. It also checks
+serialized rig wiring, controller/hand transitions, teleport landing rules and
+snap turn using synthetic input and the real scene’s locomotion providers. No
+headset or physical XR input device is required. Use the same activation/return
 procedure as above.
 
 The test deletes its bake; to remove staging (including any assets left by an

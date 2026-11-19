@@ -49,6 +49,7 @@ def generate(out, app_id, title):
     player = (HOST / "ProjectSettings/ProjectSettings.asset").read_text(encoding="utf-8")
     changes = {
         "productGUID": uuid.uuid4().hex,
+        "activeInputHandler": "1",
         "productName": json.dumps(title),
         "overrideDefaultApplicationIdentifier": "1",
         "metroPackageName": app_id,

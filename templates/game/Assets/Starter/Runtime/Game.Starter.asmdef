@@ -1,5 +1,10 @@
 {
   "name": "Game.Starter",
-  "references": ["YetiKit.Interaction", "Unity.XR.Interaction.Toolkit"],
+  "references": [
+    "YetiKit.Hands",
+    "YetiKit.Interaction",
+    "Unity.InputSystem",
+    "Unity.XR.Interaction.Toolkit"
+  ],
   "autoReferenced": false
 }

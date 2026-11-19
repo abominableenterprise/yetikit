@@ -1,6 +1,13 @@
 {
   "name": "Game.Starter.Editor",
-  "references": ["Game.Starter", "YetiKit.Interaction", "Unity.XR.Interaction.Toolkit"],
+  "references": [
+    "Game.Starter",
+    "YetiKit.Hands",
+    "YetiKit.Interaction",
+    "Unity.InputSystem",
+    "Unity.XR.CoreUtils",
+    "Unity.XR.Interaction.Toolkit"
+  ],
   "includePlatforms": ["Editor"],
   "autoReferenced": false
 }

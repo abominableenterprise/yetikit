@@ -71,6 +71,7 @@ namespace YetiKit.Starter.HostTests
 
             GrabAndRelease(scene);
             AssertSyntheticImpact(scene);
+            yield return StarterRigChecks.DriveRig(scene);
             yield return new ExitPlayMode();
         }
 
@@ -78,7 +79,7 @@ namespace YetiKit.Starter.HostTests
         {
             Root(scene, "Floor Grid");
             Root(scene, "Height Marker");
-            ComponentOn<Camera>(Root(scene, "Camera"));
+            StarterRigChecks.AssertSavedRig(scene, output);
             Assert.That(ComponentOn<BoxCollider>(Root(scene, "Recovery Volume")).isTrigger, Is.True);
             var floor = ComponentOn<BoxCollider>(Root(scene, "Floor"));
             Assert.That(floor.isTrigger, Is.False);
@@ -144,6 +145,7 @@ namespace YetiKit.Starter.HostTests
                 dummy.AddComponent<SphereCollider>().isTrigger = true;
                 var interactor = dummy.AddComponent<XRDirectInteractor>();
                 interactor.interactionManager = manager;
+                interactor.interactionLayers = grab.interactionLayers;
                 dummy.SetActive(true);
 
                 var initialSequence = grab.ReleaseSequence;
@@ -187,7 +189,7 @@ namespace YetiKit.Starter.HostTests
                 Assert.That(AssetDatabase.DeleteAsset(output), Is.True, $"Could not delete {output}");
         }
 
-        static GameObject Root(Scene scene, string name)
+        internal static GameObject Root(Scene scene, string name)
         {
             var matches = scene.GetRootGameObjects().Where(go => go.name == name).ToArray();
             Assert.That(matches, Has.Length.EqualTo(1), $"Expected exactly one '{name}' root.");
@@ -197,7 +199,7 @@ namespace YetiKit.Starter.HostTests
         static SandboxBindings Bindings(Scene scene) => scene.GetRootGameObjects()
             .SelectMany(root => root.GetComponentsInChildren<SandboxBindings>(true)).Single();
 
-        static T ComponentOn<T>(GameObject go) where T : Component
+        internal static T ComponentOn<T>(GameObject go) where T : Component
         {
             var component = go.GetComponent<T>();
             Assert.That(component, Is.Not.Null, $"{go.name} is missing {typeof(T).Name}.");
