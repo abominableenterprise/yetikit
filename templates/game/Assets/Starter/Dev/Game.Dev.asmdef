@@ -1,0 +1,12 @@
+{
+  "name": "Game.Dev",
+  "references": [
+    "Game.Starter",
+    "YetiKit.Lab",
+    "Unity.InputSystem",
+    "UnityEngine.UI",
+    "Unity.XR.Interaction.Toolkit"
+  ],
+  "defineConstraints": ["UNITY_EDITOR || DEVELOPMENT_BUILD", "UNITY_EDITOR || YETIKIT_DEV"],
+  "autoReferenced": false
+}

@@ -67,7 +67,9 @@ an isolated subfolder of `Assets/StarterTests`, then briefly enters Play Mode to
 check the sandbox's runtime bindings, drive the kit grab/release through XRI,
 and verify one accepted hit per throw using synthetic contacts. It also checks
 serialized rig wiring, controller/hand transitions, teleport landing rules and
-snap turn using synthetic input and the real scene’s locomotion providers. No
+snap turn using synthetic input and the real scene’s locomotion providers. It
+also checks that the saved scene has no dev references, drives the desktop Lab
+controls, and reloads the scene to verify local tuning and reset. No
 headset or physical XR input device is required. Use the same activation/return
 procedure as above.
 
