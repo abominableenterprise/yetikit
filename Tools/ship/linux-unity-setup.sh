@@ -14,6 +14,36 @@ install_crane() {
 fetch_crane() { curl -fsSL "$1" | tar -xz -C "$BIN_DIR" crane; }
 extract_editor() { "$1" export "$UNITY_IMAGE" - | as_root tar -x -C "$2" opt/unity; }
 
+# The image config records the build step that writes /opt/unity/version. Inspect
+# that metadata without downloading layers or trusting a version in a mutable tag.
+validated_image_ref() {
+  local crane="$1" ref version
+  # Match crane export's default platform and pin the manifest it will extract.
+  ref="$("$crane" digest --platform linux/amd64 --full-ref "$UNITY_IMAGE")" \
+    || die "cannot resolve $UNITY_IMAGE to validate Unity $UNITY_VERSION; existing editor kept"
+  version="$("$crane" config "$ref" | jq -er '
+    [.history[]?.created_by // "" | capture(
+      "^RUN \\|[0-9]+ version=(?<version>[^ ]+) module=[^ ]+ /bin/sh -c echo \\$version > \"\\$UNITY_PATH/version\" # buildkit$"
+    ).version] | unique | select(length == 1) | .[0]
+  ')" || die "cannot verify Unity $UNITY_VERSION in $UNITY_IMAGE (missing or unreadable editor version metadata); existing editor kept"
+  [ "$version" = "$UNITY_VERSION" ] \
+    || die "$UNITY_IMAGE is Unity $version, expected $UNITY_VERSION; existing editor kept"
+  printf '%s\n' "$ref"
+}
+
+preflight_replacement_image() {
+  local crane result prev_trap
+  crane="$(command -v crane || echo "$BIN_DIR/crane")"
+  result="$(mktemp)"
+  prev_trap="$(trap -p EXIT)"
+  chain_exit_trap "rm -f -- $(printf %q "$result")"
+  # Keep the registry calls cancellable by running supervise in the setup shell.
+  supervise validated_image_ref "$crane" > "$result"
+  UNITY_IMAGE="$(< "$result")"
+  rm -f -- "$result"
+  trap - EXIT; eval "$prev_trap"
+}
+
 # Markers in UNITY_ROOT: PARTIAL is written before the editor is moved in, DONE replaces it once the whole transfer
 # succeeded. A root with content but no DONE (a cross-filesystem move that failed part-way) is never trusted.
 DONE_MARK=".install-complete"
@@ -124,8 +154,9 @@ refuse_editor_in_use() {
 replace_base_editor() {
   [ "$UNITY_MODULES" = android ] && [ -x "$UNITY_BIN" ] && ! has_android || return 0
   as_root test -e "$UNITY_ROOT/$DONE_MARK" || return 0
-  log "replacing the editor at $UNITY_ROOT (no Android module) with $UNITY_IMAGE"
   refuse_editor_in_use
+  preflight_replacement_image
+  log "replacing the editor at $UNITY_ROOT (no Android module) with $UNITY_IMAGE"
   cleanup_unity require-idle || die "cleanup did not complete; refusing to replace $UNITY_ROOT. Close any Unity processes and re-run setup."
   # An editor can still start after the cleanup scan; recheck with deletion's privileges.
   refuse_editor_in_use
