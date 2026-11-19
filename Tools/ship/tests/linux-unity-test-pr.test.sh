@@ -49,4 +49,9 @@ pr HEAD
 check 'spaced, multiline class and multiline method Gfx tags select their own fixtures' \
   '[ "$rc" = 0 ] && [ "$(filter)" = "ExampleGame.Props.Tests.MethodTests;ExampleGame.Props.Tests.MultilineTests;ExampleGame.Props.Tests.SpacedTests" ]'
 
+printf '\n[Category("Gfx")] /* Render-only fixture. */\npublic class TrailingCommentTests { }\n' >> "$t/Props/StyledTests.cs"
+pr HEAD
+check 'a trailing block comment does not detach a Gfx category from its class' \
+  '[ "$rc" = 0 ] && [ "$(filter)" = "ExampleGame.Props.Tests.MethodTests;ExampleGame.Props.Tests.MultilineTests;ExampleGame.Props.Tests.SpacedTests;ExampleGame.Props.Tests.TrailingCommentTests" ]'
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
