@@ -194,5 +194,34 @@ clock b invalid 5000
 run "$b" perf stop
 check 'unavailable stop clock reports INFRA and still restores proximity' \
   '[ "$rc" = 3 ] && json '\''.overall == "INFRA" and .samples == 0 and (.message | contains("invalid adb capture clock"))'\'' && [ ! -e "$key_b" ] && [ ! -e "$tmp/b.override" ]'
+# A directory at the root report path defeats rm -f even as root, without
+# blocking the per-device reports or the reservation cleanup.
+list="$a,$b"
+clock a 1700000200.000000000 8000
+clock b 1700000200.000000000 8000
+rc=0; QUEST_SERIAL="$list" bash "$0" --worker start > "$tmp/out" 2>&1 || rc=$?
+check 'list start succeeds before the root report is obstructed' \
+  '[ "$rc" = 0 ] && [ -f "$key_a" ] && [ -f "$key_b" ] && [ -f "$tmp/a.override" ] && [ -f "$tmp/b.override" ]'
+mkdir "$run_dir/perf-summary.json" || exit 1
+for id in a b; do
+  { sample 1700000200.500000 'App=5ms'; sample 1700000201.500000 'App=6ms'; } > "$tmp/$id.samples"
+  clock "$id" 1700000202.000000000 10000
+done
+rc=0; QUEST_SERIAL="$list" bash "$0" --worker stop > "$tmp/out" 2>&1 || rc=$?
+check 'obstructed root report leaves infrastructure status but stops both captures' \
+  '[ "$rc" = 3 ] && [ -d "$run_dir/perf-summary.json" ] && grep -q "INFRA: cannot remove previous single-device performance reports" "$run_dir/summary.txt" && json '\''.overall == "PASS"'\'' "$run_dir/devices/$a_path/perf-summary.json" && json '\''.overall == "PASS"'\'' "$run_dir/devices/$b_path/perf-summary.json" && [ ! -e "$key_a" ] && [ ! -e "$key_b" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/b.override" ] && [ ! -e "$tmp/unlocked-restore" ]'
+rmdir "$run_dir/perf-summary.json" || exit 1
+rc=0; QUEST_SERIAL="$list" bash "$0" --worker stop > "$tmp/out" 2>&1 || rc=$?
+check 'retry cannot reuse either consumed capture' \
+  '[ "$rc" = 3 ] && [ "$(grep -c "no matching perf start" "$run_dir/summary.txt")" = 2 ]'
+clock a 1700000200.000000000 8000
+clock b 1700000200.000000000 8000
+rc=0; QUEST_SERIAL="$list" bash "$0" --worker start > "$tmp/out" 2>&1 || rc=$?
+check 'a fresh start can reserve the same device list' '[ "$rc" = 0 ]'
+clock a 1700000202.000000000 10000
+clock b 1700000202.000000000 10000
+rc=0; QUEST_SERIAL="$list" bash "$0" --worker stop > "$tmp/out" 2>&1 || rc=$?
+check 'the same list stop succeeds with fresh windows after clearing the obstruction' \
+  '[ "$rc" = 0 ] && [ ! -e "$key_a" ] && [ ! -e "$key_b" ] && [ ! -e "$tmp/a.override" ] && [ ! -e "$tmp/b.override" ]'
 [ "$fails" = 0 ] || exit 1
 echo 'all passed'
