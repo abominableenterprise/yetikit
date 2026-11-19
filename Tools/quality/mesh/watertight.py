@@ -6,14 +6,18 @@
 #     piece so separated sheets stay apart. Drop fins (faces with two or more open edges), then fill every open
 #     boundary loop with triangulated faces and no new vertices. Each fill corner takes its vertex's UV from a rim
 #     face. If a fill face would span a texture seam, use the rim UV closest to the loop's median colour instead.
-#  3. Wind each connected piece consistently, then reverse any piece whose signed volume is still negative.
+#  3. Wind each connected piece consistently, then correct its winding for its containment depth.
 #  4. Preserve source corner normals, which may intentionally lean past a face at recessed rims. On turned faces,
 #     negate only normals that followed the old inward winding. Fill corners receive the vertex's mean normal,
 #     oriented to their face's side.
 # turn_outward() can follow as an outside-ray check. unclosed() reports remaining open, over-used or same-way edges.
+from collections import defaultdict
+
 import bmesh
 import numpy as np
 from mathutils import Vector
+
+from shell_winding import Shell, wrong_winding
 
 SHARD = 20  # a piece (faces joined by two-face edges) this small, cut loose at a three-face edge, is a shard: dropped
 SEAM_UV = 0.05  # a fill face whose UV triangle is wider than this (in UV units) would smear across the atlas
@@ -82,28 +86,32 @@ def signed_volume(faces):
 
 
 def wind_outward(bm):
-    """Reverse every closed piece wound inside out (negative volume); returns how many. recalc_face_normals winds a
-    piece consistently but can pick the inward side. turn_outward() cannot detect this when a ray into a recessed
-    piece still meets the far wall front face first."""
-    bad = [p for p in pieces(bm) if signed_volume(p) < 0]
-    for p in bad:
-        bmesh.ops.reverse_faces(bm, faces=p)
+    """After recalc_face_normals, correct shell winding for solids and cavities."""
+    triangles = defaultdict(list)
+    for loops in bm.calc_loop_triangles():
+        triangles[loops[0].face].append([tuple(loop.vert.co) for loop in loops])
+    closed = [p for p in pieces(bm) if all(e.is_manifold and e.is_contiguous for f in p for e in f.edges)]
+    shells = [Shell([tri for f in p for tri in triangles[f]]) for p in closed]
+    bad = list(wrong_winding(shells))
+    for i in bad:
+        bmesh.ops.reverse_faces(bm, faces=closed[i])
     return len(bad)
 
 
 def close_holes(obj, image=None):
-    """Weld, fill every open loop and wind every piece outward (see the header). Returns a dict of the counts."""
+    """Repair the mesh and return counts; raise ValueError without replacing it if no faces survive."""
     me = obj.data
-    pixels = None
-    if image is not None and image.size[0] > 0:
-        pixels = np.array(image.pixels[:], dtype=np.float32).reshape(image.size[1], image.size[0], image.channels)
-    attr = me.attributes.new(TMP, "FLOAT_VECTOR", "CORNER")
-    for i, cn in enumerate(me.corner_normals):
-        attr.data[i].vector = cn.vector
     bm = bmesh.new()
-    bm.from_mesh(me)
+    attr = me.attributes.new(TMP, "FLOAT_VECTOR", "CORNER")
+    normal_name = attr.name
+    try:
+        for i, cn in enumerate(me.corner_normals):
+            attr.data[i].vector = cn.vector
+        bm.from_mesh(me)
+    finally:
+        me.attributes.remove(attr)
     uv_layer = bm.loops.layers.uv.active
-    nl = bm.loops.layers.float_vector[TMP]
+    nl = bm.loops.layers.float_vector[normal_name]
     welded = len(bm.verts)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
     welded -= len(bm.verts)
@@ -143,16 +151,26 @@ def close_holes(obj, image=None):
             break
         bmesh.ops.delete(bm, geom=fin, context="FACES_ONLY")
         fins += len(fin)
+    if not bm.faces:
+        bm.free()
+        raise ValueError(f"{obj.name}: no triangles remain after --close-holes; source mesh unchanged")
     bmesh.ops.delete(bm, geom=[e for e in bm.edges if not e.link_faces], context="EDGES")  # a deleted shard's wire edges
     bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
     boundary = [e for e in bm.edges if e.is_boundary]
-    rim_faces = {f for e in boundary for f in e.link_faces}
+    rim_faces = {f for e in boundary for f in e.link_faces} if uv_layer is not None else set()
     filled = bmesh.ops.holes_fill(bm, edges=boundary, sides=0)["faces"]
     loops = len(filled)
     new = bmesh.ops.triangulate(bm, faces=filled, quad_method="BEAUTY", ngon_method="BEAUTY")["faces"]
+    pixels = None
+    if new and uv_layer is not None and image is not None and image.size[0] > 0:
+        pixels = np.array(image.pixels[:], dtype=np.float32).reshape(image.size[1], image.size[0], image.channels)
     flat = 0
     for f in new:
         f.smooth = True
+        for l in f.loops:
+            l[nl] = Vector()
+        if uv_layer is None:
+            continue
         uvs = [_rim_uv(l.vert, rim_faces, uv_layer) for l in f.loops]
         if any(u is None for u in uvs) or _uv_span(uvs) > SEAM_UV:
             uv = _flat_uv([u for u in uvs if u is not None], pixels)
@@ -160,10 +178,10 @@ def close_holes(obj, image=None):
             flat += 1
         for l, uv in zip(f.loops, uvs):
             l[uv_layer].uv = uv
-            l[nl] = Vector()
 
-    # Wind each connected piece consistently and outward (the pieces are closed now).
+    # Wind consistently, then match each closed shell's containment depth.
     flip = bm.faces.layers.int.new(TMP + "_flip")
+    flip_name = flip.name
     bm.normal_update()
     was = [f.normal.copy() for f in bm.faces]  # by position in bm.faces (recalc rebuilds the face wrappers, not the order)
     bm.faces.index_update()
@@ -178,9 +196,9 @@ def close_holes(obj, image=None):
     bm.free()
 
     # Corner normals (step 4).
-    attr = me.attributes[TMP]
+    attr = me.attributes[normal_name]
     stored = [Vector(d.vector) for d in attr.data]
-    flipped = [d.value for d in me.attributes[TMP + "_flip"].data]
+    flipped = [d.value for d in me.attributes[flip_name].data]
     mean = [Vector() for _ in me.vertices]
     for li, l in enumerate(me.loops):
         mean[l.vertex_index] += stored[li]
@@ -197,7 +215,7 @@ def close_holes(obj, image=None):
                 n = -n if n.dot(p.normal) < 0 else n
             normals.append(tuple(n))
     me.attributes.remove(attr)
-    me.attributes.remove(me.attributes[TMP + "_flip"])
+    me.attributes.remove(me.attributes[flip_name])
     me.normals_split_custom_set(normals)
     me.update()
     report = {"welded": welded, "shards": shards, "fins": fins, "loops": loops, "fill_tris": len(new), "flat_uv": flat, "tris": (tris_before, tris_after),
@@ -208,6 +226,8 @@ def close_holes(obj, image=None):
 
 
 def unclosed(report):
-    """Why close_holes() left the mesh not watertight (open, over-used or same-way edges after it), or None."""
+    """Return why the repair report is unsafe to export, or None for a nonempty watertight mesh."""
+    if report["tris"][1] == 0:
+        return "no triangles after --close-holes"
     left = {k: report[k][1] for k in ("open", "over", "same_way") if report[k][1]}
     return f"not watertight after --close-holes: {left}" if left else None

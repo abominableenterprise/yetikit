@@ -4,6 +4,7 @@ from collections import defaultdict
 import numpy as np
 
 from outside_rays import MIN_VOTES, inward
+from shell_winding import Shell, wrong_winding
 
 
 def measure(verts, tris):
@@ -26,7 +27,8 @@ def measure(verts, tris):
             neighbors[i].update(j for j, _ in uses if j != i)
     # Rays alone cannot identify a wholly inside-out closed shell: its far wall
     # still presents a front face. Signed volume supplies that missing evidence.
-    unseen, negative = set(range(len(t))), set()
+    unseen = set(range(len(t)))
+    shells, shell_faces = [], []
     while unseen:
         seed = unseen.pop()
         piece, stack = {seed}, [seed]
@@ -35,17 +37,17 @@ def measure(verts, tris):
                 unseen.remove(j)
                 piece.add(j)
                 stack.append(j)
-        local = remap[t[list(piece)]]
-        closed = all(len(edges[tuple(sorted((a, b)))]) == 2
-                     for face in local for a, b in zip(face, np.roll(face, -1)))
-        points = v[t[list(piece)]]
-        points = points - points[0, 0]  # translation-stable volume
-        volume = np.einsum("ij,ij->i", points[:, 0], np.cross(points[:, 1], points[:, 2])).sum() / 6
-        if closed and volume < 0:
-            negative.update(piece)
+        indices = list(piece)
+        local = remap[t[indices]]
+        uses = (edges[tuple(sorted((a, b)))] for face in local for a, b in zip(face, np.roll(face, -1)))
+        if all(len(e) == 2 and e[0][1] != e[1][1] for e in uses):
+            shells.append(Shell(v[t[indices]]))
+            shell_faces.append(piece)
+    wrong = {face for i in wrong_winding(shells) for face in shell_faces[i]}
     bad, holes, hit = inward(verts, tris, MIN_VOTES)
     area = np.linalg.norm(np.cross(v[t[:, 1]] - v[t[:, 0]], v[t[:, 2]] - v[t[:, 0]]), axis=1)
-    return {"tris": len(t), "inward": len(set(bad) | negative), "inside_out": len(negative),
-            "inward_share": len(set(bad) | negative) / len(t), "hole_ray_share": holes / max(1, hit),
+    inward_count = len(set(bad) | wrong)
+    return {"tris": len(t), "inward": inward_count, "inside_out": len(wrong),
+            "inward_share": inward_count / len(t), "hole_ray_share": holes / max(1, hit),
             "holes": holes, "hit_rays": hit, "open_edges": open_n, "over_edges": over,
             "same_way_edges": same, "degenerate": int(np.count_nonzero(area == 0))}
