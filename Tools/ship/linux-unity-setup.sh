@@ -8,9 +8,11 @@ install_crane() {
   mkdir -p "$BIN_DIR"
   local archive; archive="$(ship_config_get '.setup.craneArchive // empty')"
   [ -n "$archive" ] || die "setup: crane is missing; with Go installed, run: GOBIN=$(printf %q "$BIN_DIR") go install github.com/google/go-containerregistry/cmd/crane@$CRANE_VERSION; then re-run setup (or set setup.craneArchive)"
-  curl -fsSL "$archive" \
-    | tar -xz -C "$BIN_DIR" crane
+  supervise fetch_crane "$archive"
 }
+
+fetch_crane() { curl -fsSL "$1" | tar -xz -C "$BIN_DIR" crane; }
+extract_editor() { "$1" export "$UNITY_IMAGE" - | as_root tar -x -C "$2" opt/unity; }
 
 # Markers in UNITY_ROOT: PARTIAL is written before the editor is moved in, DONE replaces it once the whole transfer
 # succeeded. A root with content but no DONE (a cross-filesystem move that failed part-way) is never trusted.
@@ -52,14 +54,14 @@ install_editor() {
   log "extracting $UNITY_IMAGE:/opt/unity (streamed, ~2-3 min, ~8.7 GB)"
   # Only opt/unity is written, into the stage, and moved into place once complete, so an interrupted extract never
   # leaves a half-installed $UNITY_ROOT that a re-run would trust.
-  "$crane" export "$UNITY_IMAGE" - | as_root tar -x -C "$stage" opt/unity
+  supervise --foreground-terminal extract_editor "$crane" "$stage"
   [ -x "$stage/opt/unity/$BIN_REL" ] && [ -x "$stage/opt/unity/$LC_REL" ] \
     || die "extract incomplete: editor or licensing client missing in $stage"
   editor_version_ok "$stage/opt/unity/$BIN_REL" || die "editor from $UNITY_IMAGE is not Unity $UNITY_VERSION"
   [ -d "$UNITY_ROOT" ] || as_root mkdir "$UNITY_ROOT"
   as_root touch "$partial"
   # Move the contents, not the directory: `mv dir existing-dir` would make $UNITY_ROOT/unity.
-  as_root find "$stage/opt/unity" -mindepth 1 -maxdepth 1 -exec mv -t "$UNITY_ROOT" -- {} +
+  supervise --foreground-terminal as_root find "$stage/opt/unity" -mindepth 1 -maxdepth 1 -exec mv -t "$UNITY_ROOT" -- {} +
   [ -x "$UNITY_BIN" ] && [ -x "$LC" ] || die "editor or licensing client missing in $UNITY_ROOT after install"
   as_root mv -f "$partial" "$done"
   as_root rm -rf "$stage"
@@ -73,8 +75,8 @@ install_libs() {
   for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
   if [ ${#missing[@]} -gt 0 ]; then
     log "apt-get install ${missing[*]}"
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
+    supervise --foreground-terminal as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    supervise --foreground-terminal as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
   fi
   if ldd "$UNITY_BIN" | grep -q 'not found'; then
     ldd "$UNITY_BIN" | grep 'not found' >&2
@@ -127,7 +129,7 @@ replace_base_editor() {
   cleanup_unity require-idle || die "cleanup did not complete; refusing to replace $UNITY_ROOT. Close any Unity processes and re-run setup."
   # An editor can still start after the cleanup scan; recheck with deletion's privileges.
   refuse_editor_in_use
-  as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  supervise --foreground-terminal as_root find "$UNITY_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 }
 
 cmd_setup() {
@@ -151,7 +153,7 @@ cmd_setup() {
     as_root mkdir -m 755 -- "$lock" || [ -d "$lock" ] || die "cannot create setup lock $lock"
   fi
   exec {setup_fd}< "$lock/." || die "cannot open setup lock $lock"
-  flock -x "$setup_fd" || die "cannot acquire setup lock for $UNITY_ROOT"
+  supervise flock -x "$setup_fd" || die "cannot acquire setup lock for $UNITY_ROOT"
   replace_base_editor; install_editor; install_libs
   if [ "$UNITY_MODULES" = android ]; then
     has_android || die "$UNITY_IMAGE gave no Android SDK/NDK under $UNITY_ROOT/$ANDROID_REL"

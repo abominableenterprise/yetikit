@@ -42,12 +42,10 @@
 #                       No matching fixture skips Gfx. Stage timings: build/test-stages.log.
 #                       Every test command: when all failures of a pass are in the configured known-flakes file, they rerun
 #                       once (<pass>-retry.xml) and a green rerun passes. The noise revert and --keep work as in open.
-#                       When every pass passed but the noise revert failed (another git command kept .git/index.lock
-#                       through scene-noise.sh's retries), test exits 3 (NOISE_REVERT_RC), as does scene once rebuilt:
-#                       rerun only the printed scene-noise command
-#   stop                kill the editor and Xvfb this script started (pidfile $OUT_DIR/linux-unity.pid)
+#   stop                stop the recorded run (including setup) and its workers (pidfile $OUT_DIR/linux-unity.pid)
 #   all                 setup, activate, open, test editmode (keeps the licence, including on failure)
 #
+# A successful editor command with failed noise cleanup exits 3; rerun only the printed scene-noise command.
 # Credentials are read from the environment only and are never printed: UNITY_USERNAME/UNITY_PASSWORD, or, when
 # either is unset or empty, USERNAME/PASSWORD (the hub's 1Password login fields) if both are set.
 # Licences/seats stay held between commands; UNITY_IDLE_RETURN_MINUTES (10) idle returns them.
@@ -129,11 +127,11 @@ log() { printf '[linux-unity] %s\n' "$*" >&2; }
 . "$(dirname "${BASH_SOURCE[0]}")/lib/linux-unity-kill.sh"
 # shellcheck source=Tools/ship/lib/linux-unity-shared-files.sh
 . "$SHIP_TOOL_DIR/lib/linux-unity-shared-files.sh"
+. "$SHIP_TOOL_DIR/lib/linux-unity-supervise.sh"
 # shellcheck source=Tools/ship/linux-unity-seat.sh
 . "$(dirname "${BASH_SOURCE[0]}")/linux-unity-seat.sh"
 die() { log "error: $*"; exit 1; }
-# Exit code of test/scene when the editor work succeeded (every test passed, the scene rebuilt) but the noise revert
-# failed: distinct from a test failure, so the caller reruns only Tools/ship/scene-noise.sh.
+# Editor work succeeded but noise cleanup failed: rerun only Tools/ship/scene-noise.sh.
 NOISE_REVERT_RC=3
 
 as_root() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
@@ -163,36 +161,29 @@ cmd_cache() {
   key="$(cache_key "${2:-}")"
   log "task-cache $op $key Library"
   if [ "$op" = restore ]; then cache_restore "$key"; return 0; fi
-  (cd "$PROJECT" && "$TASK_CACHE" "$op" "$key" Library)
+  # Android save owns the Bee move/restore lifecycle in apk_cache_save.
+  if [ "${2:-}" = android ]; then (cd "$PROJECT" && "$TASK_CACHE" "$op" "$key" Library)
+  else supervise cache_save "$key"; fi
 }
 
 # Restore with a time limit. On a timeout, miss or error it removes what the restore left behind (a partial Library/
 # when there was none before, task-cache's .task-cache.* download dir) and returns 0: the caller imports cold.
 cache_restore() {
-  local had_library=0 rc=0
+  local had_library=0 rc=0 supervised_cancel=discard_partial_restore
   [ -d "$PROJECT/Library" ] && had_library=1
-  # timeout signals its whole process group, so task-cache's download (curl) dies with it.
-  (cd "$PROJECT" && timeout -k 10 "$TASK_CACHE_TIMEOUT" "$TASK_CACHE" restore "$1" Library) || rc=$?
+  supervise cache_restore_worker "$1" || rc=$?
   [ "$rc" = 0 ] && return 0
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then log "cache restore timed out; cold import"
   else log "cache restore failed (exit $rc); cold import"; fi
-  [ "$had_library" = 1 ] || rm -rf "$PROJECT/Library"
-  rm -rf "$PROJECT"/.task-cache.*
+  discard_partial_restore
   return 0
 }
 
-# Cleanup touches global shared memory, so serialize editor runs across checkouts
-# and installations using that SHM_DIR. Refuse overlap instead of killing a peer.
-lock_unity() {
-  [ -z "${UNITY_CLEANUP_FD:-}" ] || return 0
-  local lock="$SHM_DIR/.linux-unity-cleanup.lock" flock_args=(-n)
-  # Publish once with shared read access, without truncating/replacing a peer's
-  # inode. Linux flock can take an exclusive lock on a read-only descriptor.
-  [ -e "$lock" ] || (umask 022; set -C; : > "$lock") 2>/dev/null || true
-  exec {UNITY_CLEANUP_FD}< "$lock" || die "cannot read $lock; ensure all runner accounts have read access"
-  [ "$#" = 0 ] || flock_args=(-w "$1")
-  flock "${flock_args[@]}" "$UNITY_CLEANUP_FD" || die "another Unity run owns $SHM_DIR; wait for it or stop its checkout"
-  chain_exit_trap 'exec {UNITY_CLEANUP_FD}>&-'
+cache_save() { cd "$PROJECT" && exec "$TASK_CACHE" save "$1" Library; }
+cache_restore_worker() { cd "$PROJECT" && exec timeout -k 10 "$TASK_CACHE_TIMEOUT" "$TASK_CACHE" restore "$1" Library; }
+discard_partial_restore() {
+  [ "$had_library" = 1 ] || rm -rf "$PROJECT/Library"
+  rm -rf "$PROJECT"/.task-cache.*
 }
 
 # Read-only installation scan. Strict mode prints matches but returns 1 if inspection is incomplete:
@@ -274,7 +265,7 @@ unity() {
   events="$(unity_memory_events_file)"
   baseline="$(unity_memory_events_read "$events")"
   start="$(date +%s.%N)"
-  xvfb-run -a -s "-screen 0 1280x1024x24" timeout -s KILL "$UNITY_TIMEOUT" \
+  supervise xvfb-run -a -s "-screen 0 1280x1024x24" timeout -s KILL "$UNITY_TIMEOUT" \
     "$UNITY_BIN" -batchmode -projectPath "$PROJECT" "$@" || rc=$?
   if [ "$rc" = 137 ]; then
     elapsed="$(LC_ALL=C awk -v start="$start" -v end="$(date +%s.%N)" 'BEGIN { printf "%.6f", end - start }')"
@@ -308,6 +299,10 @@ write_pidfile() {
     read -r pid start < "$PIDFILE" 2>/dev/null || true
     if [ -n "${pid:-}" ] && [ "$(proc_start "$pid" || true)" = "$start" ]; then
       exec {fd}>&-; PID_LINE=""; die "another run (pid $pid, $PIDFILE) is still going: wait for it or run $SHIP_COMMAND stop"
+    fi
+    # A dead wrapper can leave workers with its marker and the editor lock.
+    if [[ "${pid:-}" =~ ^[1-9][0-9]*$ && "${start:-}" =~ ^[0-9]+$ ]] && [ -n "$(marked "$pid:$start")" ]; then
+      exec {fd}>&-; PID_LINE=""; die "workers remain from pid $pid ($PIDFILE): run $SHIP_COMMAND stop"
     fi
     rm -f "$PIDFILE"
   done
@@ -461,7 +456,7 @@ cmd_open() {
   parse_keep "$@"
   [ ${#RUN_ARGS[@]} = 0 ] || die "usage: open [--keep [<path>]]..."
   mkdir -p "$OUT_DIR"
-  local cold=0 rc=0 before
+  local cold=0 rc=0 nrc=0 before what='project opened and compiled'
   if [ ! -d "$PROJECT/Library" ]; then
     cmd_cache restore
     [ -d "$PROJECT/Library" ] || cold=1
@@ -469,10 +464,15 @@ cmd_open() {
   cleanup_unity   # a cancelled run can leave Unity.DataStore and its shared memory behind, as before test
   before="$(run_noise_before)"
   unity -nographics -quit -logFile "$OUT_DIR/open.log" || rc=$?
-  revert_run_noise_after "$before"
-  [ "$rc" = 0 ] || die "Unity failed to open the project (see $OUT_DIR/open.log)"
-  log "project opened and compiled"
+  revert_run_noise_after "$before" || nrc=$?
+  if [ "$rc" != 0 ]; then
+    if [ "$nrc" != 0 ]; then noise_revert_failed "$nrc" "$before" "open failed" --run || :; fi
+    die "Unity failed to open the project (see $OUT_DIR/open.log)"
+  fi
+  if [ "$nrc" = 0 ]; then log "$what"
+  else noise_revert_failed "$nrc" "$before" "$what" --run || nrc=$?; fi
   if [ "$cold" = 1 ]; then cmd_cache save || log "warning: cache-save failed"; fi
+  return "$nrc"
 }
 
 # Android resource guards, cache policy and build invocation.
@@ -756,10 +756,10 @@ case "${1:-}" in
 esac
 test_stage credentials-seat end
 case "${1:-}" in
-  open|test|scene|lab|apk|all)
+  open|test|scene|lab|apk|all|setup|cache-restore|cache-save)
     # Every process this run forks inherits the marker, so `stop` finds it in any process group (timeout's,
     # a foreground run's) and never signals a pipeline peer such as `| tee`.
-    lock_unity
+    case "$1" in setup|cache-save) ;; *) lock_unity ;; esac
     write_pidfile; export LINUX_UNITY_RUN="${PID_LINE/ /:}"; chain_exit_trap release_pidfile
     if [ "${1:-}" = test ]; then test_stages_claim; fi ;;
 esac

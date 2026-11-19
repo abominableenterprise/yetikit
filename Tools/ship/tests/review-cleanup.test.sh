@@ -70,6 +70,26 @@ source_protects_atlas() {
 check source_protects_atlas
 git checkout -q -- Assets/Art/atlas.png Assets/Art/Props/source.png
 
+# The prop directory prefix and texture extension belong to the same Git path,
+# even when the filename contains a newline. Verify both tracked and untracked inputs.
+newline_prop_protects_outputs() {
+  local source=$'Assets/Art/Props/line\nbreak.png' atlas=Assets/Art/atlas.png prefab=Assets/Art/Areas/X.prefab
+  local stage status=0
+  printf 'texture\n' > "$source"
+  for stage in untracked staged; do
+    if [ "$stage" = staged ]; then git add -- "$source" || return; fi
+    printf 'regenerated\n' > "$atlas"
+    printf 'regenerated\n' > "$prefab"
+    if ! revert_editor_noise '' || ! grep -qx regenerated "$atlas" || ! grep -qx regenerated "$prefab"; then
+      printf 'Newline prop did not protect regenerated outputs (%s)\n' "$stage" >&2
+      status=1
+    fi
+  done
+  git reset -q HEAD -- "$source" && rm -- "$source" && git checkout -q -- "$atlas" "$prefab" || return
+  return "$status"
+}
+check newline_prop_protects_outputs
+
 # Area-only generation must protect its prefab even with a trailing slash in areasDir.
 area_keep() {
   cleanup_unity() { :; }

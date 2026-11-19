@@ -314,4 +314,57 @@ mkdir -p "$img/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" \
 check "Android replacement succeeds after the foreign editor exits" \
   'run env UNITY_ROOT="$replace_root" && grep -q "setup ok" "$tmp/out" && [ ! -e "$replace_root/resource" ] && [ -d "$replace_root/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" ] && [ -e "$replace_root/.install-complete" ] && [ ! -e "$shm_fixture" ] && [ ! -e "$tmp/Temp/UnityLockfile" ]'
 
+# Require a fresh terminal read on each sudo invocation. No host sudo, apt or
+# credentials. The tar stream still arrives on stdin, not on the terminal.
+cat > "$tmp/bin/id" <<'EOF'
+#!/bin/sh
+[ "$*" = -u ] && { echo 1001; exit; }
+exec /usr/bin/id "$@"
+EOF
+cat > "$tmp/bin/sudo" <<'EOF'
+#!/usr/bin/env python3
+import os, sys
+with open('/dev/tty', 'r') as tty:
+    if os.tcgetpgrp(tty.fileno()) != os.getpgrp():
+        sys.exit(f'cannot prompt in background: {sys.argv[1:]}')
+    if tty.readline().strip() != 'fixture-password':
+        sys.exit('missing synthetic password')
+with open(os.environ['SUDO_CALLS'], 'a') as log:
+    print(' '.join(sys.argv[1:]), file=log)
+os.execvp(sys.argv[1], sys.argv[1:])
+EOF
+printf '#!/bin/sh\n[ "$2" != xvfb ]\n' > "$tmp/bin/dpkg"
+cat > "$tmp/bin/apt-get" <<'EOF'
+#!/bin/bash
+case "${INSTALL_MODE:-}:$1" in
+  cancel:install)
+    trap '' TERM
+    printf '%s\n' "$$" > "$OUT_DIR/apt.pid"
+    read -r wrapper _ < "$OUT_DIR/linux-unity.pid"
+    kill -TERM "$wrapper"
+    exec /bin/sleep 12 ;;
+  fail:install) exit 37 ;;
+esac
+EOF
+chmod +x "$tmp/bin/apt-get"
+printf 'fixture-password\n%.0s' {1..32} > "$tmp/passwords"
+run_pty() {
+  PATH="$tmp/bin:$PATH" PROJECT="$tmp" UNITY_ROOT="$tmp/tty-$1/unity" BIN_DIR="$tmp/bin" OUT_DIR="$tmp/tty-logs" \
+    SUDO_CALLS="$tmp/sudo-calls" SETUP_SCRIPT="$script" INSTALL_MODE="$1" SHELL=/bin/bash \
+    timeout 30 script -qec '
+      SECONDS=0
+      rc=0; bash "$SETUP_SCRIPT" setup --no-creds || rc=$?
+      if [[ "$INSTALL_MODE" == cancel && "$SECONDS" -ge 10 ]]; then exit 98; fi
+      python3 -c "import os; assert os.tcgetpgrp(os.open(\"/dev/tty\", os.O_RDONLY)) == os.getpgrp()" || exit 99
+      exit "$rc"
+    ' /dev/null < "$tmp/passwords" > "$tmp/tty-log" 2>&1
+}
+check 'setup authenticates each supervised sudo call on the foreground terminal' \
+  'run_pty ok && [ -f "$tmp/tty-ok/unity/.install-complete" ] && grep -q "^tar -x " "$tmp/sudo-calls" && grep -q "^find .* -exec mv " "$tmp/sudo-calls" && grep -q "apt-get update" "$tmp/sudo-calls" && grep -q "apt-get install" "$tmp/sudo-calls"'
+rc=0; run_pty fail || rc=$?
+check 'a failed interactive install preserves its exit status and restores the terminal' '[ "$rc" = 37 ]'
+rc=0; run_pty cancel || rc=$?
+check 'wrapper-only TERM during interactive setup kills the worker and restores the terminal' \
+  '[ "$rc" = 143 ] && [ -s "$tmp/tty-logs/apt.pid" ] && [ ! -e "$tmp/tty-logs/linux-unity.pid" ] && { ! { read -r stat < "/proc/$(< "$tmp/tty-logs/apt.pid")/stat"; } 2>/dev/null || [[ "${stat##*) }" = "Z "* ]]; }'
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
