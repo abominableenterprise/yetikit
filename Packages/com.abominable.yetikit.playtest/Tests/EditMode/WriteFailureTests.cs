@@ -106,6 +106,11 @@ namespace YetiKit.Playtest.Tests
                 File.WriteAllText(marker, "{}");
                 Gzip(Path.Combine(dir, "chunk-0001.jsonl.gz.tmp"), "{\"k\":\"f\"}\n");         // rename failed: whole
                 File.WriteAllBytes(Path.Combine(dir, "chunk-0002.jsonl.gz.tmp"), new byte[] { 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3, 1, 2 }); // torn
+                var corrupt = Path.Combine(dir, "chunk-0004.jsonl.gz.tmp");
+                Gzip(corrupt, "{\"k\":\"corrupt\"}\n");
+                var bytes = File.ReadAllBytes(corrupt);
+                bytes[10] = 0xff; // invalid DEFLATE block type, with a complete gzip header and trailer
+                File.WriteAllBytes(corrupt, bytes);
                 Gzip(Path.Combine(dir, "chunk-0003.jsonl.gz"), "{\"k\":\"original\"}\n");
                 Gzip(Path.Combine(dir, "chunk-0003.jsonl.gz.tmp"), "{\"k\":\"duplicate\"}\n");
                 store.RecoverChunks();
@@ -113,6 +118,7 @@ namespace YetiKit.Playtest.Tests
                 Assert.AreEqual("{\"k\":\"f\"}\n", TempDir.Gunzip(Path.Combine(dir, "chunk-0001.jsonl.gz")));
                 Assert.IsFalse(File.Exists(Path.Combine(dir, "chunk-0002.jsonl.gz")));
                 Assert.AreEqual("{\"k\":\"original\"}\n", TempDir.Gunzip(Path.Combine(dir, "chunk-0003.jsonl.gz")));
+                Assert.IsFalse(File.Exists(Path.Combine(dir, "chunk-0004.jsonl.gz")));
                 Assert.AreEqual("{}", File.ReadAllText(marker));
             }
         }

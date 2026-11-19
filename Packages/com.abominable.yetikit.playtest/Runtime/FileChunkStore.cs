@@ -179,6 +179,9 @@ namespace YetiKit.Playtest
                 }
             }
             catch (InvalidDataException) { return false; }
+            // Unity's Mono inflater signals corrupt data with a plain IOException. Do not discard a temp
+            // on other IO failures: the recording might still be intact.
+            catch (IOException e) when (e.Message.StartsWith("Corrupted data ", StringComparison.Ordinal)) { return false; }
         }
     }
 }
