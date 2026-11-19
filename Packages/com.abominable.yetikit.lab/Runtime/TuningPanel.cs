@@ -27,10 +27,11 @@ namespace YetiKit.Lab
 
         void OnDisable()
         {
-            if (!Wired) return;
-            previous.onClick.RemoveListener(Previous); next.onClick.RemoveListener(Next); reset.onClick.RemoveListener(ResetBinding);
-            minus.Step -= Decrease; plus.Step -= Increase;
-            minus.Cancel(); plus.Cancel();
+            if (previous) previous.onClick.RemoveListener(Previous);
+            if (next) next.onClick.RemoveListener(Next);
+            if (reset) reset.onClick.RemoveListener(ResetBinding);
+            if (minus) { minus.Step -= Decrease; minus.Cancel(); }
+            if (plus) { plus.Step -= Increase; plus.Cancel(); }
         }
 
         void Update() => Refresh();

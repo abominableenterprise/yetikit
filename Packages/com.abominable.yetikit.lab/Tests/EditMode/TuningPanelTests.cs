@@ -4,7 +4,9 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
+using UnityEngine.XR.Interaction.Toolkit.UI;
 
 namespace YetiKit.Lab.Tests
 {
@@ -21,6 +23,96 @@ namespace YetiKit.Lab.Tests
             Assert.That(repeat.Tick(true, 2), Is.False);
             Assert.That(repeat.Tick(false, 3), Is.False);
             Assert.That(repeat.Tick(true, 4), Is.False);
+        }
+
+        [TestCase(typeof(StandaloneInputModule), "OnApplicationFocus")]
+        [TestCase(typeof(StandaloneInputModule), "OnApplicationPause")]
+        [TestCase(typeof(InputSystemUIInputModule), "OnApplicationFocus")]
+        [TestCase(typeof(InputSystemUIInputModule), "OnApplicationPause")]
+        [TestCase(typeof(XRUIInputModule), "OnApplicationFocus")]
+        [TestCase(typeof(XRUIInputModule), "OnApplicationPause")]
+        public void InterruptedHoldStopsRepeatingWithoutPointerRelease(System.Type moduleType, string message)
+        {
+            var input = new GameObject("Synthetic input", typeof(EventSystem), moduleType);
+            var control = new GameObject("Synthetic hold", typeof(TuningHoldButton));
+            try
+            {
+                var hold = control.GetComponent<TuningHoldButton>();
+                var steps = 0;
+                hold.Step += () => steps++;
+                var pointer = new PointerEventData(input.GetComponent<EventSystem>()) { pointerId = 1 };
+                // Dispatch the common pointer interface, then simulate application messages without any pointer-up.
+                ExecuteEvents.Execute(control, pointer, ExecuteEvents.pointerDownHandler);
+                Assert.That(steps, Is.EqualTo(1));
+                // Invoke lifecycle callbacks directly because the component is not running in Edit Mode.
+                var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var callback = typeof(TuningHoldButton).GetMethod(message, flags);
+                var interrupted = message == "OnApplicationPause";
+                callback?.Invoke(hold, new object[] { interrupted });
+                callback?.Invoke(hold, new object[] { !interrupted });
+
+                var repeat = (TuningRepeat)typeof(TuningHoldButton).GetField("repeat", flags).GetValue(hold);
+                Assert.That(repeat.Tick(true, Time.unscaledTime + 1), Is.False, "The interrupted hold must not repeat.");
+                ExecuteEvents.Execute(control, pointer, ExecuteEvents.pointerDownHandler);
+                Assert.That(steps, Is.EqualTo(2), "A fresh press must be accepted without a release from the old press.");
+                ExecuteEvents.Execute(control, pointer, ExecuteEvents.pointerUpHandler);
+            }
+            finally
+            {
+                Object.DestroyImmediate(control);
+                Object.DestroyImmediate(input);
+            }
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void DisableDetachesSurvivingControlsWhenOneIsMissing(bool destroyControl)
+        {
+            var root = new GameObject("Synthetic panel");
+            try
+            {
+                var label = Label(root.transform, "", 0, 0, 120, 60, 24);
+                var previous = Control<Button>(root.transform, "Previous", 0, 0);
+                var next = Control<Button>(root.transform, "Next", 0, 0);
+                var reset = Control<Button>(root.transform, "Reset", 0, 0);
+                var minus = Control<TuningHoldButton>(root.transform, "−", 0, 0);
+                var plus = Control<TuningHoldButton>(root.transform, "+", 0, 0);
+                var panel = root.AddComponent<TuningPanel>();
+                var config = new SerializedObject(panel);
+                WirePanel(config, label, previous, next, reset, minus, plus);
+                PanelLifecycle(panel, "OnEnable");
+                var tuning = new Tuning("panel-fixture", new EmptyStore());
+                float gain = 1;
+                tuning.Float("Gain", () => gain, value => gain = value, 1, 0, 4, .25f);
+                panel.Bind(tuning);
+                var pointer = new PointerEventData(null) { pointerId = 1 };
+                plus.OnPointerDown(pointer);
+                Assert.That(gain, Is.EqualTo(1.25f));
+
+                if (destroyControl) Object.DestroyImmediate(reset.gameObject);
+                else WirePanel(config, null, previous, next, reset, minus, plus);
+                PanelLifecycle(panel, "OnDisable");
+
+                var contacts = 0;
+                plus.Step += () => contacts++;
+                plus.OnPointerDown(pointer);
+                Assert.That(contacts, Is.EqualTo(1), "Disable must clear the held pointer on a surviving control.");
+                plus.OnPointerUp(pointer);
+                minus.OnPointerDown(pointer);
+                minus.OnPointerUp(pointer);
+                Assert.That(gain, Is.EqualTo(1.25f), "Neither surviving hold control should adjust a disabled panel.");
+                if (reset) reset.onClick.Invoke();
+                Assert.That(gain, Is.EqualTo(1.25f), "A surviving reset must also be detached.");
+
+                if (!reset) reset = Control<Button>(root.transform, "Replacement reset", 0, 0);
+                config.Update();
+                WirePanel(config, label, previous, next, reset, minus, plus);
+                PanelLifecycle(panel, "OnEnable");
+                plus.OnPointerDown(pointer);
+                plus.OnPointerUp(pointer);
+                Assert.That(gain, Is.EqualTo(1.5f), "Re-enabling must subscribe exactly once.");
+            }
+            finally { Object.DestroyImmediate(root); }
         }
 
         [Test, Category("Gfx")]
@@ -52,17 +144,9 @@ namespace YetiKit.Lab.Tests
                 var plus = Control<TuningHoldButton>(root.transform, "+", 84, -24);
                 root.SetActive(false);
                 var panel = root.AddComponent<TuningPanel>();
-                var config = new SerializedObject(panel);
-                config.FindProperty("label").objectReferenceValue = label;
-                config.FindProperty("previous").objectReferenceValue = previous;
-                config.FindProperty("next").objectReferenceValue = next;
-                config.FindProperty("reset").objectReferenceValue = reset;
-                config.FindProperty("minus").objectReferenceValue = minus;
-                config.FindProperty("plus").objectReferenceValue = plus;
-                config.ApplyModifiedPropertiesWithoutUndo();
+                WirePanel(new SerializedObject(panel), label, previous, next, reset, minus, plus);
                 root.SetActive(true);
-                // Invoke lifecycle explicitly: this EditMode fixture does not enter Play Mode.
-                typeof(TuningPanel).GetMethod("OnEnable", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(panel, null);
+                PanelLifecycle(panel, "OnEnable");
                 var tuning = new Tuning("panel-fixture", new EmptyStore());
                 float gain = 1;
                 bool preview = false;
@@ -88,6 +172,22 @@ namespace YetiKit.Lab.Tests
                 Object.DestroyImmediate(cameraObject);
                 Object.DestroyImmediate(target);
             }
+        }
+
+        // EditMode fixtures do not enter Play Mode.
+        static void PanelLifecycle(TuningPanel panel, string method) =>
+            typeof(TuningPanel).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic).Invoke(panel, null);
+
+        static void WirePanel(SerializedObject config, Text label, Button previous, Button next, Button reset,
+            TuningHoldButton minus, TuningHoldButton plus)
+        {
+            config.FindProperty("label").objectReferenceValue = label;
+            config.FindProperty("previous").objectReferenceValue = previous;
+            config.FindProperty("next").objectReferenceValue = next;
+            config.FindProperty("reset").objectReferenceValue = reset;
+            config.FindProperty("minus").objectReferenceValue = minus;
+            config.FindProperty("plus").objectReferenceValue = plus;
+            config.ApplyModifiedPropertiesWithoutUndo();
         }
 
         static Text Label(Transform parent, string text, float x, float y, float w, float h, int size)

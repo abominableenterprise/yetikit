@@ -46,6 +46,45 @@ namespace YetiKit.Lab.Tests
             }, events);
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void DisposingFromEnableAbortsSelectionWithoutLeakingHands(bool disposeFromRight)
+        {
+            var events = new List<string>();
+            var store = new Store();
+            store.Save("sample", "first");
+            ExperimentSwitcher switcher = null;
+            var registry = Registry(id => new Experiment(id, events, onEnable: right =>
+            {
+                if (id != "second" || right != disposeFromRight) return;
+                switcher.Dispose();
+                switcher.Tick(1);
+                events.Add("enable finished");
+            }));
+            using (switcher = new ExperimentSwitcher("sample", registry, new Hand(false), new Hand(true),
+                       store, () => new Lease(() => events.Add("restore"))))
+            {
+                events.Clear();
+                var selected = switcher.Select("second");
+                switcher.Tick(2);
+                switcher.Dispose();
+
+                var expected = new List<string> {
+                    "disable:first", "dispose:first", "disable:first", "dispose:first", "restore",
+                    "init:second:False", "enable:second"
+                };
+                if (disposeFromRight) expected.AddRange(new[] { "init:second:True", "enable:second" });
+                expected.AddRange(new[] { "enable finished", "disable:second", "dispose:second" });
+                if (disposeFromRight) expected.AddRange(new[] { "disable:second", "dispose:second" });
+                expected.Add("restore");
+                CollectionAssert.AreEqual(expected, events);
+                Assert.That(selected, Is.False);
+                Assert.That(switcher.CurrentId, Is.Null);
+                Assert.That(store.Load("sample"), Is.EqualTo("first"));
+                Assert.That(store.Writes, Is.EqualTo(1));
+            }
+        }
+
         [Test]
         public void FailedEnableReleasesBothInstancesAndRestoresInput()
         {
@@ -164,13 +203,19 @@ namespace YetiKit.Lab.Tests
         {
             readonly List<string> events;
             readonly bool failRight;
+            readonly Action<bool> onEnable;
             bool right;
-            public Experiment(string id, List<string> events = null, bool failRight = false)
-            { Id = id; this.events = events; this.failRight = failRight; }
+            public Experiment(string id, List<string> events = null, bool failRight = false, Action<bool> onEnable = null)
+            { Id = id; this.events = events; this.failRight = failRight; this.onEnable = onEnable; }
             public string Id { get; }
             public string Help => "Synthetic experiment";
             public void Initialize(IHandInput hand) { right = hand.RightHand; events?.Add($"init:{Id}:{right}"); }
-            public void Enable() { events?.Add($"enable:{Id}"); if (failRight && right) throw new InvalidOperationException(); }
+            public void Enable()
+            {
+                events?.Add($"enable:{Id}");
+                onEnable?.Invoke(right);
+                if (failRight && right) throw new InvalidOperationException();
+            }
             public void Disable() => events?.Add($"disable:{Id}");
             public void Dispose() => events?.Add($"dispose:{Id}");
             public void Tick(float now) => events?.Add($"tick:{Id}");
