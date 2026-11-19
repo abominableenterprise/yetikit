@@ -69,7 +69,11 @@ namespace Game.Starter.Editor
                     targets[i] = target.AddComponent<ImpactCue>();
                 }
                 new GameObject("Sandbox Bindings").AddComponent<SandboxBindings>().Configure(recovery, new[] { ball, offset }, targets);
-                BuildView();
+                var pads = Material(output, "Pads", new Color(0.12f, 0.65f, 0.72f));
+                var arc = new Material(Shader.Find("Sprites/Default"));
+                AssetDatabase.CreateAsset(arc, output + "/Aim.mat");
+                SandboxRigBuilder.Build(manager, pads, arc);
+                BuildLight();
                 var path = output + "/Sandbox.unity";
                 if (!EditorSceneManager.SaveScene(scene, path)) throw new IOException("Could not save sandbox scene.");
                 complete = true;
@@ -126,6 +130,7 @@ namespace Game.Starter.Editor
             prop.grip = ball
                 ? new GripSpec(GripKind.Cylinder, Vector3.up, Vector3.forward, Vector3.zero, BallDiameter / 2)
                 : GripSpec.Oriented(GripKind.Cylinder, Vector3.up, Vector3.forward, HandleCenter, 0.0325f);
+            root.GetComponent<PropGrabInteractable>().interactionLayers = SandboxRigBuilder.PropsMask;
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, $"{output}/{name}.prefab");
             UnityEngine.Object.DestroyImmediate(root);
             if (!prefab) throw new IOException($"Could not save {name} prefab.");
@@ -138,12 +143,8 @@ namespace Game.Starter.Editor
             return instance.GetComponent<GrabbableProp>();
         }
 
-        static void BuildView()
+        static void BuildLight()
         {
-            var camera = new GameObject("Camera").AddComponent<Camera>();
-            camera.tag = "MainCamera";
-            camera.gameObject.AddComponent<AudioListener>();
-            camera.transform.SetPositionAndRotation(new Vector3(0, 1.6f, -2.35f), Quaternion.Euler(10, 0, 0));
             var light = new GameObject("Room Light").AddComponent<Light>();
             light.type = LightType.Directional;
             light.transform.rotation = Quaternion.Euler(45, -30, 0);
