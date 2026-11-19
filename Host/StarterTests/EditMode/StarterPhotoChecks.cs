@@ -4,9 +4,87 @@ using System.Linq;
 using Game.Dev;
 using NUnit.Framework;
 using UnityEngine;
+using YetiKit.Playtest;
 
 namespace YetiKit.Starter.HostTests
 {
+    public sealed class StarterPhotoStorageTests
+    {
+        sealed class Interrupted : Exception { }
+
+        [Test]
+        public void NextSnapRecoversAnInterruptedPair()
+        {
+            InSnapDirectory(directory =>
+            {
+                string first = null, second = null;
+                Assert.Throws<Interrupted>(() => StarterPhoto.SavePair(directory, new byte[] { 1 }, default, (path, bytes) =>
+                {
+                    if (first == null)
+                    {
+                        FileChunkStore.WriteAtomic(path, bytes);
+                        first = path;
+                        return;
+                    }
+
+                    second = path;
+                    File.WriteAllBytes(second + FileChunkStore.TmpSuffix, bytes);
+                    // Simulate losing the process before the second rename, skipping normal error cleanup.
+                    throw new Interrupted();
+                }));
+                var temp = second + FileChunkStore.TmpSuffix;
+                Assert.That(Directory.GetFiles(directory), Is.EquivalentTo(new[] { first, temp }));
+
+                StarterPhoto.SavePair(directory, new byte[] { 2 }, default);
+
+                Assert.That(Directory.GetFiles(directory).Intersect(new[] { first, temp }), Is.Empty,
+                    "The next snap must remove both files left by the interruption.");
+                Assert.That(Path.GetExtension(first), Is.EqualTo(".png"));
+                Assert.That(Path.GetExtension(second), Is.EqualTo(".json"));
+                var files = Directory.GetFiles(directory);
+                Assert.That(files, Has.Length.EqualTo(2));
+                var photo = files.Single(path => Path.GetExtension(path) == ".png");
+                Assert.That(files, Does.Contain(Path.ChangeExtension(photo, ".json")));
+                Assert.That(File.ReadAllBytes(photo), Is.EqualTo(new byte[] { 2 }));
+            });
+        }
+
+        [Test]
+        public void RecoveryRemovesLegacyOrphansButKeepsCompletePairsAndOtherFiles()
+        {
+            InSnapDirectory(directory =>
+            {
+                string Stem(string folder) => Path.Combine(folder, "starter-photo-" + Guid.NewGuid().ToString("N"));
+                var legacy = Stem(directory);
+                var tempOnly = Stem(directory) + ".png.tmp";
+                var pngOnly = Stem(directory) + ".png";
+                var legacyFiles = new[] { legacy + ".json", legacy + ".png.tmp", tempOnly, pngOnly };
+                var complete = Stem(directory);
+                var leftover = complete + ".json.tmp";
+                var nested = Directory.CreateDirectory(Path.Combine(directory, "nested")).FullName;
+                var preserved = new[]
+                {
+                    complete + ".png", complete + ".json", Path.Combine(directory, "starter-photo-not-a-snap.json"),
+                    Stem(directory) + ".txt", Stem(Path.GetDirectoryName(directory)) + ".json", Stem(nested) + ".png.tmp"
+                };
+                foreach (var path in legacyFiles.Append(leftover).Concat(preserved)) File.WriteAllText(path, "synthetic");
+
+                StarterPhoto.SavePair(directory, new byte[] { 1 }, default);
+
+                Assert.That(Directory.GetFiles(directory).Intersect(legacyFiles.Append(leftover)), Is.Empty);
+                foreach (var path in preserved) Assert.That(File.ReadAllText(path), Is.EqualTo("synthetic"));
+            });
+        }
+
+        static void InSnapDirectory(Action<string> run)
+        {
+            var root = Path.Combine(Path.GetTempPath(), "starter-check-" + Guid.NewGuid().ToString("N"));
+            var snaps = Directory.CreateDirectory(Path.Combine(root, "snaps"));
+            try { run(snaps.FullName); }
+            finally { Directory.Delete(root, true); }
+        }
+    }
+
     sealed class StarterPhotoChecks : IDisposable
     {
         readonly string directory = Path.Combine(Path.GetTempPath(), "starter-check-" + Guid.NewGuid().ToString("N"));
