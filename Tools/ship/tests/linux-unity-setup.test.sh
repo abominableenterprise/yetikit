@@ -33,6 +33,12 @@ printf '#!/bin/sh\n# Unity 2022.3.1f1\n' > "$wrong_img/opt/unity/Editor/Unity"
 # FAKE_CUT=1 drops the stream; FAKE_EXTRACT_GATE synchronizes concurrent extracts.
 cat > "$tmp/bin/crane" <<EOF
 #!/bin/bash
+case "\$1" in
+  digest) echo 'fixture@sha256:$(printf '%064d' 1)'; exit ;;
+  config) printf '%s\n' '{"history":[{"created_by":"RUN |2 version=6000.6.6f1 module=android /bin/sh -c echo \$version > \\"\$UNITY_PATH/version\\" # buildkit"}]}'; exit ;;
+  export) ;;
+  *) exit 1 ;;
+esac
 echo crane >> "$tmp/download-calls"
 if [ -n "\${FAKE_EXTRACT_GATE:-}" ]; then
   touch "\$FAKE_EXTRACT_GATE"
