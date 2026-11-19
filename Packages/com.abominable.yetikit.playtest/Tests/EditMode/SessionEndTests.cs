@@ -75,6 +75,61 @@ namespace YetiKit.Playtest.Tests
             }
         }
 
+        [TestCase("flush")]
+        [TestCase("sync")]
+        public void FinalMetadataDurabilityFailureDefersTheMarkerUntilRetry(string failure)
+        {
+            using (var tmp = new TempDir())
+            {
+                double retryClock = 0;
+                var operations = new System.Collections.Generic.List<string>();
+                var failOnce = true;
+                void Step(string step)
+                {
+                    operations.Add(step);
+                    if (step == failure && failOnce)
+                    {
+                        failOnce = false;
+                        throw new IOException("injected durability failure");
+                    }
+                }
+                var store = new FileChunkStore(tmp.Path, long.MaxValue, file =>
+                {
+                    file.Flush(true);
+                    Step(Path.GetFileName(file.Name) == "meta.json.tmp" ? "flush" : "marker-flush");
+                }, dir =>
+                {
+                    Assert.AreEqual(Path.Combine(tmp.Path, FileChunkStore.OutboxFolder, A), dir);
+                    StringAssert.Contains("\"end\":\"", File.ReadAllText(Path.Combine(dir, FileChunkStore.MetaFile)));
+                    Step(File.Exists(Path.Combine(dir, DoneMarker.FileName)) ? "marker-sync" : "sync");
+                });
+                using (var pump = new ChunkPump(store: store, clock: () => Volatile.Read(ref retryClock)))
+                {
+                    clock = 0;
+                    var log = new FlightLog(() => clock);
+                    var session = Session(A, log, pump, store);
+                    Assert.IsTrue(session.Begin(0));
+                    Assert.IsTrue(pump.Drain(5000));
+                    Assert.IsEmpty(operations, "live checkpoints do not need the final durability barrier");
+                    log.AppendEvent("test_action", null);
+                    Assert.IsTrue(session.End(1));
+                    Assert.IsTrue(pump.Drain(5000));
+                    var marker = Path.Combine(session.Dir, DoneMarker.FileName);
+                    CollectionAssert.AreEqual(failure == "flush" ? new[] { "flush" } : new[] { "flush", "sync" }, operations);
+                    Assert.IsFalse(File.Exists(marker));
+                    Assert.IsTrue(pump.Owns(A));
+
+                    operations.Clear();
+                    Volatile.Write(ref retryClock, Backoff.Delay(1));
+                    Assert.IsTrue(pump.Drain(5000));
+                    CollectionAssert.AreEqual(new[] { "flush", "sync", "marker-flush", "marker-sync" }, operations);
+                    Assert.IsTrue(File.Exists(marker));
+                    Assert.IsFalse(pump.Owns(A));
+                    Assert.AreEqual(1, pump.Errors);
+                }
+            }
+        }
+
         [Test]
         public void ALongPauseRolloverWithAStalledPumpKeepsBothSessions()
         {

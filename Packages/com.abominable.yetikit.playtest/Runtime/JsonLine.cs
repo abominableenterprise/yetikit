@@ -57,6 +57,7 @@ namespace YetiKit.Playtest
         /// <summary>An integer.</summary>
         public static StringBuilder Int(StringBuilder sb, long v)
         {
+            if (v == long.MinValue) return sb.Append("-9223372036854775808");
             if (v < 0) { sb.Append('-'); v = -v; }
             return Digits(sb, v, 1);
         }

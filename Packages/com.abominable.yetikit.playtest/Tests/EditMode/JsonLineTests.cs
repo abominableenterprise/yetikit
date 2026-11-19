@@ -48,6 +48,31 @@ namespace YetiKit.Playtest.Tests
         }
 
         [Test]
+        public void MinimumInt64IsEmittedAsAJsonNumberByIntAndField()
+        {
+            Assert.AreEqual("-9223372036854775808", JsonLine.Int(new StringBuilder(), long.MinValue).ToString());
+            var sb = JsonLine.Begin(new StringBuilder(), 0, "test");
+            JsonLine.Field(sb, "min", long.MinValue);
+            JsonLine.End(sb);
+            Assert.AreEqual("{\"t\":0,\"k\":\"test\",\"min\":-9223372036854775808}\n", sb.ToString());
+        }
+
+        [TestCase("{\"t\":123}")]
+        [TestCase("{\"other\":[{\"t\":2}],\"k\":\"other\"}")]
+        [TestCase("{\"\\u0074\":123}")]
+        [TestCase("{\"\\u006B\":\"other\"}")]
+        public void ReservedTopLevelPayloadKeysAreKeptUnderData(string payload)
+        {
+            double time = 0;
+            var log = new FlightLog(() => time);
+            time = 1.25;
+            Assert.AreEqual(AppendResult.Appended, log.AppendEvent("test_event", payload));
+            Assert.AreEqual("{\"t\":1.25,\"k\":\"test_event\",\"d\":" + payload + "}\n", log.Buffer.ToString());
+            Assert.AreEqual(1, log.Count("test_event"));
+            Assert.AreEqual(0, log.Count("other"));
+        }
+
+        [Test]
         public void PoseRoundsPositionsToMillimetresAndQuaternionsToFourDecimals()
         {
             var sb = JsonLine.Pose7(new StringBuilder(), new Vector3(1.00049f, -0.0126f, 2f), new Quaternion(0.123456f, 0f, -0.5f, 0.86603f));
@@ -58,11 +83,11 @@ namespace YetiKit.Playtest.Tests
         public void AppendEventMergesObjectFieldsAndWrapsOtherValues()
         {
             var log = new FlightLog(() => 0);
-            log.AppendEvent("test_object", "{\"value\":\"alpha\"}");
+            log.AppendEvent("test_object", "{\"value\":{\"t\":123},\"quote\":\"\\\"k\\\":\"}");
             log.AppendEvent("test_text", "hello");
             log.AppendEvent("test_number", "42");
             log.AppendEvent("test_empty", null);
-            Assert.AreEqual("{\"t\":0,\"k\":\"test_object\",\"value\":\"alpha\"}\n{\"t\":0,\"k\":\"test_text\",\"d\":\"hello\"}\n" +
+            Assert.AreEqual("{\"t\":0,\"k\":\"test_object\",\"value\":{\"t\":123},\"quote\":\"\\\"k\\\":\"}\n{\"t\":0,\"k\":\"test_text\",\"d\":\"hello\"}\n" +
                 "{\"t\":0,\"k\":\"test_number\",\"d\":42}\n{\"t\":0,\"k\":\"test_empty\"}\n", log.Buffer.ToString());
             Assert.AreEqual(4, log.Events);
             Assert.AreEqual(1, log.Count("test_object"));

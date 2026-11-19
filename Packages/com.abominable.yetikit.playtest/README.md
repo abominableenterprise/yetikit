@@ -13,7 +13,9 @@ of the pump after the last session. Use one active session per log and pump.
 
 Producers call `FlightLog.AppendEvent(kind, payload)` or register an
 `IFlightEventSource` and dispose its registration when finished. Payloads are
-JSON values; object fields are merged into the record. An optional
+JSON values; object fields are merged into the record unless the object uses
+recorder-owned `t` or `k` keys at the top level, in which case it stays under
+`d`. An optional
 `IEventClassification` controls counts and whether events keep short sessions.
 `AppendEvent` returns `Appended` when a record enters memory, `BufferFull`
 when backpressure rejects it, or `Sealed` after the session ends. Acceptance
@@ -26,7 +28,9 @@ and latest lost record times (`lost.first` / `lost.last`, null if unavailable).
 
 Recordings stay under `<root>/outbox/<session>/`. They contain `meta.json`,
 gzip JSON Lines chunks rotated every 60 seconds, and `session.done` after
-finalization. Each in-flight chunk uses a temporary `.journal`: a four-byte
+finalization. The disk store flushes final metadata before publishing the
+marker, including directory entries on Linux, macOS and Android filesystems
+that support directory sync. Each in-flight chunk uses a temporary `.journal`: a four-byte
 little-endian length followed by a UTF-8 record. Length prefixes keep recovery
 independent of gzip member parsing. Startup recovery publishes the complete
 records as one ordinary gzip chunk, counts any torn tail, and removes the
