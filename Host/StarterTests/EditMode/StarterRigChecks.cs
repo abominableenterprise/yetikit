@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Linq;
 using NUnit.Framework;
+using Game.Starter;
 using Unity.XR.CoreUtils;
 using UnityEditor;
 using UnityEngine;
@@ -75,28 +76,46 @@ namespace YetiKit.Starter.HostTests
                 ""name"": ""StarterTestController"",
                 ""extend"": ""XRController"",
                 ""controls"": [
+                    {""name"": ""gripButton"", ""layout"": ""Button"", ""usage"": ""GripButton""},
                     {""name"": ""triggerButton"", ""layout"": ""Button"", ""usage"": ""TriggerButton""},
                     {""name"": ""stick"", ""layout"": ""Vector2"", ""usage"": ""Primary2DAxis""}
                 ]
             }");
             var device = (UnityEngine.InputSystem.XR.XRController)InputSystem.AddDevice(layout);
+            const string poseOnlyLayout = "StarterTestHandDevice";
+            InputSystem.RegisterLayout(@"{
+                ""name"": ""StarterTestHandDevice"", ""extend"": ""XRController"",
+                ""controls"": [{""name"": ""handOnlyControl"", ""layout"": ""Button""}]
+            }");
+            UnityEngine.InputSystem.XR.XRController unsupported = null;
+            using var observed = new InputAction("Fixture tracking", InputActionType.PassThrough);
+            observed.AddBinding("<StarterTestController>/isTracked");
+            observed.AddBinding("<StarterTestHandDevice>/isTracked");
+            var reports = 0;
+            observed.performed += ctx => { if (ctx.ReadValue<float>() > 0.5f) reports++; };
+            observed.Enable();
             try
             {
                 InputSystem.SetDeviceUsage(device, "RightHand");
                 Assert.That(hand.Mode, Is.EqualTo(HandMode.None));
                 var tracking = new SyntheticHand();
                 hand.Tracking = tracking;
-                yield return null;
+                yield return Frames(3);
                 Assert.That(hand.Mode, Is.EqualTo(HandMode.TrackedHand));
                 Assert.That(hand.grabber.isActiveAndEnabled, Is.True);
                 var interactable = prop.GetComponent<PropGrabInteractable>();
+                var position = hand.transform.parent.InverseTransformPoint(prop.transform.position);
+                var adapter = hand.GetComponent<ControllerTracking>();
+                adapter.enabled = false;
+                SetController(device, position, Quaternion.identity);
+                yield return Until(() => reports > 0);
+                Assert.That(reports, Is.GreaterThan(0), "The controller reported tracking while the adapter was disabled.");
+                Assert.That(hand.HandTracked, Is.True);
                 grab.interactionManager.SelectEnter((IXRSelectInteractor)hand.grabber, interactable);
                 Assert.That(prop.Held, Is.True);
-
-                var position = hand.transform.parent.InverseTransformPoint(prop.transform.position);
-                SetController(device, position, Quaternion.identity);
+                adapter.enabled = true;
                 yield return Frames(3);
-                Assert.That(hand.Mode, Is.EqualTo(HandMode.Controller));
+                Assert.That(hand.Mode, Is.EqualTo(HandMode.Controller), "Take over without a new tracking edge.");
                 Assert.That(other.Mode, Is.EqualTo(HandMode.None), "tracking is per side");
                 Assert.That(Vector3.Distance(hand.controller.localPosition, position), Is.LessThan(0.001f));
                 Assert.That(hand.grabber.isActiveAndEnabled || prop.Held || interactable.PendingLateRelease, Is.False);
@@ -152,6 +171,13 @@ namespace YetiKit.Starter.HostTests
                 yield return Frames(3);
                 Assert.That(teleports, Is.EqualTo(1), "Losing tracking must not confirm an aimed teleport.");
                 Assert.That(origin.transform.position, Is.EqualTo(beforeLoss));
+                unsupported = (UnityEngine.InputSystem.XR.XRController)InputSystem.AddDevice(poseOnlyLayout);
+                InputSystem.SetDeviceUsage(unsupported, "RightHand");
+                reports = 0;
+                SetController(unsupported, new Vector3(2f, 1f, 1f), Quaternion.identity);
+                yield return Until(() => reports > 0);
+                yield return null;
+                Assert.That(reports, Is.GreaterThan(0), "The pose-only device reported tracking.");
                 Assert.That(grab.isActiveAndEnabled || prop.Held || interactable.PendingLateRelease, Is.False);
                 Assert.That(hand.Mode, Is.EqualTo(HandMode.TrackedHand));
                 Assert.That(hand.grabber.isActiveAndEnabled, Is.True);
@@ -181,7 +207,9 @@ namespace YetiKit.Starter.HostTests
             finally
             {
                 if (device.added) InputSystem.RemoveDevice(device);
+                if (unsupported != null && unsupported.added) InputSystem.RemoveDevice(unsupported);
                 InputSystem.RemoveLayout(layout);
+                InputSystem.RemoveLayout(poseOnlyLayout);
             }
         }
 
@@ -201,8 +229,10 @@ namespace YetiKit.Starter.HostTests
                 device.deviceRotation.WriteValueIntoEvent(rotation, state);
                 device.trackingState.WriteValueIntoEvent(3, state);
                 device.isTracked.WriteValueIntoEvent(1f, state);
-                ((UnityEngine.InputSystem.Controls.ButtonControl)device["triggerButton"]).WriteValueIntoEvent(trigger ? 1f : 0f, state);
-                ((UnityEngine.InputSystem.Controls.Vector2Control)device["stick"]).WriteValueIntoEvent(stick, state);
+                device.TryGetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("triggerButton")
+                    ?.WriteValueIntoEvent(trigger ? 1f : 0f, state);
+                device.TryGetChildControl<UnityEngine.InputSystem.Controls.Vector2Control>("stick")
+                    ?.WriteValueIntoEvent(stick, state);
                 InputSystem.QueueEvent(state);
             }
         }

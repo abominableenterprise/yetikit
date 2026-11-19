@@ -62,10 +62,7 @@ namespace Game.Starter.Editor
         {
             var side = right ? "RightHand" : "LeftHand";
             var device = "<XRController>{" + side + "}";
-            var tracker = Child(space, side + " Pose");
-            BindPose(tracker, device);
-            // PlayerHand and PropGrabInteractable both expect the active controller and hand
-            // to share the same tracking space. Keep the tracking driver on a separate sibling.
+            // The controller and hand must be siblings in the same tracking space.
             var controller = Child(space, side + " Controller");
             controller.SetActive(false);
             var direct = Direct<XRDirectInteractor>(controller, manager);
@@ -114,7 +111,7 @@ namespace Game.Starter.Editor
             handTurn.teleport = aim;
             handTurn.provider = turn;
 
-            tracker.AddComponent<ControllerTracking>().Configure(hand, direct, ray, handTurn, turn, device);
+            handRoot.AddComponent<ControllerTracking>().Configure(hand, direct, ray, handTurn, turn, device);
         }
 
         static T Direct<T>(GameObject root, XRInteractionManager manager) where T : XRDirectInteractor

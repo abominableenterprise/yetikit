@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Inputs.Readers;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
@@ -8,8 +9,7 @@ using YetiKit.Hands;
 
 namespace Game.Starter
 {
-    // Keep the pose driver independent of the controller interactor's active state, so it can
-    // receive the first tracked pose before PlayerHand sees an active controller.
+    // Poll tracking independently of the controller interactor's active state.
     [DefaultExecutionOrder(XRInteractionUpdateOrder.k_LocomotionProviders - 1)]
     public sealed class ControllerTracking : MonoBehaviour
     {
@@ -18,7 +18,8 @@ namespace Game.Starter
         [SerializeField] XRRayInteractor teleport;
         [SerializeField] HandSnapTurn handTurn;
         [SerializeField] SnapTurnProvider turn;
-        [SerializeField] InputAction tracked, stick;
+        [SerializeField] InputAction tracked;
+        const int FullPose = (int)(UnityEngine.XR.InputTrackingState.Position | UnityEngine.XR.InputTrackingState.Rotation);
 
         XRInputValueReader<Vector2> TurnInput => hand.RightHand ? turn.rightHandTurnInput : turn.leftHandTurnInput;
 
@@ -30,35 +31,41 @@ namespace Game.Starter
             teleport = ray;
             handTurn = trackedTurn;
             turn = snapTurn;
-            tracked = new InputAction("Tracked", InputActionType.Button, device + "/isTracked");
-            stick = new InputAction("Turn", InputActionType.Value, device + "/{Primary2DAxis}");
+            tracked = new InputAction("Tracked", InputActionType.PassThrough, device + "/isTracked");
         }
 
-        void OnEnable()
-        {
-            tracked.Enable();
-            stick.Enable();
-        }
+        void OnEnable() => tracked.Enable();
 
         void OnDisable()
         {
             tracked.Disable();
-            stick.Disable();
             SetControllerActive(false);
         }
 
         void Update()
         {
-            var active = tracked.IsPressed();
-            if (active) direct.transform.SetLocalPositionAndRotation(transform.localPosition, transform.localRotation);
-            SetControllerActive(active);
-            if (!active) return;
-            // Discard a hand pulse left over from the previous frame at controller takeover.
-            handTurn.Input.Pulse(0);
-            var axis = stick.ReadValue<Vector2>();
-            TurnInput.manualValue = Mathf.Abs(axis.x) >= 0.7f && Mathf.Abs(axis.x) > Mathf.Abs(axis.y)
-                ? new Vector2(Mathf.Sign(axis.x), 0f) : Vector2.zero;
-            hand.Report(direct.selectInput.ReadValue(), teleport.selectInput.ReadValue());
+            foreach (var control in tracked.controls)
+            {
+                // Some hand-interaction profiles are XRController layouts too. Require the
+                // physical controller controls this rig uses, and read pose from that device only.
+                if (control is not ButtonControl button || button.ReadValue() < 0.5f ||
+                    control.device is not UnityEngine.InputSystem.XR.XRController device ||
+                    (device.trackingState.ReadValue() & FullPose) != FullPose ||
+                    InputControlPath.TryFindChild<ButtonControl>(device, "{GripButton}") == null ||
+                    InputControlPath.TryFindChild<ButtonControl>(device, "{TriggerButton}") == null ||
+                    InputControlPath.TryFindChild<Vector2Control>(device, "{Primary2DAxis}") is not { } stick)
+                    continue;
+
+                direct.transform.SetLocalPositionAndRotation(device.devicePosition.ReadValue(), device.deviceRotation.ReadValue());
+                SetControllerActive(true);
+                handTurn.Input.Pulse(0); // discard a hand pulse from before takeover
+                var axis = stick.ReadValue();
+                TurnInput.manualValue = Mathf.Abs(axis.x) >= 0.7f && Mathf.Abs(axis.x) > Mathf.Abs(axis.y)
+                    ? new Vector2(Mathf.Sign(axis.x), 0f) : Vector2.zero;
+                hand.Report(direct.selectInput.ReadValue(), teleport.selectInput.ReadValue());
+                return;
+            }
+            SetControllerActive(false);
         }
 
         void SetControllerActive(bool active)
