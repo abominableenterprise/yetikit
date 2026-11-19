@@ -19,6 +19,8 @@ namespace YetiKit.Lab.Editor.Tests
         const string FolderKey = "YetiKit.Lab.Editor.Tests.GripLabBuilderTests.Folder";
         const string SceneFile = "/GripLab.unity";
 
+        public enum ColliderSetup { Missing, Trigger, Disabled, InactiveChild, SeparateBody }
+
         sealed class Catalog : IInteractableCatalog
         {
             public IReadOnlyList<InteractableEntry> Entries { get; set; }
@@ -27,18 +29,15 @@ namespace YetiKit.Lab.Editor.Tests
         [UnityTest]
         public IEnumerator SavedSceneKeepsBakedPropsAndRigAndPopulatesOnStart()
         {
-            var name = "GripLabFixture-" + Guid.NewGuid().ToString("N");
-            var folder = "Assets/" + name;
-            AssetDatabase.CreateFolder("Assets", name);
-            SessionState.SetString(FolderKey, folder);
-            var prefab = MakePrefab(folder + "/Block.prefab");
+            var folder = CreateFixtureFolder();
+            var prefab = MakePrefab(folder + "/Block.prefab", MakeBlock());
             var previous = OpenBaseScene(folder);
             var calls = 0;
             var catalog = new Catalog { Entries = new[] {
                 new InteractableEntry("prefab-block", "Prefab block", prefab, "blocks"),
                 new InteractableEntry("factory-block", "Factory block", () => {
                     calls++;
-                    return MakeBlock();
+                    return MakeBlock(colliderOnChild: true);
                 }, "blocks")
             }};
             var scene = GripLabBuilder.Build(catalog, target =>
@@ -93,7 +92,10 @@ namespace YetiKit.Lab.Editor.Tests
             Physics.SyncTransforms();
             var table = Surface(playing, "Grip Lab Table").bounds;
             var first = slots[0].GetComponent<BoxCollider>().bounds;
-            var second = slots[1].GetComponent<BoxCollider>().bounds;
+            var childBox = slots[1].GetComponentInChildren<BoxCollider>();
+            Assert.That(childBox.gameObject, Is.Not.EqualTo(slots[1].gameObject));
+            Assert.That(childBox.attachedRigidbody, Is.EqualTo(slots[1].GetComponent<Rigidbody>()));
+            var second = childBox.bounds;
             Assert.That(first.min.y, Is.EqualTo(table.max.y + 0.002f).Within(0.001f));
             Assert.That(second.min.z, Is.GreaterThan(first.max.z), "Wide props wrap onto a new row.");
             Assert.That(second.max.z, Is.LessThan(table.max.z), "The table accommodates both rows.");
@@ -102,11 +104,7 @@ namespace YetiKit.Lab.Editor.Tests
         [Test]
         public void RejectsHeadFromAnotherSceneAndClosesTheNewScene()
         {
-            var name = "GripLabFixture-" + Guid.NewGuid().ToString("N");
-            var folder = "Assets/" + name;
-            AssetDatabase.CreateFolder("Assets", name);
-            SessionState.SetString(FolderKey, folder);
-            var previous = OpenBaseScene(folder);
+            var previous = OpenBaseScene(CreateFixtureFolder());
             var foreignHead = new GameObject("Foreign head");
             var count = SceneManager.sceneCount;
             var called = false;
@@ -127,6 +125,56 @@ namespace YetiKit.Lab.Editor.Tests
             finally { Object.DestroyImmediate(foreignHead); }
         }
 
+        [TestCase(true, ColliderSetup.Missing)]
+        [TestCase(true, ColliderSetup.Trigger)]
+        [TestCase(true, ColliderSetup.Disabled)]
+        [TestCase(true, ColliderSetup.InactiveChild)]
+        [TestCase(true, ColliderSetup.SeparateBody)]
+        [TestCase(false, ColliderSetup.Missing)]
+        [TestCase(false, ColliderSetup.Trigger)]
+        [TestCase(false, ColliderSetup.Disabled)]
+        [TestCase(false, ColliderSetup.InactiveChild)]
+        [TestCase(false, ColliderSetup.SeparateBody)]
+        public void RejectsPropWithoutUsableColliderAndClosesTheNewScene(bool usePrefab, ColliderSetup setup)
+        {
+            var folder = CreateFixtureFolder();
+            var previous = OpenBaseScene(folder);
+            var existing = MakeBlock();
+            var count = SceneManager.sceneCount;
+            var target = default(Scene);
+            GameObject valid = null, invalid = null;
+            var badEntry = usePrefab
+                ? new InteractableEntry("invalid", "Invalid", MakePrefab(folder + "/Invalid.prefab", MakeInvalidBlock(setup)))
+                : new InteractableEntry("invalid", "Invalid", () => invalid = MakeInvalidBlock(setup));
+            var catalog = new Catalog { Entries = new[] {
+                new InteractableEntry("valid", "Valid", () => valid = MakeBlock()), badEntry
+            }};
+            try
+            {
+                var error = Assert.Throws<InvalidOperationException>(() => GripLabBuilder.Build(catalog, scene =>
+                {
+                    target = scene;
+                    return new GameObject("Synthetic head").transform;
+                }));
+                Assert.That(error.Message, Does.Contain("'invalid'").And.Contain("enabled solid collider"));
+                Assert.That(SceneManager.GetActiveScene(), Is.EqualTo(previous));
+                Assert.That(SceneManager.sceneCount, Is.EqualTo(count));
+                Assert.That(target.isLoaded, Is.False);
+                Assert.That(previous.GetRootGameObjects(), Is.EqualTo(new[] { existing }));
+                Assert.That(ReferenceEquals(valid, null), Is.False, "The earlier entry was created.");
+                Assert.That(valid == null, Is.True, "The earlier baked prop was destroyed.");
+                if (!usePrefab)
+                {
+                    Assert.That(ReferenceEquals(invalid, null), Is.False, "The invalid factory prop was created.");
+                    Assert.That(invalid == null, Is.True, "The invalid factory prop was destroyed.");
+                }
+            }
+            finally
+            {
+                if (target.IsValid() && target.isLoaded) EditorSceneManager.CloseScene(target, true);
+            }
+        }
+
         [UnityTearDown]
         public IEnumerator DeleteFixture()
         {
@@ -142,6 +190,15 @@ namespace YetiKit.Lab.Editor.Tests
             SessionState.EraseString(FolderKey);
         }
 
+        static string CreateFixtureFolder()
+        {
+            var name = "GripLabFixture-" + Guid.NewGuid().ToString("N");
+            var folder = "Assets/" + name;
+            AssetDatabase.CreateFolder("Assets", name);
+            SessionState.SetString(FolderKey, folder);
+            return folder;
+        }
+
         static Scene OpenBaseScene(string folder)
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
@@ -155,20 +212,43 @@ namespace YetiKit.Lab.Editor.Tests
         static BoxCollider Surface(Scene scene, string name) =>
             scene.GetRootGameObjects().Single(go => go.name == name).GetComponent<BoxCollider>();
 
-        static GameObject MakePrefab(string path)
+        static GameObject MakePrefab(string path, GameObject source)
         {
-            var source = MakeBlock();
             try { return PrefabUtility.SaveAsPrefabAsset(source, path); }
             finally { Object.DestroyImmediate(source); }
         }
 
-        static GameObject MakeBlock()
+        static GameObject MakeBlock(bool colliderOnChild = false)
         {
             var block = new GameObject("Block");
-            var box = block.AddComponent<BoxCollider>();
-            box.size = new Vector3(1.6f, 0.3f, 0.9f);
+            AddBox(block, colliderOnChild);
             block.AddComponent<GrabbableProp>();
             return block;
+        }
+
+        static GameObject MakeInvalidBlock(ColliderSetup setup)
+        {
+            var block = new GameObject("Invalid block", typeof(GrabbableProp));
+            if (setup == ColliderSetup.Missing) return block;
+            var box = AddBox(block, onChild: setup == ColliderSetup.InactiveChild || setup == ColliderSetup.SeparateBody);
+            if (setup == ColliderSetup.Trigger) box.isTrigger = true;
+            if (setup == ColliderSetup.Disabled) box.enabled = false;
+            if (setup == ColliderSetup.InactiveChild) box.gameObject.SetActive(false);
+            if (setup == ColliderSetup.SeparateBody) box.gameObject.AddComponent<Rigidbody>();
+            return block;
+        }
+
+        static BoxCollider AddBox(GameObject block, bool onChild = false)
+        {
+            var target = block;
+            if (onChild)
+            {
+                target = new GameObject("Collider child");
+                target.transform.SetParent(block.transform, false);
+            }
+            var box = target.AddComponent<BoxCollider>();
+            box.size = new Vector3(1.6f, 0.3f, 0.9f);
+            return box;
         }
     }
 }

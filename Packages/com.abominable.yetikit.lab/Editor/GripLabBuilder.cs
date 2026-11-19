@@ -17,7 +17,7 @@ namespace YetiKit.Lab.Editor
         /// Save untitled scenes before calling. The rig hook runs with the new scene active
         /// and must return a head in that scene.
         /// Catalog prefabs must be prefab assets, and factories must create fresh root props in the new scene.
-        /// The station places the baked props at runtime, not while building the scene.
+        /// Each prop needs an enabled solid collider on its rigidbody. The station places the baked props at runtime.
         /// </remarks>
         public static Scene Build(IInteractableCatalog catalog, Func<Scene, Transform> buildRig)
         {
@@ -75,6 +75,12 @@ namespace YetiKit.Lab.Editor
                     !item.TryGetComponent<GrabbableProp>(out var prop) || !prop.isActiveAndEnabled ||
                     item.GetComponent<GripLabSlot>())
                     throw new InvalidOperationException($"Catalog entry '{entry.Id}' must create an active root prop in the new scene without a lab slot.");
+
+                // Match the station's runtime layout: only active, enabled solids on the prop's own body count.
+                var body = prop.Body;
+                if (!Array.Exists(item.GetComponentsInChildren<Collider>(),
+                        collider => collider.enabled && !collider.isTrigger && collider.attachedRigidbody == body))
+                    throw new InvalidOperationException($"Catalog entry '{entry.Id}' needs an enabled solid collider on its rigidbody.");
 
                 item.name = entry.DisplayName;
                 item.transform.SetParent(parent, true);
