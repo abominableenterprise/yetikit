@@ -330,7 +330,8 @@ with open('/dev/tty', 'r') as tty:
     if tty.readline().strip() != 'fixture-password':
         sys.exit('missing synthetic password')
 with open(os.environ['SUDO_CALLS'], 'a') as log:
-    print(' '.join(sys.argv[1:]), file=log)
+    args = sys.argv[7:] if sys.argv[1:4] == ['/usr/bin/python3', '-I', '-c'] else sys.argv[1:]
+    print(' '.join(args), file=log)
 os.execvp(sys.argv[1], sys.argv[1:])
 EOF
 printf '#!/bin/sh\n[ "$2" != xvfb ]\n' > "$tmp/bin/dpkg"
