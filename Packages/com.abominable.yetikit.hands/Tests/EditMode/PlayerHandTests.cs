@@ -177,6 +177,54 @@ namespace YetiKit.Hands.Tests
             Assert.That(visual.Poses, Is.EqualTo(6), "only one listener after re-enabling");
         }
 
+        [Test]
+        public void PartialReadKeepsAllJointsFromTheLastCompleteSample()
+        {
+            var tracking = new FakeTracking();
+            var hand = Build(true, tracking);
+            hand.Tick(0f);
+            Assert.That(hand.HandTracked, Is.True);
+            var wrist = hand.WristPose;
+            var palm = hand.PalmPose;
+            var joints = new Vector3[HandCurls.Points];
+            for (var i = 0; i < joints.Length; i++) joints[i] = hand.Joint(i);
+
+            tracking.Points[0] += Vector3.right;
+            tracking.Points[1] += Vector3.up;
+            tracking.Wrist.position += Vector3.right;
+            tracking.PartialRead = true;
+            hand.Tick(0.01f);
+
+            Assert.That(hand.Mode, Is.EqualTo(HandMode.None));
+            Assert.That(hand.WristPose, Is.EqualTo(wrist));
+            Assert.That(hand.PalmPose, Is.EqualTo(palm));
+            for (var i = 0; i < joints.Length; i++) Assert.That(hand.Joint(i), Is.EqualTo(joints[i]), $"joint {i}");
+        }
+
+        [Test]
+        public void DisableInTrackedPresenceDoesNotRestartGrabberOrSendPose()
+        {
+            var hand = Build(true, new FakeTracking());
+            hand.grabber = Child("Near grab", hand.transform).gameObject.AddComponent<HandGrabInteractor>();
+            var visual = new RecordingVisual();
+            hand.Visual = visual;
+            var modes = new List<HandMode>();
+            hand.PresenceChanged += () =>
+            {
+                modes.Add(hand.Mode);
+                if (!hand.HandTracked) return;
+                hand.enabled = false;
+                Lifecycle(hand, "OnDisable");
+            };
+            hand.Tick(0f);
+
+            Assert.That(modes, Is.EqualTo(new[] { HandMode.TrackedHand, HandMode.None }));
+            Assert.That(hand.isActiveAndEnabled, Is.False);
+            Assert.That(hand.Present, Is.False);
+            Assert.That(visual.Presence[visual.Presence.Count - 1], Is.False);
+            Assert.That((hand.grabber.enabled, visual.Poses), Is.EqualTo((false, 0)), "no grabber or pose after absence");
+        }
+
         PlayerHand Build(bool right, FakeTracking tracking)
         {
             space = new GameObject("Tracking space");
@@ -207,6 +255,7 @@ namespace YetiKit.Hands.Tests
         class FakeTracking : IHandTracking
         {
             public bool Tracked = true;
+            public bool PartialRead;
             public bool LastRight;
             public Pose Wrist = new Pose(new Vector3(0.1f, 1.2f, 0.4f), Quaternion.Euler(-25f, 40f, 15f));
             public Vector3[] Points = HandShapeTests.Hand(0f, 0f, 0f, 0f, 0f);
@@ -216,6 +265,12 @@ namespace YetiKit.Hands.Tests
                 LastRight = right;
                 wrist = Wrist;
                 if (!Tracked) return false;
+                if (PartialRead)
+                {
+                    points[0] = Points[0];
+                    points[1] = Points[1];
+                    return false;
+                }
                 Points.CopyTo(points, 0);
                 return true;
             }

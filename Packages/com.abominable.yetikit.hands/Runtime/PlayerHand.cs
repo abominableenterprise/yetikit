@@ -12,6 +12,8 @@ namespace YetiKit.Hands
     public sealed class PlayerHand : MonoBehaviour, IHandInput
     {
         public const int ExecutionOrder = -200;
+        // Allow a short gap between Dynamic updates, then treat cached joints as tracking loss.
+        const float DynamicSampleMaxAge = 0.05f;
 
         public bool rightHand = true;
         public Transform controller;
@@ -26,6 +28,7 @@ namespace YetiKit.Hands
         static readonly int palmIndex = XRHandJointID.Palm.ToIndex();
 
         readonly Vector3[] points = new Vector3[HandCurls.Points];
+        readonly Vector3[] pendingPoints = new Vector3[HandCurls.Points];
         readonly JointCurls curls = new JointCurls();
         readonly Vector3[] renderPoints = new Vector3[HandCurls.Points];
         readonly JointCurls renderCurls = new JointCurls();
@@ -38,6 +41,7 @@ namespace YetiKit.Hands
         System.Action follow;
         float controllerGrip, controllerTrigger, handGrip;
         bool endingGrab, notifiedPresence;
+        int disableEpoch;
         Pose dynamicWrist = Pose.identity, dynamicPalm = Pose.identity;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -180,6 +184,7 @@ namespace YetiKit.Hands
 
         void OnDisable()
         {
+            disableEpoch++;
             live.Remove(this);
             Application.onBeforeRender -= Follow;
             XrHandTracking.BeforeRender -= RenderSample;
@@ -219,23 +224,34 @@ namespace YetiKit.Hands
                 return;
             }
 
-            if (Tracking.TryGetHand(rightHand, points, out var wrist))
+            var source = Tracking;
+            if (source.TryGetHand(rightHand, pendingPoints, out var wrist))
             {
-                HandSampleAt = Tracking is XrHandTracking xr ? xr.LastDynamicSampleAt(rightHand) : sampleTime;
-                Track(wrist, now);
-                SetMode(HandMode.TrackedHand);
-                if (grabber && !grabber.enabled) grabber.enabled = true;
-                SendPose(WristPose, curls);
-                return;
+                var sampledAt = source is XrHandTracking xr ? xr.LastDynamicSampleAt(rightHand) : sampleTime;
+                if (sampleTime <= sampledAt + DynamicSampleMaxAge)
+                {
+                    System.Array.Copy(pendingPoints, points, points.Length);
+                    HandSampleAt = sampledAt;
+                    Track(wrist, now);
+                    if (!SetMode(HandMode.TrackedHand) || ControllerActive) return;
+                    var transition = Transition;
+                    if (grabber && !grabber.enabled) grabber.enabled = true;
+                    if (CanContinue(transition) && !ControllerActive) SendPose(WristPose, curls);
+                    return;
+                }
             }
 
             grab.Tick(false, 0f, 0f, 0f, now);
-            SetMode(HandMode.None);
-            if (!GrabberActive) EndHandGrab();
+            if (SetMode(HandMode.None) && !GrabberActive) EndHandGrab();
         }
 
-        void SetMode(HandMode mode)
+        // A listener can synchronously disable the hand or start a different mode transition.
+        (int pose, int disable) Transition => (PoseEpoch, disableEpoch);
+        bool CanContinue((int pose, int disable) transition) => isActiveAndEnabled && Transition == transition;
+
+        bool SetMode(HandMode mode)
         {
+            var transition = Transition;
             if (mode != Mode)
             {
                 if (Mode == HandMode.TrackedHand)
@@ -248,9 +264,11 @@ namespace YetiKit.Hands
                 if (Mode == HandMode.Controller) controllerGrip = controllerTrigger = 0f;
                 Mode = mode;
                 PoseEpoch++;
+                transition = Transition;
                 PresenceChanged?.Invoke();
             }
-            NotifyVisual();
+            if (Transition == transition) NotifyVisual();
+            return CanContinue(transition);
         }
 
         IHandVisual NotifyVisual()
@@ -330,13 +348,16 @@ namespace YetiKit.Hands
         void Follow()
         {
             if (!isActiveAndEnabled || endingGrab || !ControllerActive) return;
+            var transition = Transition;
+            var target = controller;
             // Release at the last hand position, before snapping the root to a different input source.
             EndHandGrab();
+            if (!CanContinue(transition) || controller != target || !ControllerActive) return;
             grab.Reset();
-            transform.SetPositionAndRotation(controller.position, controller.rotation);
+            transform.SetPositionAndRotation(target.position, target.rotation);
             var changed = Mode != HandMode.Controller;
-            SetMode(HandMode.Controller);
-            if (changed) Visual?.OnControllerInput(controllerGrip, controllerTrigger);
+            if (SetMode(HandMode.Controller) && changed && ControllerActive)
+                Visual?.OnControllerInput(controllerGrip, controllerTrigger);
         }
     }
 }
