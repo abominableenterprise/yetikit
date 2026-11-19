@@ -69,7 +69,7 @@ namespace YetiKit.Hands
         public HandMode Mode { get; private set; }
         public bool HandTracked => Mode == HandMode.TrackedHand;
         public bool Present => Mode != HandMode.None;
-        /// <summary>Unscaled time of the latest valid Dynamic joint sample.</summary>
+        /// <summary>Unscaled time of the latest valid Dynamic joint sample, or negative infinity when unavailable.</summary>
         public float HandSampleAt { get; private set; } = float.NegativeInfinity;
         public event System.Action PresenceChanged;
         public HandShape Shape => HandTracked ? classifier.Shape : HandShape.Relaxed;

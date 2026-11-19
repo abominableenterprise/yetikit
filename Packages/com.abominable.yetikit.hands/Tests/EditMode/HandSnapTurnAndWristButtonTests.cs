@@ -91,6 +91,28 @@ namespace YetiKit.Hands.Tests
         }
 
         [Test]
+        public void FrozenTrackedSampleDoesNotAdvanceTurnDwell()
+        {
+            var hand = Child("Tracked hand").AddComponent<PlayerHand>();
+            hand.Tracking = new FakeTracking { Points = TurnPose(Vector3.right) };
+            var turn = hand.gameObject.AddComponent<HandSnapTurn>();
+            turn.hand = hand;
+
+            hand.Tick(0f);
+            Assert.That(turn.Tick(0f, 0.02f, false), Is.Zero);
+            Assert.That(hand.HandTracked, Is.True);
+            Assert.That(turn.Tick(HandTurnGesture.HoldTime + 0.01f, 0.02f, false), Is.Zero,
+                "an unchanged sample timestamp cannot complete the turn dwell");
+            Assert.That(turn.Input.Pending, Is.Zero);
+
+            hand.Tick(1f);
+            Assert.That(turn.Tick(1f, 0.02f, false), Is.Zero, "dwell restarts on a fresh sample");
+            var ready = 1f + HandTurnGesture.HoldTime + 0.01f;
+            hand.Tick(ready);
+            Assert.That(turn.Tick(ready, 0.02f, false), Is.EqualTo(1));
+        }
+
+        [Test]
         public void SnapTurnDiscardsProgressWhileTeleportIsBusyAndClearsPulsesOnHandLoss()
         {
             var hand = Child("Tracked hand").AddComponent<PlayerHand>();

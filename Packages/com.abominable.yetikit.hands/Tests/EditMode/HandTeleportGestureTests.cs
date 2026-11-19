@@ -66,6 +66,28 @@ namespace YetiKit.Hands.Tests
             Assert.That(g.Busy, Is.EqualTo(confirms), "an expired half drop cancels and frees the grab");
         }
 
+        [TestCase(1f, -0.01f, true)]
+        [TestCase(1f, 0f, true)]
+        [TestCase(1f, 0.01f, false)]
+        [TestCase(0.6f, -0.01f, true)]
+        [TestCase(0.6f, 0f, true)]
+        [TestCase(0.6f, 0.01f, false)]
+        public void FirstThumbDropRespectsAnExistingPointLossDeadline(float hammer, float offset, bool withinGrace)
+        {
+            var g = Armed();
+            const float lostAt = 0.5f;
+            g.Tick(true, false, true, 0f, 0f, false, lostAt);
+            Assert.That(g.Aiming, Is.True);
+
+            var now = lostAt + HandTeleportGesture.DropGrace + offset;
+            var halfDrop = hammer < HandTeleportGesture.ConfirmDrop;
+            Assert.That(g.Tick(true, false, true, hammer, 0f, false, now), Is.EqualTo(withinGrace && !halfDrop));
+            Assert.That(g.Dropping, Is.EqualTo(halfDrop && withinGrace));
+            Assert.That(g.Busy, Is.EqualTo(withinGrace));
+            if (halfDrop)
+                Assert.That(g.Tick(true, false, true, 1f, 0f, false, now + 0.01f), Is.EqualTo(withinGrace));
+        }
+
         [Test]
         public void LiftingTheThumbBeforeTheDeadlineAllowsANewDrop()
         {

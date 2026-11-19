@@ -18,6 +18,7 @@ namespace YetiKit.Hands
 
         Vector3 last;
         bool hasLast;
+        float lastSampleAt = float.NegativeInfinity;
         public HandTurnGesture Gesture { get; } = new HandTurnGesture();
         public HandTurnInput Input { get; } = new HandTurnInput();
         /// <summary>An external aiming interaction is using this hand.</summary>
@@ -36,6 +37,7 @@ namespace YetiKit.Hands
             Input.Detach();
             Gesture.Reset();
             hasLast = false;
+            lastSampleAt = float.NegativeInfinity;
         }
 
         void Update() => Tick(Time.time, Time.deltaTime, hand && hand.isActiveAndEnabled && HandTeleport.Holding(hand));
@@ -52,7 +54,10 @@ namespace YetiKit.Hands
                 return 0;
             }
 
-            var tracked = hand.HandTracked;
+            // A cached pose is neither progress toward the hold nor a release of an already-fired pose.
+            var sampleAt = hand.HandSampleAt;
+            var tracked = hand.HandTracked && sampleAt != float.NegativeInfinity && sampleAt != lastSampleAt;
+            if (tracked) lastSampleAt = sampleAt;
             var pos = hand.transform.localPosition; // Movement of the rig is not movement of the hand.
             var speed = tracked && hasLast && dt > 0f ? Vector3.Distance(pos, last) / dt : 0f;
             last = pos;

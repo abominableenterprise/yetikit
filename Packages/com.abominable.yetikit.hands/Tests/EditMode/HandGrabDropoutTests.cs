@@ -4,6 +4,26 @@ namespace YetiKit.Hands.Tests
 {
     public sealed class HandGrabDropoutTests
     {
+        [TestCase(-0.01f, false, true)]
+        [TestCase(0f, false, true)]
+        [TestCase(0.01f, false, false)]
+        [TestCase(0.01f, true, false)]
+        public void FirstTrackedFrameAppliesTheDropoutDeadline(float offset, bool fullFist, bool withinGrace)
+        {
+            var g = new HandGrabGesture();
+            g.Tick(true, 1f, 0f, 0f, 0f);
+            Assert.That(g.Armed, Is.True);
+            g.Tick(false, 0f, 0f, 0f, 0.25f);
+            var now = 0.25f + HandGrabGesture.LostGrace + offset;
+            var curl = fullFist ? 1f : (HandGrabGesture.GripEnter + HandGrabGesture.GripStay) / 2f;
+            g.Tick(true, curl, 0f, 1f, now);
+
+            Assert.That(g.Selecting, Is.EqualTo(withinGrace || fullFist));
+            Assert.That(g.Armed, Is.EqualTo(withinGrace));
+            Assert.That(g.Trigger, Is.EqualTo(withinGrace ? 1f : 0f));
+            Assert.That(g.StartedAt, Is.EqualTo(withinGrace ? 0f : fullFist ? now : float.NegativeInfinity));
+        }
+
         [Test]
         public void ReacquisitionBetweenPinchThresholdsPreservesGrabAcrossRepeatedDropouts()
         {

@@ -63,6 +63,8 @@ namespace YetiKit.Hands
         /// <paramref name="press"/> 0..1 (<see cref="ThumbPress"/>).</summary>
         public void Tick(bool tracked, float grip, float pinch, float press, float now)
         {
+            // A late reacquisition is a fresh gesture, even without another untracked sample.
+            if (lostAt >= 0f && now > lostAt + LostGrace) Reset();
             if (!tracked)
             {
                 // No trigger while untracked, but the press keeps its hysteresis through the grace: a thumb held down
@@ -71,7 +73,6 @@ namespace YetiKit.Hands
                 Trigger = 0f;
                 if (!Selecting) { Reset(); return; }
                 if (lostAt < 0f) lostAt = now;
-                if (now - lostAt > LostGrace) Reset();
                 return;
             }
             lostAt = -1f;

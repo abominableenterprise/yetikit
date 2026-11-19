@@ -26,16 +26,17 @@ namespace YetiKit.Hands
         public static float Volume(float amplitude) => Mathf.Lerp(MinVolume, MaxVolume, Mathf.Clamp01(amplitude));
 
         /// <summary>The cue for a haptic impulse of <paramref name="amplitude"/> at <paramref name="now"/>; false when
-        /// rate-limited.</summary>
+        /// unavailable or rate-limited.</summary>
         public bool Play(float amplitude, float now)
         {
             var strong = Strong(amplitude);
+            var clip = strong ? thump : tick;
+            if (!source || !source.isActiveAndEnabled || !clip) return false;
             if (strong ? now - lastStrong < StrongInterval : now - Mathf.Max(lastSoft, lastStrong) < SoftInterval) return false;
+            source.PlayOneShot(clip, Volume(amplitude));
             if (strong) lastStrong = now;
             else lastSoft = now;
             Played++;
-            var clip = strong ? thump : tick;
-            if (source && clip && source.isActiveAndEnabled) source.PlayOneShot(clip, Volume(amplitude));
             return true;
         }
     }
