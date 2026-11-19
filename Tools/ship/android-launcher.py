@@ -147,8 +147,7 @@ AXIS = {qualifier: axis[0] for axis in EXACT_AXES for qualifier in axis}
 # separate constraints because their combined ranking depends on the request.
 QUALIFIER_ORDER = (
     "mcc", "mnc", "ldltr", "sw", "w", "h", "notlong", "notround", "nowidecg",
-    "lowdr", "port", "desk", "notnight", "notouch", "nokeys", "navexposed", "nonav", "v",
-
+    "lowdr", "port", "desk", "notnight", "notouch", "navexposed", "nokeys", "nonav", "v",
 )
 
 

@@ -213,6 +213,11 @@ with tempfile.TemporaryDirectory() as directory:
          default + export_entry + true_value + alias_entry + false_value
          + landscape + alias_entry + true_value + version + alias_entry + false_value
          + '      config land-v28:\n' + export_entry + alias),
+        ('navigation visibility takes precedence over keyboard type', False,
+         default + export_entry + true_value + alias_entry + true_value
+         + '      config navhidden:\n' + alias_entry + false_value
+         + '      config qwerty:\n' + alias_entry + true_value
+         + '      config navhidden-qwerty:\n' + export_entry + alias),
         ('landscape alias sees narrower override', False,
          default + export_entry + true_value + alias_entry + true_value + landscape + export_entry + alias
          + '      config land-v28:\n' + alias_entry + false_value),
