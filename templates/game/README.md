@@ -41,8 +41,8 @@ The generated Build Profiles handler uses `StarterPlayerBuild.Build(BuildPlayerO
 
 ## Day-0 checklist
 
-1. **Clean-cache resolution and smoke/adapter tests:** run generated-scene smoke tests; remote package resolution from a cold cache and consumer adapter tests are still pending.
-2. **Doctor and safe install/verify:** run doctor, then verify safe install and launch. Pending separate headset validation.
+1. **Clean-cache resolution and smoke/adapter tests:** the kit Host runs synthetic smoke tests against staged starter assets; the generated project does not ship those tests. Remote package resolution from a cold cache and consumer adapter tests are pending.
+2. **Doctor and safe install/verify:** the starter does not ship doctor or install tooling. Safe install and launch are pending consumer tooling and separate headset validation.
 3. **Title and build stamp:** check the generated title and application ID in Player Settings; a runtime build stamp is still pending.
 4. **Hands and controllers:** verify both hands at ≥60 Hz and per-side switching to controllers. The Host covers synthetic switching; live tracking is pending OpenXR setup and separate headset validation.
 5. **Throw and impact:** throw a prop at a target and check the impact event against the fixture band. Host checks the wiring and synthetic contacts; physical throws are pending separate headset validation.
@@ -50,6 +50,6 @@ The generated Build Profiles handler uses `StarterPlayerBuild.Build(BuildPlayerO
 7. **Direct experiment boot:** launch with an experiment ID and check that it is selected without changing the last explicit choice. XR panel interaction is pending separate headset validation.
 8. **Persistent tuning:** adjust the snap angle, restart, verify the experiment retains its override, then reset; check that capture context shows the effective value and override state. Host covers persistence and synthetic wrist input; live wrist use is pending separate headset validation.
 9. **Local photo:** verify the PNG and context sidecar are saved locally with no upload or voice. Host uses synthetic captures; live XR capture is pending separate headset validation.
-10. **Release and frame timing:** build with Development Build off and verify that BuildAudit passes without the Lab controls. The Host covers the desktop build and a synthetic leak; frame-time recording and the Quest 2 floor are pending separate headset validation.
+10. **Release and frame timing:** build with Development Build off and verify that BuildAudit passes without the Lab controls. The Host covers the desktop build and a synthetic leak. The consumer still needs rendering and comfort defaults, a pinned lockfile, vendored Ship tools, CI and release notes. Frame-time recording and the Quest 2 floor are pending separate headset validation.
 
 Targets of ≤2 hours to local capture, ≤4 hours including release, and ≤10 minutes of headset verification are unmeasured until real use. Record queue, cold import and device wait separately.
