@@ -9,6 +9,23 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
+- None.
+
+### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
+## [0.1.13] - 2026-11-19
+
+Only core and quality are released consumer packages. Hands, interaction,
+playtest and lab are included as previews and remain at `0.0.1`.
+
+### Added
 - Add tracked-hand curl and shape measurements, grab, poke, turn and teleport
   gesture detectors, and XR input adapters in the hands package.
 - Add an art-free `PlayerHand`, optional `IHandVisual`, and palm-following
@@ -17,15 +34,58 @@ notes. Chunk and tuning schema changes count as breaking changes too.
   ownership, hand snap turn, and an event-driven wrist button.
 - Add the interaction package with throw and release math, configurable aim and
   respawn rules, and grip hand-off and carry helpers.
+- Add reusable XRI props with per-mode grips and a catalog-driven Grip Lab
+  with grip previews, saved adjustments and optional ghost hands.
+- Add development-only local playtest recording with a durable outbox and
+  recovery and retry for interrupted sessions.
+- Add the development-only lab package for experiment switching and live tuning.
+- Generate a game-owned starter sandbox with an XR rig and locomotion, desktop
+  experiment boot, persistent tuning, XR wrist controls and local photo snaps.
 
 ### Fixed
 - Release cleanup preserves worktrees with `assume-unchanged` or `skip-worktree`
-  entries instead of removing them and losing hidden edits.
+  entries instead of removing them and losing hidden edits
+  ([#282](https://github.com/abominableenterprise/yetikit/pull/282)).
+- Quest release `wait` reports the right invocation and saved result through
+  cancellation, lock handoffs and teardown, including legacy runs and removed directories.
+- Quest cancellation keeps cleanup and reporting going when worker exit is
+  uncertain. Ambiguous installs invalidate stale baselines, and a performance
+  report failure no longer prevents restoring device proximity settings.
+- Quest APK checks resolve launcher booleans in the active configuration and
+  recognize annotated permission requests. Signing passwords stay out of tool overrides.
+- Linux Unity keeps setup writes and worker cleanup ordered, rejects mismatched
+  Android images without replacing the base editor, and avoids reusing licences
+  pending return or seats that were released.
+- Linux Unity preserves regenerated assets and abnormal test results during
+  recovery. APK swaps and Bee cache recovery preserve symlinks and report
+  restoration errors even if saving the APK cache also fails.
+- Targeted PR tests combine equivalent builder paths, retain sibling fixtures
+  after nested or verbatim C# strings, recognize multiline Gfx tests, and keep
+  explicit render fixtures out of headless runs.
+- Core builds independently and build stamping preserves existing folders.
+- Mesh audits reject malformed inputs without overwriting source assets or
+  external buffers; audit and repair preserve the winding of hollow solids.
+- Tracked-hand input, gestures and locomotion recover from failed reads and
+  callbacks without acting on stale input or leaving previews out of sync.
+- Throw estimation uses valid motion history, prop grips and releases survive
+  state changes, and Grip Lab rejects unusable colliders and restores input safely.
+- Local playtest finalization reports storage failures accurately and preserves
+  data for retry. Lab experiment and tuning lifecycles are safer; starter tuning
+  becomes read-only when its saved data cannot be read.
 
 ### Behaviour changes
-- None.
+- Changed-mesh selection includes unchanged glTF and GLB files when a `.bin`
+  buffer changes. See the [mesh checks guide](Tools/quality/README.md).
+- Interactive Linux setup waits for privileged package writes to finish before
+  honoring cancellation.
 
 ### Adapter changes
+- Linux Unity setup uses `/usr/bin/python3` to supervise privileged writes.
+- If Quest signing maps a password to a Git, SSH or Android tool override,
+  move it to a dedicated uppercase environment variable.
+
+The following adapter notes apply to the preview hands package only:
+
 - `PlayerHand.glove` (serialized) is removed. Assign an optional `IHandVisual`
   through the inspector's `visual` field or `PlayerHand.Visual`. The gameplay
   root now follows the tracked wrist directly; implement any model offsets in

@@ -21,11 +21,12 @@ task-brief tail, review checklist and playtest-inbox routine. Replace
 `{{GAME_NAME}}` and `{{GAME_ID}}`, fill area paths/commands, and configure private
 sources and permissions outside the public kit. No stamping script ships yet.
 
-Version 0.1.12 provides core runtime/editor APIs, quality validators, Ship,
+Version 0.1.13 provides core runtime/editor APIs, quality validators, Ship,
 vendoring and mesh checks; see the [release status](../README.md#modules).
-Hands, interaction, playtest, lab and analyzer integrations remain planned; see
-[the design](../docs/design.md). Skills must not be read as proof an unavailable
-command ran successfully; verify capabilities against the consumer's pinned tag.
+Hands, interaction, playtest and lab are previews; analyzer integrations remain
+planned. See [the design](../docs/design.md). Skills must not be read as proof
+an unavailable command ran successfully; verify capabilities against the
+consumer's pinned tag.
 
 Validate without Unity: `python3 -m pip install PyYAML==6.0.2`, then run
 `python3 -m unittest discover -s Tools/skills -p 'test_*.py' -v` and
