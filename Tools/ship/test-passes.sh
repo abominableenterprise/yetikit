@@ -36,10 +36,14 @@ cs_classes() {
             s = substr(s, RLENGTH + 2)
             verbatim = 0
           } else {
-            if (!match(s, /\/\/|\/\*|@"|["\047]/)) return out s
+            if (!match(s, /\/\/|\/\*|\$@?"|@\$"|@"|["\047]/)) return out s
             out = out substr(s, 1, RSTART - 1)
             token = substr(s, RSTART, RLENGTH)
             s = substr(s, RSTART)
+            # Do not treat quotes or comment markers inside interpolation
+            # expressions as top-level tokens. Keep the rest of the line as
+            # written so its braces are counted as before.
+            if (token ~ /\$/) return out s
             if (token == "//") return out
             if (token == "/*") {
               out = out " "

@@ -90,12 +90,17 @@ public class MethodCaptureTests
 {
     [Test, Explicit, Category("RenderTool")] /* Method only, not a closing brace: } */ public
     void Capture() {}
-    [Test] public void Rule() {}
+    [Test] public void Rule()
+    {
+        string value = null;
+        var label = $"{value ?? "// fixture"}";
+        Assert.IsNotEmpty(label);
+    }
 }
 public class SiblingPureTests { [Test] public void Rule() {} }
 CS
 pr HEAD
-check 'a method category does not block its class or a later pure class' \
+check 'a method category and comment-like text in an interpolated string do not hide pure classes' \
   '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.MethodCaptureTests;ShipFixtures.SiblingPureTests "* ]]'
 rm "$t/Props/MethodCaptureTests.cs"
 
