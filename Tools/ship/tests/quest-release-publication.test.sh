@@ -53,6 +53,9 @@ torn_lock() {
   QR_LOGS="$tmp/torn-$deletion"
   mkdir -p "$QR_LOGS"
   start_release || return 1
+  if [ "$deletion" = equal ]; then
+    touch -t 200001010000 "$QR_LOGS/run.lock/pid" "$QR_LOGS/current-invocation" || return 1
+  fi
   cat() {
     command cat "$@" || return
     if [ "$*" = pid ] && [ . -ef "$QR_LOGS/run.lock" ]; then
@@ -90,6 +93,7 @@ legacy_with_old_pointer() {
 
 eval "$(declare -f qr_lock_read | sed '1s/qr_lock_read/real_lock_read/')"
 eval "$(declare -f qr_lock_snapshot | sed '1s/qr_lock_snapshot/real_lock_snapshot/')"
+eval "$(declare -f qr_lock_pointer | sed '1s/qr_lock_pointer/real_lock_pointer/')"
 start_during_wait() {
   QR_LOGS="$tmp/start"
   mkdir -p "$QR_LOGS"
@@ -154,6 +158,8 @@ start_during_reconciliation() {
   printf 'synthetic previous success\n' > "$QR_RUN_DIR/summary.txt" || return 1
   start_release && qr_lock_result prepare 0 0 && qr_lock_release || return 1
   local previous_key="$QR_INVOCATION"
+  # A preceded the synthetic startup cutoff, including in backdated cases.
+  touch -t 200001010000 "$QR_LOGS/current-invocation" || return 1
   if [ "$outcome" = first-legacy ] || [ "$outcome" = first-legacy-finished ]; then
     # With only legacy state, an abandoned startup must not reactivate last-result either.
     rm "$QR_LOGS/current-invocation" && printf 'QR_RUN_DIR=%q\n' "$QR_RUN_DIR" > "$QR_LOGS/current.env" || return 1
@@ -167,8 +173,7 @@ start_during_reconciliation() {
   case "$outcome" in
     first-keyed-legacy-race-vanished-owner*)
       # Reuse A's PID, but its pointer predates B's PID file and lock.
-      touch -t 200001010000 "$QR_LOGS/current-invocation" && mkdir "$QR_LOGS/run.lock" &&
-        printf '%s\n' "$$" > "$QR_LOGS/run.lock/pid" &&
+      mkdir "$QR_LOGS/run.lock" && printf '%s\n' "$$" > "$QR_LOGS/run.lock/pid" &&
         touch -t "$startup_stamp" "$QR_LOGS/run.lock/pid" "$QR_LOGS/run.lock" || return 1
       did_start=1 ;;
     first-keyed-legacy-race-created|first-keyed-legacy-race-in-snapshot|first-keyed-legacy-race-vanished-recheck) ;;
@@ -208,9 +213,6 @@ start_during_reconciliation() {
           *-old-result) touch -t "$startup_stamp" "$QR_LOGS/last-result" || exit 99 ;;
         esac
       fi
-    elif [ "$outcome" = first-keyed-legacy-race-vanished-early ] &&
-       [ "$*" = "$QR_LOGS/current-invocation" ] && [ . -ef "$QR_LOGS/run.lock" ]; then
-      finish_legacy_in_place && rmdir "$QR_LOGS/run.lock" && touch "$QR_LOGS/vanished" || exit 99
     elif [[ "$outcome" = first-keyed-legacy-race-vanished* && "$outcome" != *vanished-early ]] &&
          [ "$*" = pid ] && [ . -ef "$QR_LOGS/run.lock" ]; then
       # Publish and fully remove the lock on the second PID read, after the
@@ -228,6 +230,12 @@ start_during_reconciliation() {
       fi
     fi
     return "$cat_rc"
+  }
+  qr_lock_pointer() {
+    if [ "$outcome" = first-keyed-legacy-race-vanished-early ] && [ . -ef "$QR_LOGS/run.lock" ]; then
+      finish_legacy_in_place && rmdir "$QR_LOGS/run.lock" && touch "$QR_LOGS/vanished" || exit 99
+    fi
+    real_lock_pointer "$@"
   }
   qr_lock_snapshot() {
     real_lock_snapshot "$@" || return $?
@@ -384,7 +392,74 @@ start_during_reconciliation() {
   esac
 }
 
+pending_keyed_copy_failure() {
+  QR_LOGS="$tmp/pending-copy"
+  local lock="$QR_LOGS/run.lock" wait_rc=0
+  QR_RUN_DIR="$QR_LOGS/run"
+  mkdir -p "$QR_RUN_DIR" || return 1
+  printf 'synthetic previous success\n' > "$QR_RUN_DIR/summary.txt" || return 1
+  start_release && qr_lock_result prepare 0 0 && qr_lock_release || return 1
+  touch -t 200001010000 "$QR_LOGS/current-invocation" "$QR_LOGS/last-result" || return 1
+  mkdir "$lock" && touch -t 200001010001 "$lock" || return 1
+  cp() {
+    [ "$2" = "$QR_LOGS/last-result.$$" ] || { command cp "$@"; return; }
+    touch "$QR_LOGS/copy-attempted" || exit 99
+    return 1
+  }
+  cat() {
+    command cat "$@"; local status=$?
+    if [ "$*" = invocation ] && [ . -ef "$lock" ]; then
+      # Publish after both owner reads missed, but before wait samples the pointer.
+      local invocation_dir
+      invocation_dir="$(mktemp -d "$QR_LOGS/invocations/run.XXXXXXXXXX")" || exit 99
+      QR_INVOCATION="${invocation_dir##*/}"; QR_LOCK_HELD=1
+      printf '%s\n' "$QR_INVOCATION" > "$lock/invocation" && printf '%s\n' "$$" > "$lock/pid" &&
+        printf '%s %s\n' "$$" "$QR_INVOCATION" > "$QR_LOGS/new-pointer" &&
+        mv "$QR_LOGS/new-pointer" "$QR_LOGS/current-invocation" &&
+        printf 'synthetic keyed successor\n' > "$QR_RUN_DIR/summary.txt" &&
+        qr_lock_result prepare 0 0 && qr_lock_release || exit 99
+    fi
+    return "$status"
+  }
+  QUEST_WAIT_GRACE=0 qr_main wait 0 || wait_rc=$?
+  [ -f "$QR_LOGS/copy-attempted" ] && grep -q '^synthetic previous success$' "$QR_LOGS/last-result" &&
+    [ "$wait_rc" = 0 ] && grep -q '^synthetic keyed successor$' "$tmp/out" &&
+    ! grep -q '^synthetic previous success$' "$tmp/out"
+}
+
+pending_legacy_retry() {
+  QR_LOGS="$tmp/pending-retry"
+  local lock="$QR_LOGS/run.lock" wait_rc=0 fake_now=0 cutoff result_stamp
+  read -r cutoff result_stamp < <(perl -MPOSIX=strftime -e '
+    $now = time; print join(" ", map { strftime "%Y%m%d%H%M.%S", localtime($now - $_) } (30, 15)), "\n";
+  ')
+  QR_RUN_DIR="$QR_LOGS/run"
+  mkdir -p "$lock" "$QR_RUN_DIR" && : > "$lock/pid" && touch -t "$cutoff" "$lock" || return 1
+  cat() {
+    command cat "$@" || return
+    if [ "$*" = pid ] && [ . -ef "$lock" ]; then
+      if [ ! -s pid ]; then
+        printf '%s\n' "$$" > pid || exit 99
+      else
+        printf 'synthetic legacy retry failure\n' > "$QR_RUN_DIR/summary.txt" &&
+          printf 'QR_RUN_DIR=%q\n' "$QR_RUN_DIR" > "$QR_LOGS/current.env" &&
+          ( QR_INVOCATION='' QR_LOCK_HELD=1; qr_lock_result prepare 1 0 ) &&
+          touch -t "$result_stamp" "$QR_LOGS/last-result" &&
+          rm pid || exit 99
+      fi
+    fi
+  }
+  qr_wait_now() { echo "$fake_now"; }
+  sleep() { rmdir "$lock" || exit 99; fake_now=60; }
+  QUEST_WAIT_GRACE=0 qr_main wait 1 || wait_rc=$?
+  [ "$wait_rc" = 1 ] && [ ! -d "$lock" ] && grep -q 'exited 1' "$tmp/err" &&
+    grep -q '^synthetic legacy retry failure$' "$tmp/out"
+}
+
 check 'compatibility copy failure does not change the published outcome' compat_copy_failure
+check 'a pointer published during pending sampling resolves without a compatibility copy' pending_keyed_copy_failure
+check 'a same-generation legacy retry keeps the initial pending cutoff' pending_legacy_retry
+check 'keyed teardown retains the key when pointer and PID timestamps are equal' torn_lock equal
 check 'deletion between metadata reads does not pin a legacy owner' torn_lock complete
 check 'deletion paused before removing the directory does not pin a legacy owner' torn_lock paused
 check 'an old keyed pointer does not relabel a legacy lock with the same PID' legacy_with_old_pointer
