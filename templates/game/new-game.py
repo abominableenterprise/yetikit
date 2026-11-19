@@ -89,7 +89,7 @@ def main():
     app_id, title = args.id, args.title.strip()
     if (not re.fullmatch(r"[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){2,}", app_id)
             or any(placeholder(part) for part in app_id.split("."))
-            or app_id.startswith(("com.example.", "com.company.", "com.unity."))):
+            or app_id.startswith(("com.example.", "org.example.", "net.example.", "com.company.", "com.unity."))):
         parser.error("--id must be a non-placeholder reverse-DNS application ID")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .,'&!()_-]{0,79}", title) or placeholder(title) or title.lower() in {
             "game", "new game", "my game", "untitled", "untitled game"}:

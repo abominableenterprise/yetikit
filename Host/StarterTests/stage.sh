@@ -39,7 +39,9 @@ reject_identity() {
 fixture org.examplechecks.sandbox 'Neutral Fixture' first
 fixture org.examplechecks.sandbox 'Neutral Fixture' second
 reject_identity --id 'not a valid id' 'Neutral Fixture'
-reject_identity --id com.example.placeholder 'Neutral Fixture'
+reject_identity --id com.example.sandbox 'Neutral Fixture'
+reject_identity --id org.example.sandbox 'Neutral Fixture'
+reject_identity --id net.example.sandbox 'Neutral Fixture'
 reject_identity --title org.examplechecks.sandbox 'Untitled Game'
 mkdir -- "$tmp/occupied"
 touch -- "$tmp/occupied/keep"
