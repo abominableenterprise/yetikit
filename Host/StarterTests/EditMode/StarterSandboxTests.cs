@@ -73,7 +73,7 @@ namespace YetiKit.Starter.HostTests
             GrabAndRelease(scene);
             AssertSyntheticImpact(scene);
             yield return StarterRigChecks.DriveRig(scene);
-            yield return StarterLabChecks.DriveAndReload(path);
+            yield return StarterLabChecks.DriveAndReload(scene.path);
             yield return new ExitPlayMode();
         }
 
