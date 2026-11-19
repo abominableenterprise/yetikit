@@ -180,7 +180,7 @@ apk_cache_cleanup() {
 # Save the cache without ~7 GB of Bee intermediates. Keep it on the project
 # filesystem so moving it aside and back doesn't copy those files.
 apk_cache_save() {
-  local bee="$PROJECT/Library/Bee" aside="$PROJECT/Temp/apk-bee-aside" save_rc=0 monitor=0 temp_device bee_device identity
+  local bee="$PROJECT/Library/Bee" aside="$PROJECT/Temp/apk-bee-aside" save_rc=0 monitor=0 temp_device bee_device identity bee_fs
   if [ -e "$aside" ] || [ -L "$aside" ]; then
     log "error: refusing to overwrite existing Bee aside $aside"
     return 1
@@ -197,12 +197,15 @@ apk_cache_save() {
       log "error: Library/Bee and Temp are on different filesystems; not moving Bee"
       return 1
     fi
-    if [ -L "$bee" ] && [ "${identity%%:*}" != "$bee_device" ]; then
-      # Force overlay copy-up at the source using the link's own timestamps.
-      # Record its new identity before rename, so even EXIT during mv can
-      # restore it without trusting whatever happens to be at the aside path.
-      touch -ch -r "$bee" -- "$bee" || return
-      identity="$(stat -c '%d:%i' -- "$bee")" || return
+    if [ -L "$bee" ]; then
+      bee_fs="$(stat -fc '%T' -- "${bee%/*}")" || return
+      if [ "$bee_fs" = overlayfs ]; then
+        # Even with equal device IDs, copy-up can change the inode. Force it
+        # at the source and record the identity before rename, so EXIT can
+        # restore Bee without trusting whatever appears at the aside path.
+        touch -ch -r "$bee" -- "$bee" || return
+        identity="$(stat -c '%d:%i' -- "$bee")" || return
+      fi
     fi
     APK_BEE_ID="$identity"
     apk_bee_move "$bee" "$aside" || {

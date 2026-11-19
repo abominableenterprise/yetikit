@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run portably with a synthetic lower identity and real renames, or set
-# BEE_OVERLAY_TEST=1 on a Linux VM with mount privileges to use overlayfs.
+# BEE_OVERLAY_TEST=split (or same) on a Linux VM with mount privileges to
+# mount overlayfs with layers on different devices (or the same device).
 set -euo pipefail
 ship="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ship/lib/android.sh"
@@ -16,17 +17,25 @@ cleanup() {
   rm -rf -- "$tmp"
 }
 trap cleanup EXIT
-if [ "${BEE_OVERLAY_TEST:-0}" = 1 ]; then
-  # Distinct backing devices; /tmp itself may not support overlay upperdirs.
+overlay_mode="${BEE_OVERLAY_TEST:-}"
+if [ -n "$overlay_mode" ]; then
+  # /tmp itself may not support overlay upperdirs.
   upper="$(mktemp -d /dev/bee-overlay.XXXXXX)"
-  lower="$(mktemp -d /dev/shm/bee-overlay.XXXXXX)"
+  case "$overlay_mode" in
+    split)
+      lower="$(mktemp -d /dev/shm/bee-overlay.XXXXXX)"
+      [ "$(stat -c %d "$lower")" != "$(stat -c %d "$upper")" ] ;;
+    same) lower="$upper/lower"; mkdir -- "$lower" ;;
+    *) echo "unknown BEE_OVERLAY_TEST mode: $overlay_mode" >&2; exit 1 ;;
+  esac
   mkdir -- "$upper/upper" "$upper/work" "$tmp/overlay"
-  [ "$(stat -c %d "$lower")" != "$(stat -c %d "$upper")" ]
 fi
 
 stat() {
   if [[ $# = 4 && "$1" = -c && "$2" = %d:%i && "$4" = "$bee" && -f "$PROJECT/lower" ]]; then
     printf '%s\n' '0:1'
+  elif [[ $# = 4 && "$1" = -fc && "$2" = %T && "$4" = "${bee%/*}" && -z "$overlay_mode" ]]; then
+    printf '%s\n' overlayfs
   else
     command stat "$@"
   fi
