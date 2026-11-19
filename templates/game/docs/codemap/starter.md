@@ -1,5 +1,7 @@
 # Starter sandbox
 
+- Verify remote package sources before and after first import: `verify-packages.py` at the project root.
+
 - Bake the scene, prefabs and materials: `Assets/Starter/Editor/SandboxBuilder.cs`.
 - Configure per-build dev defines and audit release players: `Assets/Starter/Editor/StarterPlayerBuild.cs`.
 - Bake the XR Origin, hand/controller interactors and pad locomotion: `Assets/Starter/Editor/SandboxRigBuilder.cs`.

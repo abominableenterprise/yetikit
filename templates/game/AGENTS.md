@@ -14,7 +14,7 @@
 - Prefer prefabs and catalogs; never hand-edit scene YAML. Use small per-area test scenes and their builders, not whole-game regeneration; leave lightmaps alone.
 - One job per file, named constants, no speculative abstractions. Bugs require a failing-first regression test.
 - Register kit hooks only in the composition root, with disposable lifetimes. Dev code belongs only in `Game.Dev`, constrained by `YETIKIT_DEV`; release must not reference it.
-- Fix kit defects upstream; never edit `Tools/yetikit/` or installed kit packages. Use `kit-bump.sh` (planned) to update vendored tools and all kit dependency pins coherently to one tag.
+- Fix kit defects upstream; never edit `Tools/yetikit/` or installed kit packages. Use `kit-bump.sh` to adopt a compatible release tag and update vendored tools and all kit pins together. See the starter README for the verification steps.
 
 ## Review and merge
 

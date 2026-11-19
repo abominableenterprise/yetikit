@@ -14,3 +14,4 @@ grep -Fq '## Day-0 checklist' "$readme"
 test "$(grep -Ec '^[0-9]+\. \*\*' "$readme")" = 10
 grep -Fq 'pending separate headset validation' "$readme"
 grep -Eq '≤2 hours.*≤4 hours.*unmeasured' "$readme"
+python3 -B "$repo/Tools/ship/tests/starter-package-sources.py" "$out/game"
