@@ -14,6 +14,7 @@ namespace YetiKit.Lab
         IDisposable inputLease;
         readonly IExperiment[] active = new IExperiment[2];
         readonly bool[] enabled = new bool[2];
+        bool activating;
         bool disposed;
 
         public string CurrentId { get; private set; }
@@ -37,40 +38,49 @@ namespace YetiKit.Lab
         {
             if (disposed) throw new ObjectDisposedException(nameof(ExperimentSwitcher));
             var factory = registry.Factory(id);
-            if (factory == null) return false;
+            if (factory == null || activating) return false;
             if (CurrentId != id) Activate(id, factory);
+            if (disposed) return false;
             store.Save(labId, id);
             return true;
         }
 
         public void Tick(float now)
         {
+            if (disposed || activating) return;
             foreach (var experiment in active) experiment?.Tick(now);
         }
 
         void Activate(string id, Func<IExperiment> factory)
         {
-            Release();
+            activating = true;
             try
             {
+                Release();
+                if (disposed) return;
                 inputLease = borrowInput?.Invoke();
+                if (disposed) return;
                 for (int i = 0; i < active.Length; i++)
                 {
                     var experiment = factory();
                     if (experiment == null || ReferenceEquals(active[0], experiment))
                         throw new InvalidOperationException("Experiment factories must return a fresh instance per hand.");
                     active[i] = experiment;
+                    if (disposed) return;
                     if (experiment.Id != id) throw new InvalidOperationException("Experiment id does not match its registration.");
+                    if (disposed) return;
                     experiment.Initialize(hands[i]);
+                    if (disposed) return;
                     enabled[i] = true;
                     experiment.Enable();
+                    if (disposed) return;
                 }
                 CurrentId = id;
             }
-            catch
+            finally
             {
-                Release();
-                throw;
+                try { if (CurrentId == null) Release(); }
+                finally { activating = false; }
             }
         }
 
@@ -78,7 +88,8 @@ namespace YetiKit.Lab
         {
             if (disposed) return;
             disposed = true;
-            Release();
+            // Activation owns cleanup after the current consumer callback returns.
+            if (!activating) Release();
         }
 
         void Release()

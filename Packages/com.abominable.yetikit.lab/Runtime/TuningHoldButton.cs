@@ -22,6 +22,8 @@ namespace YetiKit.Lab
         public void OnPointerUp(PointerEventData data) { if (pointer == data.pointerId) Cancel(); }
         public void OnPointerExit(PointerEventData data) { if (pointer == data.pointerId) Cancel(); }
         void OnDisable() => Cancel();
+        void OnApplicationFocus(bool focused) { if (!focused) Cancel(); }
+        void OnApplicationPause(bool paused) { if (paused) Cancel(); }
         void Update() { if (repeat.Tick(pointer.HasValue, Time.unscaledTime)) Step?.Invoke(); }
 
         internal void Cancel()

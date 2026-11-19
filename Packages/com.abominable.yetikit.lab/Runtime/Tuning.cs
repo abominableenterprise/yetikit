@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace YetiKit.Lab
@@ -89,12 +92,23 @@ namespace YetiKit.Lab
             if (string.IsNullOrWhiteSpace(body)) return null;
             try
             {
-                var doc = JsonUtility.FromJson<Document>(body);
-                if (doc == null || doc.v != 1 || doc.values == null ||
-                    doc.values.Any(row => row == null || string.IsNullOrWhiteSpace(row.id) || !Finite(row.value))) return null;
-                return doc.values.ToDictionary(row => row.id, row => row.value, StringComparer.Ordinal);
+                // Inspect token types before conversion: JsonUtility reads a missing float as zero.
+                using var reader = new JsonTextReader(new StringReader(body)) { DateParseHandling = DateParseHandling.None };
+                var doc = JObject.Load(reader);
+                if (reader.Read() || !JToken.DeepEquals(doc["v"], new JValue(1)) || !(doc["values"] is JArray entries)) return null;
+                var loaded = new Dictionary<string, float>(StringComparer.Ordinal);
+                foreach (var entry in entries)
+                {
+                    if (!(entry is JObject row) || row["id"]?.Type != JTokenType.String) return null;
+                    var id = (string)row["id"];
+                    var number = row["value"];
+                    if (string.IsNullOrWhiteSpace(id) || (number?.Type != JTokenType.Integer && number?.Type != JTokenType.Float)) return null;
+                    var value = (float)number;
+                    if (!Finite(value) || !loaded.TryAdd(id, value)) return null;
+                }
+                return loaded;
             }
-            catch (ArgumentException) { return null; } // Unreadable JSON or duplicate IDs.
+            catch (JsonException) { return null; } // Unreadable JSON.
         }
 
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
