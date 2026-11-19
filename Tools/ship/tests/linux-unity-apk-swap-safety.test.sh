@@ -30,6 +30,7 @@ as_root() {
       local dir
       dir="$(command "$@")" || return
       if [ "${fake_collision:-0}" = 1 ]; then ln -s -- "$tmp/sentinel" "$dir/linux-unity-apk.swapfile" || return; fi
+      if [ -n "${fake_dir_mode:-}" ]; then chmod -- "$fake_dir_mode" "$dir" || return; fi
       printf '%s\n' "$dir" ;;
     rm|rmdir|stat|dd) command "$@" ;;
     *) return 98 ;;
@@ -148,5 +149,41 @@ normal_swap() (
   apk_swap_off && [ ! -e "${path%/*}" ] && grep -Fxq "swapoff $path" "$tmp/calls"
 )
 check 'a sticky shared directory allows private swap creation and cleanup' normal_swap
+
+setgid_swap() (
+  APK_SWAP_DIR="$tmp/setgid"; APK_SWAPFILE=""
+  local probe stale path mode
+  mkdir -m 755 -- "$APK_SWAP_DIR" && : > "$tmp/calls" || return
+  if ! chmod g+s -- "$APK_SWAP_DIR"; then
+    echo 'SKIP setgid swap: cannot set setgid on the swap parent'
+    return 0
+  fi
+  probe="$(mktemp -d -- "$APK_SWAP_DIR/probe.XXXXXXXXXX")" || return
+  mode="$(stat -c '%a' -- "$probe")" && rmdir -- "$probe" || return
+  if [ "$mode" != 2700 ]; then
+    printf 'SKIP setgid swap: mktemp inherited mode %s instead of 2700\n' "$mode"
+    return 0
+  fi
+  apk_swap_on 1 && [ -n "$APK_SWAPFILE" ] && grep -Fxq "swapon $APK_SWAPFILE" "$tmp/calls" || return 1
+  path="$APK_SWAPFILE"
+  apk_swap_off && [ ! -e "${path%/*}" ] && grep -Fxq "swapoff $path" "$tmp/calls" || return 1
+
+  stale="$APK_SWAP_DIR/linux-unity-apk.swapdir.S1t2A3l4E5.9103"
+  mkdir -- "$stale" && chmod 2700 -- "$stale" && (umask 077; touch -- "$stale/linux-unity-apk.swapfile") || return
+  apk_swap_reclaim && [ ! -e "$stale" ] && grep -Fxq "swapoff $stale/linux-unity-apk.swapfile" "$tmp/calls"
+)
+check 'a setgid parent allows private swap creation, cleanup, and reclamation' setgid_swap
+
+insecure_allocation() (
+  local fake_dir_mode="$1"
+  APK_SWAP_DIR="$tmp/insecure-$fake_dir_mode"; APK_SWAPFILE=""
+  mkdir -m 700 -- "$APK_SWAP_DIR" && : > "$tmp/calls" || return
+  apk_swap_on 1 && [ -z "$APK_SWAPFILE" ] &&
+    ! grep -Eq '^(dd|fallocate|mkswap|swapon) ' "$tmp/calls" &&
+    [ -z "$(find "$APK_SWAP_DIR" -mindepth 1 -print -quit)" ]
+)
+for mode in 710 701; do
+  check "a new swap directory with mode $mode is rejected and removed" insecure_allocation "$mode"
+done
 
 [ "$fails" = 0 ] || { printf '%s failed\n' "$fails"; exit 1; }

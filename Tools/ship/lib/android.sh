@@ -59,7 +59,8 @@ apk_swap_private_dir() {
   local owner mode
   meta="$(stat -c '%u %f' -- "$1" 2>/dev/null)" || return 1
   read -r owner mode <<< "$meta"
-  [[ "$owner" == 0 || "$owner" == "$EUID" ]] && (( 16#$mode == (0040000 | 0700) ))
+  # mktemp can inherit setgid from its parent without granting group access.
+  [[ "$owner" == 0 || "$owner" == "$EUID" ]] && (( (16#$mode & ~02000) == (0040000 | 0700) ))
 }
 
 # Make both the private directory and its file exclusively. On some hosts the
@@ -67,8 +68,12 @@ apk_swap_private_dir() {
 apk_swap_on() {
   local base dir f
   if ! base="$(apk_swap_dir)" ||
-    ! dir="$(as_root mktemp -d --suffix=".$$" -- "${base%/}/linux-unity-apk.swapdir.XXXXXXXXXX")" ||
-    ! apk_swap_private_dir "$dir"; then
+    ! dir="$(as_root mktemp -d --suffix=".$$" -- "${base%/}/linux-unity-apk.swapdir.XXXXXXXXXX")"; then
+    log "warning: could not create a safe swap directory in $APK_SWAP_DIR; building without swap"
+    return 0
+  fi
+  if ! apk_swap_private_dir "$dir"; then
+    as_root rmdir -- "$dir" || :
     log "warning: could not create a safe swap directory in $APK_SWAP_DIR; building without swap"
     return 0
   fi
@@ -141,7 +146,8 @@ apk_bee_move() {
 
 apk_bee_restore() {
   local aside="$PROJECT/Temp/apk-bee-aside" identity
-  [ -n "$APK_BEE_ID" ] && [ -d "$aside" ] || return 0
+  # A relative Bee link can dangle after it is moved out of Library.
+  [ -n "$APK_BEE_ID" ] && { [ -L "$aside" ] || [ -d "$aside" ]; } || return 0
   identity="$(stat -c '%d:%i' -- "$aside")" || return "$?"
   # If move-out failed and another aside appeared, it isn't ours to restore.
   [ "$identity" = "$APK_BEE_ID" ] || return 0
@@ -171,7 +177,7 @@ apk_cache_cleanup() {
 # Save the cache without ~7 GB of Bee intermediates. Keep it on the project
 # filesystem so moving it aside and back doesn't copy those files.
 apk_cache_save() {
-  local bee="$PROJECT/Library/Bee" aside="$PROJECT/Temp/apk-bee-aside" save_rc=0 monitor=0 temp_device
+  local bee="$PROJECT/Library/Bee" aside="$PROJECT/Temp/apk-bee-aside" save_rc=0 monitor=0 temp_device bee_device
   if [ -e "$aside" ] || [ -L "$aside" ]; then
     log "error: refusing to overwrite existing Bee aside $aside"
     return 1
@@ -181,7 +187,11 @@ apk_cache_save() {
     # Only an atomic rename preserves Bee's identity across cancellation.
     temp_device="$(stat -Lc '%d' -- "$PROJECT/Temp")" || return
     APK_BEE_ID="$(stat -c '%d:%i' -- "$bee")" || return
-    if [ "${APK_BEE_ID%%:*}" != "$temp_device" ]; then
+    bee_device="${APK_BEE_ID%%:*}"
+    # Overlayfs can report different device IDs for a symlink and its parent.
+    # We're renaming the link's directory entry, not its target.
+    if [ -L "$bee" ]; then bee_device="$(stat -Lc '%d' -- "${bee%/*}")" || return; fi
+    if [ "$bee_device" != "$temp_device" ]; then
       log "error: Library/Bee and Temp are on different filesystems; not moving Bee"
       return 1
     fi
