@@ -11,19 +11,27 @@ cs_classes() {
   while IFS= read -r f; do
     [ -f "$f" ] || continue
     awk -v gfx="$([ "$cat" = 0 ] && echo 0 || echo 1)" -v cat="$cat" -v scope="${2:-}" '
-      BEGIN { tag = "\\[[^]]*Category[[:space:]]*\\([[:space:]]*\"" cat "\"[[:space:]]*\\)" }
+      BEGIN {
+        category = "Category[[:space:]]*\\([[:space:]]*\"" cat "\"[[:space:]]*\\)"
+        inline_tag = "\\[[^]]*" category
+      }
       function fq(c) { return ns == "" ? c : ns "." c }
       function braces(s,   o, c) { o = gsub(/\{/, "{", s); c = gsub(/\}/, "}", s); depth += o - c }
-      # End of a leading attribute section, ignoring brackets in strings and
-      # retaining nested brackets (for example typeof(int[]) in a fixture).
-      function attribute_end(s,   i, ch, rest, level) {
+      # Consume one leading attribute section, ignoring brackets in literals
+      # and retaining nested brackets (for example typeof(int[]) in a fixture).
+      # Only a complete section can contribute a tag to the next declaration.
+      function attribute_end(s,   i, ch, rest, level, tagged) {
         for (i = 1; i <= length(s); i++) {
           ch = substr(s, i, 1)
           if (ch == "[") level++
-          else if (ch == "]" && --level == 0) return i
-          else if (ch == "@" || ch == "\"" || ch == "\047") {
+          else if (ch == "]" && --level == 0) {
+            if (tagged) pending = 1
+            return i
+          } else if (ch == "@" || ch == "\"" || ch == "\047") {
             rest = substr(s, i)
             if (match(rest, /^(@"([^"]|"")*"|"([^"\\]|\\.)*"|\047([^\047\\]|\\.)*\047)/)) i += RLENGTH - 1
+          } else if (gfx && ch == "C" && substr(s, i - 1, 1) !~ /[[:alnum:]_]/ && substr(s, i) ~ ("^" category)) {
+            tagged = 1
           }
         }
         return 0
@@ -41,41 +49,35 @@ cs_classes() {
           else if (sub(/^[[:space:]]*\{/, "", line)) depth++
           if (line ~ /^[[:space:]]*\/\//) next
         }
+        # Class-only selection never searches bodies for class-level tags.
+        if (scope == "class" && depth > nsdepth) { braces(line); next }
+        # Consume each complete section, carrying only an unfinished section
+        # to the next line. Leave any following declaration for selection.
+        line = attributes line
+        attributes = ""
+        while (line ~ /^[[:space:]]*\[/) {
+          end = attribute_end(line)
+          if (!end) { attributes = line " "; break }
+          line = substr(line, end + 1)
+        }
+        if (attributes != "" || line ~ /^[[:space:]]*(\/\/.*)?$/) next
         if (scope == "class") {
-          # Only leading attribute sections at namespace scope can tag the
-          # declaration. Never search its body for class-level categories.
-          if (depth <= nsdepth) {
-            line = attributes line
-            attributes = ""
-            while (line ~ /^[[:space:]]*\[/) {
-              end = attribute_end(line)
-              if (!end) { attributes = line " "; break }
-              if (substr(line, 1, end) ~ tag) pending = 1
-              line = substr(line, end + 1)
-            }
-            if (attributes != "" || line ~ /^[[:space:]]*(\/\/.*)?$/) next
-            if (pending && match(line, /^[[:space:]]*((public|internal|protected|private|file|abstract|sealed|static|unsafe|new|partial|record)[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]+/)) {
-              c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
-              print fq(c)
-            }
-            pending = 0
+          if (pending && match(line, /^[[:space:]]*((public|internal|protected|private|file|abstract|sealed|static|unsafe|new|partial|record)[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]+/)) {
+            c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
+            print fq(c)
           }
+          pending = 0
           braces(line)
           next
         }
-        # Coalesce an attribute section before tagging it. Keep the closing
-        # line so a declaration following the closing bracket is still seen.
-        if (attributes != "") line = attributes " " line
-        attr = line ~ /^[[:space:]]*\[/
-        if (attr && line !~ /\]/) { attributes = line; next }
-        attributes = ""
-        if (gfx && line ~ tag) pending = 1
+        # Keep recognizing tags on methods written inline in a class body.
+        if (gfx && line ~ inline_tag) pending = 1
         if (match(line, /(^|[^A-Za-z0-9_])class[[:space:]]+[A-Za-z0-9_]+/)) {
           c = substr(line, RSTART, RLENGTH); sub(/^.*class[[:space:]]+/, "", c)
           if (depth <= nsdepth) { top = c; if (!gfx) print fq(top) }
           if (pending && gfx) print fq(top)
           pending = 0
-        } else if (pending && !attr && line ~ /[^[:space:]]/) {
+        } else if (pending) {
           if (gfx && top != "") print fq(top)
           pending = 0
         }

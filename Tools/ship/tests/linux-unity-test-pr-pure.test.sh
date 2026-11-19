@@ -58,6 +58,39 @@ check 'inline method Gfx category keeps the fixture in both passes, with Gfx exc
   '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-nographics"* && "$(pure_run)" == *"-testCategory !Gfx;!MacOnly"* && "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.MixedInlineTests "* ]] && [ "$(filter)" = ShipFixtures.MixedInlineTests ]'
 rm "$t/Props/MixedInlineTests.cs"
 
+cat > "$t/Props/MultilineAttributes.cs" <<'CS'
+namespace ShipFixtures;
+public class PrecedingAttributeTests
+{
+    [Test] [Category(
+        "Gfx")]
+    public void Render() {}
+}
+public class BracketArgumentTests
+{
+    [TestCase("]"), Category(
+        "Gfx")]
+    public void Render(string value) {}
+}
+CS
+pr HEAD
+check 'a complete preceding attribute does not end the multiline Gfx section' \
+  '[ "$rc" = 0 ] && grep -Fq "test pr: selected ShipFixtures.PrecedingAttributeTests" "$tmp/err"'
+check 'a bracket inside an attribute argument does not hide a Gfx tag in the same section' \
+  '[ "$rc" = 0 ] && grep -Fq "test pr: selected ShipFixtures.BracketArgumentTests" "$tmp/err"'
+rm "$t/Props/MultilineAttributes.cs"
+
+cat > "$t/Props/PureAttributeTests.cs" <<'CS'
+namespace ShipFixtures;
+[Description("Matches class Decoy]"), Category(
+    "Pure")]
+public class PureAttributeTests { [Test] public void Rule() {} }
+CS
+pr HEAD
+check 'a non-Gfx multiline attribute stays pure and does not invent a class from its argument' \
+  '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.PureAttributeTests "* ]] && [ "$(wc -l < "$tmp/runs")" = 1 ]'
+rm "$t/Props/PureAttributeTests.cs"
+
 printf '// This changed source declares no class.\n' > "$t/Props/Unresolved.cs"
 echo '// another runtime change' >> "$proj/Assets/Scripts/Props/Spray/Spray.cs"
 pr HEAD
