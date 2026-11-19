@@ -72,15 +72,25 @@ qr_wait_tails() {
 
 # A keyed waiter reads only its invocation's record, never a successor's last-result.
 # Legacy locks have only a PID and use the old freshness and run-folder checks.
-# $1 PID, $2 start time, $3 run folder, $4 invocation key. Emits folder, rc, command,
-# frozen verdict (blank for a legacy mutable summary), then the optional report.
+# $1 PID, $2 start time, $3 run folder, $4 invocation key, $5 pending legacy startup (optional).
+# Emits folder, rc, command, frozen verdict (blank for a legacy mutable summary), then the optional report.
 qr_wait_result() {
   local f="$QR_LOGS/last-result" record header p rc cmd run verdict marker=$'\nreport:'
   if [ -n "$4" ]; then
     [[ "$4" =~ ^run\.[a-zA-Z0-9]{10}$ ]] || return 1
     f="$QR_LOGS/invocations/$4/result"
   fi
-  record="$(cat "$f" 2>/dev/null)" || return 1
+  if [ "${5:-}" = pending ]; then
+    # Read and stat the same file so an atomic replacement cannot lend its
+    # fresh timestamp to an older record.
+    record="$(perl -MTime::HiRes=stat -e '
+      open my $result, "<", $ARGV[0] or exit 1;
+      my @s = stat $result; exit 1 unless @s && $s[9] > $ARGV[1];
+      local $/; print <$result>;
+    ' "$f" "$2")" || return 1
+  else
+    record="$(cat "$f" 2>/dev/null)" || return 1
+  fi
   if [[ "$record" != *"$marker"* ]]; then marker=$'\nlist-summary:'; fi
   header="${record%%"$marker"*}"
   p="$(printf '%s\n' "$header" | sed -n 's/^pid=//p')"
@@ -89,7 +99,12 @@ qr_wait_result() {
   run="$(printf '%s\n' "$header" | sed -n 's/^run=//p')"
   verdict="$(printf '%s\n' "$header" | sed -n 's/^verdict=//p')"
   [ -z "$1" ] || [ "$p" = "$1" ] || return 1
-  [ -n "$4" ] || perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$(qr_lock_mtime "$f")" "${2:-0}" || return 1
+  [ -n "$4" ] || [ "${5:-}" = pending ] ||
+    perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$(qr_lock_mtime "$f")" "${2:-0}" || return 1
+  if [ "${5:-}" = pending ]; then
+    [[ "$p" =~ ^[1-9][0-9]*$ && "$rc" =~ ^(0|[1-9][0-9]*)$ ]] && [ -n "$cmd" ] || return 1
+    [ -n "$run" ] || [ "$rc" != 0 ] || return 1
+  fi
   [ "$run" = "$3" ] \
     || { [ -z "$3" ] && { [ -n "$4" ] || { [ -n "$1" ] && [ -n "$2" ]; }; }; } \
     || { [ -z "$run" ] && [ "$rc" != 0 ]; } || return 1
@@ -102,13 +117,13 @@ qr_wait_result() {
 qr_wait() {
   local minutes="${1:-45}" poll="${QUEST_WAIT_POLL:-5}" grace="${QUEST_WAIT_GRACE:-15}" t0 now deadline
   local last_line seen=0 start="" run="" st wpid="" key="" res terminal rc cmd verdict
-  local pointer="$QR_LOGS/current-invocation" pointer_pid pointer_key
+  local pointer="$QR_LOGS/current-invocation" pointer_pid pointer_key sampled_pid sampled_key
   local pending=0 superseded_pid="" superseded_key="" retry_pointer legacy_start="" QR_WAIT_SAMPLE=1
   case "$minutes" in ''|*[!0-9]*) qr_wait_say "usage: wait [minutes]"; return 2 ;; esac
   minutes=$((10#$minutes))
   t0="$(qr_wait_now)"; deadline=$((t0 + minutes * 60)); last_line="$t0"
   while :; do
-    retry_pointer=0
+    retry_pointer=0; res=""
     st=0; qr_lock_read || st=$?
     if [ -z "$wpid" ] && [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
       if [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ] && [ -f "$pointer" ]; then
@@ -119,14 +134,20 @@ qr_wait() {
         elif ! [[ "$pointer_pid" =~ ^[0-9]+$ ]]; then
           qr_wait_say "invalid invocation identity"; return 1
         elif [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; then
+          sampled_pid="$pointer_pid"; sampled_key="$pointer_key"
           st=0; qr_lock_read || st=$?
           if [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
-            # A successor may have completed and unlocked during reconciliation. Use
-            # a single re-read so even a change on the final poll can yield its result.
+            # A successor may have started or finished during reconciliation.
+            # Recheck a changed pointer's lock, but keep the final poll bounded.
             start="$(qr_lock_mtime "$pointer")"
             if read -r pointer_pid pointer_key 2>/dev/null < "$pointer" && [[ "$pointer_pid" =~ ^[0-9]+$ ]] &&
                { [ "$pending" = 0 ] || [ "$pointer_pid" != "$superseded_pid" ] || [ "$pointer_key" != "$superseded_key" ]; }; then
-              wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
+              if [ "$pointer_pid" != "$sampled_pid" ] || [ "$pointer_key" != "$sampled_key" ]; then
+                st=0; qr_lock_read || st=$?
+              fi
+              if [ "$st" != 0 ] && ! [[ "$QR_LOCK_PID" =~ ^[0-9]+$ ]]; then
+                wpid="$pointer_pid"; key="$pointer_key"; seen=1; run=""
+              fi
             else
               retry_pointer=1
             fi
@@ -146,13 +167,18 @@ qr_wait() {
       pending=1
       superseded_pid="$QR_LOCK_PREV_PID"; superseded_key="$QR_LOCK_PREV_INVOCATION"
       legacy_start="$QR_LOCK_UNPUBLISHED_AT"
-    elif [ -z "$wpid" ] && [ "$pending" = 1 ] && [ "$retry_pointer" = 0 ] && [ -z "$superseded_key" ] &&
+      # Older keyed producers removed their lock files in place. A retained
+      # key with its own result proves teardown, not a new pending startup.
+      if [ -n "$superseded_key" ] && [ "$QR_LOCK_INVOCATION" = "$superseded_key" ] &&
+         qr_wait_result "$superseded_pid" "" "" "$superseded_key" >/dev/null; then
+        superseded_pid=""; superseded_key=""
+      fi
+    elif [ -z "$wpid" ] && [ "$pending" = 1 ] && [ "$retry_pointer" = 0 ] &&
          [ -n "$legacy_start" ] && [ "$st" = 1 ] && [ $(( $(qr_wait_now) - t0 )) -ge "$grace" ]; then
-      # A legacy producer may publish its PID and result between polls. Accept only
-      # a result newer than the observed pending lock, with the usual folder checks.
-      if perl -e 'exit !($ARGV[0] > $ARGV[1])' "$(qr_lock_mtime "$QR_LOGS/last-result")" "$legacy_start"; then
-        run="$(qr_wait_run_dir)"
-        if [ -n "$run" ]; then start="$legacy_start"; seen=1; fi
+      # Legacy producers leave the keyed pointer untouched. Only a result
+      # newer than the pending lock can resolve it, even without a run folder.
+      if res="$(qr_wait_result "" "$legacy_start" "$(qr_wait_run_dir)" "" pending)"; then
+        start="$legacy_start"; seen=1; run="${res%%$'\n'*}"
       fi
     fi
     # Never cache current.env for a pinned pending prepare: it may describe the previous run. Once concrete,
@@ -176,7 +202,7 @@ qr_wait() {
       fi
       if [ "$seen" = 1 ]; then
         # Without an observed lock, current.env supplies the earliest valid result time and the run identity.
-        if res="$(qr_wait_result "$wpid" "$start" "$run" "$key")"; then
+        if [ -n "$res" ] || res="$(qr_wait_result "$wpid" "$start" "$run" "$key")"; then
           [ -n "$run" ] || run="${res%%$'\n'*}"
           res="${res#*$'\n'}"
           terminal="${res%%$'\n'*}"
