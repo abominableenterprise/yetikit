@@ -196,7 +196,7 @@ qr_cleanup_expected_head() {
 
 # Remove only clean worktrees, optionally after reversing recognized editor noise.
 qr_cleanup_one() {
-  local wt="$1" discard="${2:-}" status_file noise_rc=0
+  local wt="$1" discard="${2:-}" status_file noise_rc=0 index_rc=0
   [ -d "$wt" ] || { echo "absent"; return 0; }
   if [ "$discard" = --discard-noise ]; then
     qr_discard_noise "$wt" || noise_rc=$?
@@ -222,6 +222,13 @@ qr_cleanup_one() {
       return 1
     fi
     rm -f "$status_file"
+    qr_hidden_index_entry "$wt" || index_rc=$?
+    case "$index_rc" in
+      0) ;;
+      1) echo "kept (hidden index entry)"; return 1 ;;
+      *) qr_log "cannot inspect index flags in $wt; preserving worktree"
+         echo "kept (inspection failed)"; return 1 ;;
+    esac
   fi
   # Non-forced removal rechecks local changes, not the release commit.
   if qr_with_cleanup_head "$wt" qr_git worktree remove "$wt" >> "$QR_RUN_DIR/cleanup.log" 2>&1; then

@@ -2,6 +2,21 @@
 qr_discard_noise() { qr_inspect_noise "$1" discard; }
 qr_check_release_noise() { qr_inspect_noise "$1" check "${2:-}"; }
 
+# Git status and non-forced removal can miss edits to these entries.
+# Return 0 for no hidden entries, 1 for a hidden entry, and 2 on inspection failure.
+qr_hidden_index_entry() (
+  local wt="$1" flags record LC_ALL=C
+  flags="$(mktemp)" || return 2
+  trap 'rm -f -- "$flags"' EXIT
+  git -C "$wt" ls-files -v -z > "$flags" || return 2
+  while IFS= read -r -d '' record; do
+    case "${record:0:1}" in
+      [a-z]|S) qr_log "keeping $wt: cannot inspect hidden index entry ${record:2}"; return 1 ;;
+    esac
+  done < "$flags"
+  return 0
+)
+
 # Share the classifier and index checks, but only opt-in cleanup reverses edits.
 qr_inspect_noise() (
   local wt="$1" action="$2" apk="${3:-}" scratch record path reason
@@ -12,16 +27,9 @@ qr_inspect_noise() (
   cd -P -- "$wt" || return 2
   qr_cleanup_expected_head . || return 2
 
+  qr_hidden_index_entry "$PWD" || return 2
   scratch="$(mktemp -d)" || return 2
   trap 'rm -rf -- "$scratch"' EXIT
-  # Git status (including the final removal's clean check) can miss edits to
-  # assume-unchanged and skip-worktree entries. Do not discard in those trees.
-  git ls-files -v -z > "$scratch/index-flags" || return 2
-  while IFS= read -r -d '' record; do
-    case "${record:0:1}" in
-      [a-z]|S) qr_log "keeping $wt: cannot inspect hidden index entry ${record:2}"; return 2 ;;
-    esac
-  done < "$scratch/index-flags"
   if [ "$action" = check ]; then
     # Ignore only known Unity output trees, not arbitrary project/global ignore
     # rules (which could hide a new script or asset). Directory patterns do
