@@ -10,6 +10,16 @@ namespace YetiKit.Core.Tests
         static readonly TimeZoneInfo Pacific = TimeZoneInfo.CreateCustomTimeZone("Test Pacific", TimeSpan.FromHours(-7), "Test Pacific", "Test Pacific");
 
         [Test]
+        public void CoreDeclaresTheJsonSerializeModuleItUses()
+        {
+            var core = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(BuildInfo).Assembly);
+            Assert.IsNotNull(core);
+            Assert.That(Array.Exists(core.dependencies, dependency =>
+                dependency.name == "com.unity.modules.jsonserialize" && dependency.version == "1.0.0"),
+                "Core must bring JSON Serialize even when the consumer does not declare it.");
+        }
+
+        [Test]
         public void FormatAndParseRoundTrip()
         {
             var info = new BuildInfo(141, "d3050c5", Utc, new[] { "Pick who's playing", "Build number \"b141\"" });

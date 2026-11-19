@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -73,7 +74,6 @@ namespace YetiKit.Core.Editor
             ValidatePath(assetPath);
             return Stamp(info, () =>
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(assetPath));
                 File.WriteAllText(assetPath, info.ToJson(), new UTF8Encoding(false));
                 AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
             }, assetPath);
@@ -84,13 +84,18 @@ namespace YetiKit.Core.Editor
         {
             var version = PlayerSettings.bundleVersion;
             var code = PlayerSettings.Android.bundleVersionCode;
+            var created = new List<string>();
             var undo = new Undo(() =>
             {
                 try { PlayerSettings.bundleVersion = version; }
                 finally
                 {
                     try { PlayerSettings.Android.bundleVersionCode = code; }
-                    finally { Remove(assetPath); }
+                    finally
+                    {
+                        Remove(assetPath);
+                        RemoveEmptyFolders(created);
+                    }
                 }
             });
             try
@@ -100,6 +105,7 @@ namespace YetiKit.Core.Editor
                     PlayerSettings.bundleVersion = "1.0." + info.Number;
                     PlayerSettings.Android.bundleVersionCode = info.Number;
                 }
+                CreateFolders(Path.GetDirectoryName(assetPath), created);
                 setup();
                 Debug.Log($"[BuildStamp] build {info.Number} ({info.Sha}), {info.Notes.Length} notes, version {PlayerSettings.bundleVersion}");
                 return undo;
@@ -124,7 +130,16 @@ namespace YetiKit.Core.Editor
                 throw new ArgumentException("The generated JSON path must not be a directory.", nameof(assetPath));
         }
 
-        /// <summary>Delete the generated file and empty parent folders, stopping at Assets.</summary>
+        static void CreateFolders(string path, List<string> created)
+        {
+            if (string.IsNullOrEmpty(path) || path == "Assets" || Directory.Exists(path)) return;
+            CreateFolders(Path.GetDirectoryName(path), created);
+            if (Directory.Exists(path)) return;
+            Directory.CreateDirectory(path);
+            created.Add(path);
+        }
+
+        /// <summary>Delete the generated file and its metadata, leaving parent folders intact.</summary>
         public static void Remove(string assetPath = AssetPath)
         {
             ValidatePath(assetPath);
@@ -132,13 +147,16 @@ namespace YetiKit.Core.Editor
             // A failed write/import may leave files the AssetDatabase does not know about yet.
             if (File.Exists(assetPath)) File.Delete(assetPath);
             if (File.Exists(assetPath + ".meta")) File.Delete(assetPath + ".meta");
-            var dir = Path.GetDirectoryName(assetPath);
-            while (!string.IsNullOrEmpty(dir) && dir != "Assets" &&
-                Directory.Exists(dir) && Directory.GetFileSystemEntries(dir).Length == 0)
+        }
+
+        static void RemoveEmptyFolders(List<string> created)
+        {
+            for (var i = created.Count - 1; i >= 0; i--)
             {
+                var dir = created[i];
+                if (!Directory.Exists(dir) || Directory.GetFileSystemEntries(dir).Length != 0) continue;
                 if (!AssetDatabase.DeleteAsset(dir)) Directory.Delete(dir);
                 if (File.Exists(dir + ".meta")) File.Delete(dir + ".meta");
-                dir = Path.GetDirectoryName(dir);
             }
         }
 

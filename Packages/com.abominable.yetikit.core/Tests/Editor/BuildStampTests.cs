@@ -271,7 +271,7 @@ namespace YetiKit.Core.Tests
                 Assert.AreEqual(141, PlayerSettings.Android.bundleVersionCode);
                 if (stage > 0)
                 {
-                    Directory.CreateDirectory(Path.GetDirectoryName(BuildStamp.AssetPath));
+                    Assert.IsTrue(Directory.Exists(Path.GetDirectoryName(BuildStamp.AssetPath)));
                     File.WriteAllText(BuildStamp.AssetPath, stage == 1 ? "{partial" : "{}");
                 }
                 if (stage == 2)
@@ -287,8 +287,16 @@ namespace YetiKit.Core.Tests
             Assert.AreEqual(code, PlayerSettings.Android.bundleVersionCode);
             Assert.IsFalse(File.Exists(BuildStamp.AssetPath));
             Assert.IsFalse(File.Exists(BuildStamp.AssetPath + ".meta"));
-            if (!generatedExisted) Assert.IsFalse(Directory.Exists("Assets/Resources/Generated"));
-            if (!resourcesExisted) Assert.IsFalse(Directory.Exists("Assets/Resources"));
+            if (!generatedExisted)
+            {
+                Assert.IsFalse(Directory.Exists("Assets/Resources/Generated"));
+                Assert.IsFalse(File.Exists("Assets/Resources/Generated.meta"));
+            }
+            if (!resourcesExisted)
+            {
+                Assert.IsFalse(Directory.Exists("Assets/Resources"));
+                Assert.IsFalse(File.Exists("Assets/Resources.meta"));
+            }
         }
 
         [Test]
@@ -306,6 +314,38 @@ namespace YetiKit.Core.Tests
                 Assert.IsFalse(Directory.Exists("Assets/CoreStampTest"));
             }
             finally { AssetDatabase.DeleteAsset("Assets/CoreStampTest"); }
+        }
+
+        [TestCase("Assets/Resources", BuildStamp.AssetPath, true)]
+        [TestCase("Assets/CoreStampTest", "Assets/CoreStampTest/One/Two/BuildInfo.json", false)]
+        [TestCase("Assets/CoreStampTest", "Assets/CoreStampTest/BuildInfo.json", false)]
+        public void DisposingAStampPreservesPreexistingEmptyFoldersAndGuids(string folder, string path, bool useDefault)
+        {
+            var existed = Directory.Exists(folder);
+            try
+            {
+                Directory.CreateDirectory(folder);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                var meta = File.ReadAllBytes(folder + ".meta");
+                var guid = AssetDatabase.AssetPathToGUID(folder);
+                Assert.IsNotEmpty(guid);
+
+                var info = new BuildInfo(141, "d3050c5", Utc, null);
+                using (useDefault ? BuildStamp.For(info) : BuildStamp.For(info, path))
+                    Assert.IsTrue(File.Exists(path));
+
+                Assert.IsFalse(File.Exists(path));
+                Assert.IsFalse(File.Exists(path + ".meta"));
+                Assert.IsTrue(Directory.Exists(folder), "the preexisting folder must survive disposal");
+                CollectionAssert.AreEqual(meta, File.ReadAllBytes(folder + ".meta"));
+                Assert.AreEqual(guid, AssetDatabase.AssetPathToGUID(folder));
+                if (!existed)
+                    Assert.IsEmpty(Directory.GetFileSystemEntries(folder), "scope-created folders and metadata are gone");
+            }
+            finally
+            {
+                if (!existed) AssetDatabase.DeleteAsset(folder);
+            }
         }
 
         [TestCase(false, false)]

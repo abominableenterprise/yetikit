@@ -68,8 +68,9 @@ require `/bin/sh` and skip on platforms without it.
   `IDisposable` scope that writes/imports the Assets-relative JSON path and, for positive build numbers, temporarily sets
   bundle version to `1.0.<number>` and Android version code to the number.
   Disposal restores both versions and removes the generated JSON and empty
-  generated directories, including on build exceptions. `Remove()` performs
-  explicit generated-asset cleanup; pass the same optional asset path to it.
+  directories created by the scope, including on build exceptions. Existing
+  folders and their GUIDs are preserved. `Remove()` deletes only the generated
+  asset and its metadata; pass the same optional asset path to it.
   A custom Resources key can be read with `BuildInfo.Parse` on the loaded text;
   `BuildInfo.Current` always uses the default key.
 
