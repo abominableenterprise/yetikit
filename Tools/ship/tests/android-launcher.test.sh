@@ -182,15 +182,48 @@ with tempfile.TemporaryDirectory() as directory:
     true_value = 't=0x12 d=0xffffffff (s=0x0008 r=0x00)\n'
     false_value = 't=0x12 d=0x00000000 (s=0x0008 r=0x00)\n'
     default = '      config (default):\n'
+    landscape = '      config land:\n'
+    portrait = '      config port:\n'
+    version = '      config v26:\n'
+    leaf_entry = '        resource 0x7f040002 com.example:bool/export_leaf: '
+    alias = 't=0x01 d=0x7f040001\n'
+    leaf = 't=0x01 d=0x7f040002\n'
     for label, resolved, values in (
         ('true bool reference', True, default + export_entry + true_value),
         ('false bool reference', False, default + export_entry + false_value),
         ('unresolved bool reference', False, ''),
         ('non-boolean resource', False, default + export_entry + true_value.replace('t=0x12', 't=0x10')),
-        ('bool alias', True, default + export_entry + 't=0x01 d=0x7f040001\n' + alias_entry + true_value),
+        ('bool alias', True, default + export_entry + alias + alias_entry + true_value),
+        ('landscape alias uses landscape value', True,
+         default + export_entry + true_value + alias_entry + false_value
+         + landscape + export_entry + alias + alias_entry + true_value),
+        ('landscape alias falls back to default', True,
+         default + export_entry + true_value + alias_entry + true_value + portrait + alias_entry + false_value
+         + landscape + export_entry + alias),
+        ('landscape-only alias target', True,
+         default + export_entry + true_value + '      config land flags=0x02 [offset16]:\n'
+         + export_entry + alias + alias_entry + true_value),
+        ('landscape context survives default intermediate alias', True,
+         default + export_entry + true_value + alias_entry + leaf + leaf_entry + false_value
+         + landscape + export_entry + alias + leaf_entry + true_value + portrait + leaf_entry + false_value),
+        ('landscape alias uses compatible version fallback', True,
+         default + export_entry + true_value + alias_entry + false_value
+         + version + alias_entry + true_value + '      config land-v28:\n' + export_entry + alias),
+        ('orientation takes precedence over SDK version', True,
+         default + export_entry + true_value + alias_entry + false_value
+         + landscape + alias_entry + true_value + version + alias_entry + false_value
+         + '      config land-v28:\n' + export_entry + alias),
+        ('landscape alias sees narrower override', False,
+         default + export_entry + true_value + alias_entry + true_value + landscape + export_entry + alias
+         + '      config land-v28:\n' + alias_entry + false_value),
+        ('default alias sees landscape override', False,
+         default + export_entry + alias + alias_entry + true_value + landscape + alias_entry + false_value),
         ('cyclic alias', False, default + export_entry + 't=0x01 d=0x7f040000\n'),
-        ('false override', False, default + export_entry + true_value + '      config v26:\n' + export_entry + false_value),
-        ('no default', False, '      config v26:\n' + export_entry + true_value),
+        ('cyclic landscape alias', False,
+         default + export_entry + true_value + alias_entry + true_value
+         + landscape + export_entry + alias + alias_entry + 't=0x01 d=0x7f040000\n'),
+        ('false override', False, default + export_entry + true_value + version + export_entry + false_value),
+        ('no default', False, version + export_entry + true_value),
     ):
         resources.write_text(theme + export_spec + values)
         for contest in (False, True):
