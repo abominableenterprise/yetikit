@@ -146,6 +146,27 @@ preserves_unreadable_index() {
 }
 check preserves_unreadable_index
 
+preserves_symlinked_index() {
+  local wt target result
+  wt="$(mktemp -d "$tmp/symlinked-index.XXXXXX")" || return 1
+  target="$wt.target"
+  printf 'synthetic tracked content\n' > "$wt/untouched.txt"
+  printf 'synthetic index\n' > "$target"
+  ln -s "$target" "$wt/index-fixture" || return 1
+  : > "$FIXTURE_STATUS"
+  : > "$FIXTURE_CALLS"
+  qr_discard_noise() { printf 'discard noise\n' >> "$FIXTURE_CALLS"; }
+  if result="$(qr_cleanup_one "$wt" "$@")"; then
+    return 1
+  fi
+  [ "$result" = 'kept (symlinked index)' ] && [ ! -s "$FIXTURE_CALLS" ] &&
+    [ -L "$wt/index-fixture" ] && [ "$(readlink "$wt/index-fixture")" = "$target" ] &&
+    [ ! -e "$wt/index-fixture.lock" ] && [ ! -e "$target.lock" ] &&
+    grep -Fxq 'synthetic tracked content' "$wt/untouched.txt" && grep -Fxq 'synthetic index' "$target"
+}
+check preserves_symlinked_index
+check preserves_symlinked_index --discard-noise
+
 preserves_existing_index_lock() {
   local wt="$tmp/busy-index" result
   mkdir -p "$wt"

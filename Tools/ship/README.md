@@ -587,7 +587,8 @@ the same serialized float value count as noise.
 A worktree with staged or untracked work, deletions, or unclassified edits is
 kept intact with a reason. Both modes lock the worktree index while checking
 for `assume-unchanged` or `skip-worktree` entries and through non-forced
-removal. Cleanup keeps the worktree if the index is busy, cannot be inspected,
+removal. Cleanup refuses symlinked indexes before inspecting or discarding
+changes. It also keeps the worktree if the index is busy, cannot be inspected,
 or has either flag, since Git can hide edits to those files.
 `--discard-noise` is only for standalone
 `cleanup`; `all` continues to remove only clean worktrees.
