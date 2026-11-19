@@ -245,6 +245,13 @@ namespace YetiKit.Interaction
             return Vector3.Distance(from, prop.body ? prop.body.worldCenterOfMass : prop.transform.position);
         }
 
+#if UNITY_EDITOR || (DEVELOPMENT_BUILD && YETIKIT_DEV)
+        internal void RefitGripForMode(HandMode mode)
+        {
+            if (heldGripMode == mode && GripMode == mode) RefitGrip();
+        }
+#endif
+
         public void RefitGrip()
         {
             if (!isSelected || !PlaceInHand(interactorsSelecting[0].GetAttachTransform(this))) return;

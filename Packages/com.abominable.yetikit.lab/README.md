@@ -53,3 +53,29 @@ profile ID, empty for an unnamed grip), plus two poses:
 Poses use Unity's left-handed axes (+X right, +Y up, +Z forward) for either hand,
 with no mirroring. Each is `[px,py,pz,qx,qy,qz,qw]` in meters and quaternion
 components; rotations map child axes into the parent frame.
+
+### Grip overrides
+
+Pass an `IGripOverrideStore` to `Populate` to load and save overrides by catalog
+ID and `HandMode`. Use `PlayerPrefsGripOverrideStore` with a stable catalog scope
+for local persistence; omitting the store keeps commits in memory. Per mode,
+the lab preview or committed override wins over `gripProfiles`, which wins over
+`grip`. The authored and baked data are never edited.
+
+Use `station.Adjuster.Begin(slot, mode, competingInputs)` to select an edit target.
+Supply only behaviours competing for adjustment input. The guard disables them,
+except for tracked-hand interactors, where it blocks selection without stopping
+tracking. Do not include the active holding interactor. `Stage(profile)`
+previews a grip and refits any matching hold in place. `Commit()` saves the
+preview. `Undo()` discards an active preview, or restores the last committed
+state for that slot and mode. `Reset()` removes the override for that key and
+can itself be undone. `End()` discards uncommitted changes. Borrowed input states
+are restored on end, on Back, on station or slot disable, and on an adjuster
+exception. The station's Reset button still returns props to their slots; it
+does not delete saved grips.
+
+The store handles a JSON body per key: `v` is `1`, and `profile` contains the
+`id` and `spec` fields of `GripProfile`. Unknown fields in a valid v1 body are
+ignored on read; an explicit edit replaces that key's body. Malformed or
+unsupported bodies fall back to the baked or authored grip and cannot be
+committed over or reset by the adjuster. Other keys are never rewritten.
