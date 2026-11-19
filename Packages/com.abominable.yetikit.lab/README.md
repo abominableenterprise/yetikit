@@ -22,3 +22,34 @@ A release player cannot include the assembly just by defining `YETIKIT_DEV`.
 - Place `TuningPanel` on a world-space canvas, wire its label, navigation and
   reset buttons, and put a `TuningHoldButton` on each adjustment target. Use the
   rig's UI pointer and raycaster. Call `Bind` when the active tuning model changes.
+
+## Grip lab station
+
+A consumer supplies an `IInteractableCatalog` with unique stable IDs and one
+prefab or factory per entry. Each must produce a fresh active `GrabbableProp`
+with solid colliders on its rigidbody. Put `GripLabStation` at the midpoint of
+an axis-aligned table's near edge at surface height, and call `Populate` once
+at runtime. The station keeps authored rotations, wraps rows along world +Z,
+and uses the combined solid collider bounds for spacing. Size the table depth
+for the catalog and allow room for entries wider than the row width.
+
+Props start fixed at their slots. Physical hand contact or XR selection makes
+them dynamic. Unheld props return after three gameplay seconds, starting after
+any late release has settled; props that fall out of the world recover directly.
+Assign the optional Reset and Back buttons in the Inspector. Both return props
+and cancel active grabs without throwing. Back then raises `BackRequested` for
+the consumer's navigation. Props remain children of the station while held.
+
+Set `Head` to the rig's head transform and register `FlightEvents` with the
+session flight recorder (dispose the registration when leaving the lab). On
+selection with available hand input, `griplab` v1 records `prop` (catalog ID),
+`side` (`L` or `R`), `mode` (`controller` or `tracked_hand`), and `grip` (mode
+profile ID, empty for an unnamed grip), plus two poses:
+
+- `attach`: interactor attach pose in wrist space.
+- `wrist`: wrist pose in head space. For controller input, the controller pose
+  is the wrist reference.
+
+Poses use Unity's left-handed axes (+X right, +Y up, +Z forward) for either hand,
+with no mirroring. Each is `[px,py,pz,qx,qy,qz,qw]` in meters and quaternion
+components; rotations map child axes into the parent frame.
