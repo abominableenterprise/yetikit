@@ -9,6 +9,7 @@ import struct
 import subprocess
 import tempfile
 
+from audit_paths import reject_report_alias, resolve
 from gltf_reader import load_meshes
 from mesh_metrics import measure
 
@@ -57,13 +58,13 @@ def failures(row, thresholds, allow_open=False):
     return bad
 
 
-def check(path, thresholds, rule, blender, require_blender):
+def check(path, thresholds, rule, blender, require_blender, *, inputs=None):
     row = {"file": path}
     try:
         suffix = Path(path).suffix.lower()
         if suffix not in (".glb", ".gltf", ".fbx"):
             raise ValueError("unsupported file type")
-        if not Path(path).is_file():
+        if not resolve(Path(path), strict=True).is_file():
             raise ValueError("file not found")
         if suffix == ".fbx":
             if not blender:
@@ -78,7 +79,7 @@ def check(path, thresholds, rule, blender, require_blender):
                     raise ValueError("Blender audit failed: " + (result.stdout + result.stderr)[-1500:])
                 meshes = json.loads(Path(report).read_text())
         else:
-            meshes = [dict(measure(v, t), mesh=name) for name, v, t in load_meshes(path)]
+            meshes = [dict(measure(v, t), mesh=name) for name, v, t in load_meshes(path, inputs=inputs)]
         if not meshes:
             raise ValueError("no meshes")
         for mesh in meshes:
@@ -102,12 +103,21 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         thresholds, exceptions = configuration(args.config)
+        exceptions = {resolve(Path(k)): v for k, v in exceptions.items()}
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
-    exceptions = {Path(k).resolve(): v for k, v in exceptions.items()}
     blender = shutil.which(args.blender or "blender")
-    rows = [check(path, thresholds, exceptions.get(Path(path).resolve(), {}), blender,
-                  args.require_blender) for path in args.files]
+    inputs = set(map(Path, args.files))
+    if args.config:
+        inputs.add(Path(args.config))
+    rows = []
+    for path in args.files:
+        try:
+            rule = exceptions.get(resolve(Path(path)), {}) if exceptions else {}
+        except (OSError, ValueError) as exc:
+            rows.append({"file": path, "status": "FAIL", "message": str(exc)})
+            continue
+        rows.append(check(path, thresholds, rule, blender, args.require_blender, inputs=inputs))
     for row in rows:
         meshes = row.get("meshes", [])
         detail = (f"tris={sum(m['tris'] for m in meshes)} "
@@ -120,7 +130,11 @@ def main(argv=None):
                   if meshes else row["message"])
         print(f"{row['status']} {row['file']}: {' '.join(detail.split())}")
     if args.json:
-        args.json.write_text(json.dumps({"thresholds": thresholds, "files": rows}, indent=2) + "\n")
+        try:
+            reject_report_alias(args.json, inputs)
+            args.json.write_text(json.dumps({"thresholds": thresholds, "files": rows}, indent=2) + "\n")
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
     return int(any(row["status"] == "FAIL" for row in rows))
 
 

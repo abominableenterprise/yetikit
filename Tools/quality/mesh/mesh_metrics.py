@@ -23,8 +23,13 @@ def measure(verts, tris):
     over = sum(len(e) > 2 for e in edges.values())
     same = sum(int(len(e) == 2 and e[0][1] == e[1][1]) for e in edges.values())
     for uses in edges.values():
-        for i, _ in uses:
-            neighbors[i].update(j for j, _ in uses if j != i)
+        # A star connects the same faces as a clique without O(len(uses)^2)
+        # neighbor entries on an over-used edge.
+        first = uses[0][0]
+        for i, _ in uses[1:]:
+            if i != first:
+                neighbors[first].add(i)
+                neighbors[i].add(first)
     # Rays alone cannot identify a wholly inside-out closed shell: its far wall
     # still presents a front face. Signed volume supplies that missing evidence.
     unseen = set(range(len(t)))

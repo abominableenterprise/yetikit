@@ -11,27 +11,90 @@ from urllib.parse import unquote, urlsplit
 
 import numpy as np
 
+from audit_paths import resolve
 
-def load_meshes(path):
+JSON_CHUNK = 0x4E4F534A
+BIN_CHUNK = 0x004E4942
+STATIC_PRIMITIVE_METADATA = {"KHR_materials_variants"}
+
+
+def _local_buffer_path(parent, uri):
+    parts = urlsplit(uri)
+    if parts.scheme or parts.netloc or parts.query or parts.fragment:
+        raise ValueError("buffer must be a local relative URI")
+    path = unquote(parts.path)
+    if "\0" in path:
+        raise ValueError("buffer URI contains a null byte")
+    return parent / path
+
+
+def _protect_buffer_paths(doc, parent, inputs):
+    specs = doc.get("buffers") if isinstance(doc, dict) else None
+    if not isinstance(specs, list):
+        return
+    # Collect paths without reading buffers or depending on validation order.
+    # A malformed entry must not hide local paths in subsequent entries.
+    for spec in specs:
+        uri = spec.get("uri") if isinstance(spec, dict) else None
+        if isinstance(uri, str):
+            try:
+                inputs.add(_local_buffer_path(parent, uri))
+            except ValueError:
+                continue  # Nonlocal or invalid URI; the audit handles validation.
+
+
+def load_meshes(path, *, inputs=None):
     path = Path(path)
     blob = path.read_bytes()
     binary = None
     if path.suffix.lower() == ".glb":
         magic, version, size = struct.unpack_from("<4sII", blob)
+        error = None
         if magic != b"glTF" or version != 2 or size != len(blob):
-            raise ValueError("invalid GLB header")
-        chunks, offset = {}, 12
-        while offset < size:
+            error = "invalid GLB header"
+        # Retain the first validation error, but walk chunk boundaries within
+        # the actual file so malformed containers cannot hide input paths.
+        text, offset, chunk, json_spans = None, 12, 0, []
+        while offset < len(blob):
+            if len(blob) - offset < 8:
+                error = error or "truncated GLB chunk header"
+                break
             length, kind = struct.unpack_from("<II", blob, offset)
             offset += 8
-            if offset + length > size or length % 4:
-                raise ValueError("invalid GLB chunk")
-            chunks[kind] = blob[offset:offset + length]
-            offset += length
-        doc = json.loads(chunks[0x4E4F534A])
-        binary = chunks.get(0x004E4942)
+            end = offset + length
+            if kind == JSON_CHUNK and inputs is not None:
+                json_spans.append((offset, end))
+            if end > len(blob) or length % 4:
+                error = error or "invalid GLB chunk"
+            if chunk == 0 and kind != JSON_CHUNK:
+                error = error or "GLB JSON chunk must be first"
+            if kind == JSON_CHUNK:
+                if chunk != 0:
+                    error = error or "duplicate GLB JSON chunk"
+                elif not error:
+                    text = blob[offset:end]
+            elif kind == BIN_CHUNK:
+                if chunk != 1:
+                    error = error or "GLB BIN chunk must occur at most once, immediately after JSON"
+                elif not error:
+                    binary = blob[offset:end]
+            # glTF requires clients to ignore unknown chunk types.
+            offset = end
+            chunk += 1
+        if error:
+            for start, end in json_spans:
+                try:
+                    _protect_buffer_paths(json.loads(blob[start:end]), path.parent, inputs)
+                except (ValueError, RecursionError):
+                    continue  # Unreadable JSON must not hide paths in another chunk.
+            raise ValueError(error)
+        if text is None:
+            raise ValueError("missing GLB JSON chunk")
+        doc = json.loads(text)
     else:
         doc = json.loads(blob)
+    if inputs is not None:
+        _protect_buffer_paths(doc, path.parent, inputs)
     if not isinstance(doc, dict) or not isinstance(doc.get("asset"), dict):
         raise ValueError("invalid glTF document")
     if doc.get("asset", {}).get("version") != "2.0":
@@ -46,11 +109,8 @@ def load_meshes(path):
         elif uri.startswith("data:") and ";base64," in uri:
             data = base64.b64decode(uri.split(",", 1)[1], validate=True)
         else:
-            parts = urlsplit(uri)
-            if parts.scheme or parts.netloc or parts.query or parts.fragment:
-                raise ValueError("buffer must be a local relative URI")
-            target = (path.parent / unquote(parts.path)).resolve()
-            if not target.is_relative_to(path.parent.resolve()):
+            target = resolve(_local_buffer_path(path.parent, uri))
+            if not target.is_relative_to(resolve(path.parent)):
                 raise ValueError("buffer URI escapes asset directory")
             data = target.read_bytes()
         if data is None or len(data) < spec["byteLength"]:
@@ -75,6 +135,10 @@ def load_meshes(path):
         stride = view.get("byteStride", dtype.itemsize * width)
         start = view.get("byteOffset", 0)
         offset = a.get("byteOffset", 0)
+        if offset % dtype.itemsize or (start + offset) % dtype.itemsize:
+            raise ValueError("misaligned accessor or buffer view offset")
+        if "byteStride" in view and (not position or type(stride) is not int or not 4 <= stride <= 252 or stride % 4):
+            raise ValueError("invalid vertex stride or stride on an index buffer view")
         count = a["count"]
         end = offset + (count - 1) * stride + dtype.itemsize * width
         data = reference(buffers, view["buffer"])
@@ -88,8 +152,11 @@ def load_meshes(path):
     for index, mesh in enumerate(doc.get("meshes", [])):
         verts, tris = [], []
         for primitive in mesh["primitives"]:
-            if primitive.get("mode", 4) != 4 or primitive.get("extensions"):
-                raise ValueError("only uncompressed TRIANGLES primitives are supported")
+            extensions = primitive.get("extensions", {})
+            if primitive.get("mode", 4) != 4:
+                raise ValueError("only TRIANGLES primitives are supported")
+            if not isinstance(extensions, dict) or extensions.keys() - STATIC_PRIMITIVE_METADATA:
+                raise ValueError("unsupported glTF primitive extensions")
             positions = accessor(primitive["attributes"]["POSITION"], True)
             indices = accessor(primitive["indices"]).ravel() if "indices" in primitive else np.arange(len(positions))
             if len(indices) % 3 or not len(indices) or np.max(indices) >= len(positions):
