@@ -183,7 +183,11 @@ cmd_return() {
   ' _ "$LC" --return-ulf --username "$UNITY_USERNAME" --password "$UNITY_PASSWORD") > "$capture" 2>&1 || rc=$?
   out="$(< "$capture")"; rm -f "$capture"
   printf '%s\n' "$out" | mask >&2
-  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then log "return: licensing client timed out after $limit s (UNITY_RETURN_TIMEOUT)"; fi
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+    # Partial output cannot confirm what happened remotely before the timeout.
+    log "return: licensing client timed out after $limit s (UNITY_RETURN_TIMEOUT)"
+    return "$rc"
+  fi
   # Nothing to give back (already returned, or never activated on this VM): that is fine.
   if grep -qi 'Ulf license file not found' <<< "$out"; then
     log "return: licence already returned"; rc=0
@@ -223,18 +227,25 @@ clear_return_guard() {
   fi
 }
 
-# Every editor run needs the ULF. If it vanished (returned, wiped), re-activate once when credentials are set.
-# An invalid one (see ulf_problem) counts as missing.
+# On success the caller holds the ULF lock through the supervised editor run.
+# Activation takes its own locks (and may poll for a seat), so drop the ULF
+# lock before activating, then recheck under lock before authorizing launch.
 ensure_licence() {
-  require_no_pending_return
-  local why="missing"
-  if [ -f "$ULF" ]; then why="$(ulf_problem)"; [ -n "$why" ] || return 0; fi
-  if [ -n "${UNITY_USERNAME:-}" ] && [ -n "${UNITY_PASSWORD:-}" ]; then
+  local why attempted=0
+  while :; do
+    activation_lock
+    require_no_pending_return
+    why=missing
+    if [ -f "$ULF" ]; then why="$(ulf_problem)"; [ -n "$why" ] || return 0; fi
+    [ "$attempted" = 0 ] || die "ULF licence at $ULF is $why after activation; retry the editor command"
+    if [ -z "${UNITY_USERNAME:-}" ] || [ -z "${UNITY_PASSWORD:-}" ]; then
+      die "ULF licence at $ULF is $why; set UNITY_USERNAME/UNITY_PASSWORD and run activate"
+    fi
+    activation_unlock
     log "ULF licence at $ULF is $why; re-activating once"
     cmd_activate
-  else
-    die "ULF licence at $ULF is $why; set UNITY_USERNAME/UNITY_PASSWORD and run activate"
-  fi
+    attempted=1
+  done
 }
 
 # Guard each handler against errexit, report its status, and leave EXIT_RC alone. Handlers must explicitly
@@ -263,6 +274,9 @@ chain_exit_trap() {
 return_on_exit() {
   local ret=0
   [ "${RETURN_ATTEMPTED:-0}" = 0 ] || return 0
+  # Cancellation may have interrupted an editor's lock acquisition. Reacquire
+  # from a fresh descriptor rather than treating an open FD as authorization.
+  activation_unlock
   log "UNITY_RETURN_ON_EXIT=1: returning the held licence" || :
   (cmd_return) || ret=$?
   [ "$ret" = 0 ] && return 0

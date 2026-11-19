@@ -304,6 +304,7 @@ cmd_apk() {
       "$cli" build "$PROJECT" --profile "$profile" -e "$UNITY_BIN" --output-path "$PROJECT/$apk" \
       --android-export-type apk --allow-dirty-build --timeout "$APK_TIMEOUT" --no-tail \
       -l "$OUT_DIR/apk.log" >&2 || rc=$?
+    activation_unlock
     cleanup_unity
   else
     UNITY_TIMEOUT="$APK_TIMEOUT" UNITY_TIMEOUT_VAR=APK_TIMEOUT UNITY_RUN_LABEL=apk unity -quit -buildTarget Android \

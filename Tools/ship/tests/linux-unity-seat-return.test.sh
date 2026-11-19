@@ -26,6 +26,25 @@ lu "${hub[@]}" -- return
 check "return without ULF or state: no Licensing Client or release call" \
   '[ "$rc" = 0 ] && [ ! -s "$tmp/curl-calls" ] && [ ! -s "$tmp/lc-calls" ] && grep -Fq "return: licence already returned" "$tmp/log"'
 
+# Simulate both deadline statuses while leaving the signed ULF on disk.
+for status in 124 137; do
+  reset 200; good_ulf_now; echo "5455 1" > "$state"
+  lu "${hub[@]}" "FAKE_RETURN_RC=$status" -- return
+  check "first timeout ($status) leaves the ULF and a pending guard" \
+    '[ "$rc" = "$status" ] && [ -f "$ULF" ] && [ -d "$ULF.returning" ] && [ ! -e "$ULF.returning/returned" ] && [ "$(calls release)" = 0 ]'
+  : > "$tmp/lc-calls"
+  for command in open activate; do
+    lu "${hub[@]}" -- "$command"
+    check "first timeout ($status) blocks $command until retry" \
+      '[ "$rc" != 0 ] && grep -q "licence return is pending" "$tmp/log" && [ ! -s "$tmp/runs" ] && [ ! -s "$tmp/lc-calls" ]'
+  done
+  lu "${hub[@]}" -- return
+  check "successful retry after $status clears the guard and releases the seat" \
+    '[ "$rc" = 0 ] && [ ! -e "$ULF" ] && [ ! -e "$ULF.returning" ] && [ "$(calls release)" = 1 ] && grep -qx -- --return-ulf "$tmp/lc-calls"'
+  lu "${hub[@]}" -- open
+  check "editor can launch again after cleanup of $status" '[ "$rc" = 0 ] && [ -s "$tmp/runs" ]'
+done
+
 # Inject unlink failures at just the two paths; stdout/stderr and all other
 # filesystem operations still use the real wrapper and fixture files.
 cat > "$tmp/bin/rm" <<'EOF'
