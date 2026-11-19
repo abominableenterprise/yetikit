@@ -38,7 +38,7 @@ namespace Game.Starter
         public Component ResolveTarget(Collider other) =>
             other && other.TryGetComponent<ImpactCue>(out var cue) && Array.IndexOf(targets, cue) >= 0 ? cue : null;
 
-        public void OnHit(PropHit hit)
+        public void OnHit(in PropHit hit)
         {
             if (hit.Target is ImpactCue cue && cue) cue.Play();
         }
