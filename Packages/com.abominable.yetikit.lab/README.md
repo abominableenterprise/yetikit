@@ -36,9 +36,9 @@ for the catalog and allow room for entries wider than the row width.
 Props start fixed at their slots. Physical hand contact or XR selection makes
 them dynamic. Unheld props return after three gameplay seconds, starting after
 any late release has settled; props that fall out of the world recover directly.
-Assign the optional Reset and Back buttons in the Inspector. Reset cancels
-active grabs without throwing; subscribe to `BackRequested` to leave the lab
-using the consumer's navigation.
+Assign the optional Reset and Back buttons in the Inspector. Both return props
+and cancel active grabs without throwing. Back then raises `BackRequested` for
+the consumer's navigation. Props remain children of the station while held.
 
 Set `Head` to the rig's head transform and register `FlightEvents` with the
 session flight recorder (dispose the registration when leaving the lab). On

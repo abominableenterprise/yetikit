@@ -30,6 +30,8 @@ namespace YetiKit.Lab
             Solids = GetComponentsInChildren<Collider>()
                 .Where(c => !c.isTrigger && c.attachedRigidbody == prop.Body).ToArray();
             prop.respawns = false;
+            // Keep station ownership when XRI grabs the prop, including across scene teardown.
+            grab.unparentTransformOnGrab = false;
         }
 
         void Awake()

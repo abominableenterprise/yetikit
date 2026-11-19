@@ -90,6 +90,10 @@ namespace YetiKit.Lab
             foreach (var slot in slots) if (slot) slot.ReturnHome();
         }
 
-        public void Back() => backRequested.Invoke();
+        public void Back()
+        {
+            ResetAll();
+            backRequested.Invoke();
+        }
     }
 }

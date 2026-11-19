@@ -112,13 +112,29 @@ namespace YetiKit.Lab.Tests
                 Assert.That(slot.IsFixedInSlot, Is.True);
                 Assert.That(Vector3.Distance(body.position, home), Is.LessThan(0.0001f));
                 Assert.That(body.linearVelocity, Is.EqualTo(Vector3.zero));
-                var back = 0;
-                station.BackRequested.AddListener(() => back++);
-                station.Back();
-                Assert.That(back, Is.EqualTo(1));
+                manager.SelectEnter((IXRSelectInteractor)hand, grab);
+                Assert.That(grab.isSelected, Is.True);
+                VerifyBack(station, slot, grab);
             }
             finally { Object.DestroyImmediate(root); }
             yield return new ExitPlayMode();
+        }
+
+        static void VerifyBack(GripLabStation station, GripLabSlot slot, PropGrabInteractable grab)
+        {
+            var back = 0;
+            station.BackRequested.AddListener(() =>
+            {
+                Assert.That(grab.isSelected, Is.False, "Back settles the grab before navigation.");
+                back++;
+                station.gameObject.SetActive(false);
+            });
+            station.Back();
+            Assert.That(back, Is.EqualTo(1));
+            Assert.That(slot.transform.parent, Is.EqualTo(station.transform));
+            Assert.That(slot.gameObject.activeInHierarchy, Is.False);
+            station.gameObject.SetActive(true);
+            Assert.That(slot.IsFixedInSlot, Is.True);
         }
 
         static GrabbableProp MakeProp(string label, Vector3 size)
