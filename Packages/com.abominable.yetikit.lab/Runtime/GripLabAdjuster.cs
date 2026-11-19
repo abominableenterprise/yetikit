@@ -12,14 +12,17 @@ namespace YetiKit.Lab
         GripLabSlot slot;
         GripOverrideEntry entry;
         BorrowedGripInput borrowed;
+        bool restoring;
 
         internal GripLabAdjuster(GripLabStation station) => this.station = station;
 
         /// <summary>Discard any previous preview, then suppress the supplied input components until End.
         /// Tracked-hand interactors are gated at selection so tracking can continue.
-        /// Supply only competing input handlers, not the interactor that owns the current hold.</summary>
+        /// Supply only competing input handlers, not the interactor that owns the current hold.
+        /// Calls made during restoration are ignored; callers can try again once restoration completes.</summary>
         public void Begin(GripLabSlot target, HandMode mode, params Behaviour[] inputs)
         {
+            if (restoring) return;
             End();
             if (!station || !station.isActiveAndEnabled)
                 throw new InvalidOperationException("The station must be active.");
@@ -43,13 +46,19 @@ namespace YetiKit.Lab
         /// <summary>Discard a preview and restore borrowed input without changing committed overrides.</summary>
         public void End()
         {
+            if (restoring) return;
+            restoring = true;
             var previous = entry;
             var input = borrowed;
             slot = null;
             entry = null;
             borrowed = null;
-            try { previous?.DiscardPreview(); }
-            finally { input?.Dispose(); }
+            try
+            {
+                try { previous?.DiscardPreview(); }
+                finally { input?.Dispose(); }
+            }
+            finally { restoring = false; }
         }
 
         internal void End(GripLabSlot target) { if (slot == target) End(); }
