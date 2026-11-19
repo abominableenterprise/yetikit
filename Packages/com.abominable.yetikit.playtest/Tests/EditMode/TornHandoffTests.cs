@@ -1,190 +1,140 @@
 using System;
 using System.IO;
-using System.IO.Compression;
-using System.Text;
 using NUnit.Framework;
-using UnityEngine;
 
 namespace YetiKit.Playtest.Tests
 {
-    /// <summary>A disk error part-way through a multi-block handoff never publishes half a JSON line: the retry restarts
-    /// the whole handoff in a fresh chunk, and Lost counts only what is really dropped.</summary>
     public class TornHandoffTests
     {
-        /// <summary>Fails a chunk's write once more than <see cref="FailAfter"/> compressed bytes reached that file, for
-        /// the next <see cref="Fails"/> chunks.</summary>
-        sealed class FailingDisk
+        const string Id = "20261029-070503-abcd";
+        const string First = "{\"t\":1,\"k\":\"first\"}\n", Second = "{\"t\":2,\"k\":\"second\"}\n";
+
+        [TestCase("create", false)]
+        [TestCase("create", true)]
+        [TestCase("write", false)]
+        [TestCase("write", true)]
+        [TestCase("flush", false)]
+        [TestCase("flush", true)]
+        [TestCase("rename", false)]
+        [TestCase("rename", true)]
+        public void PublicationFaultLeavesCommittedFramesRecoverable(string step, bool diskFull)
         {
-            public long FailAfter = long.MaxValue;
-            public int Fails;
-            public long FailedAt = -1; // bytes the file had taken when it failed
-
-            public Stream Open(string path) => new Guarded(this, File.Create(path));
-
-            sealed class Guarded : Stream
+            using (var tmp = new TempDir())
             {
-                readonly FailingDisk disk;
-                readonly FileStream f;
-                long written;
-                bool broken; // a failed file keeps failing (the gzip dispose writes again) but counts once
-                public Guarded(FailingDisk d, FileStream f) { disk = d; this.f = f; }
-                public override void Write(byte[] b, int o, int n)
+                var store = new Disk(tmp.Path, step, diskFull);
+                store.Files.CreateSession(Id);
+                var dir = store.SessionOutbox(Id);
+                var writer = new ChunkWriter(dir, store: store);
+                writer.Append(First.ToCharArray(), First.Length);
+                writer.Append(Second.ToCharArray(), Second.Length);
+                Assert.Throws<IOException>(() => writer.Rotate());
+                Assert.That(store.Injected, Is.EqualTo(1));
+                Assert.IsEmpty(Directory.GetFiles(dir, "*.jsonl.gz"));
+                Assert.That(Directory.GetFiles(dir, "*.journal").Length, Is.EqualTo(1));
+                store.Files.RecoverChunks();
+                store.Files.RecoverChunks();
+                Assert.That(TempDir.Gunzip(Path.Combine(dir, FileChunkStore.ChunkName(1))), Is.EqualTo(First + Second));
+                Assert.IsEmpty(Directory.GetFiles(dir, "*.journal"));
+                Assert.IsEmpty(Directory.GetFiles(dir, "*.tmp"));
+            }
+        }
+
+        [TestCase("write", false)]
+        [TestCase("write", true)]
+        [TestCase("flush", false)]
+        [TestCase("flush", true)]
+        public void JournalFaultRollsBackOnlyTheUncommittedRecord(string step, bool diskFull)
+        {
+            using (var tmp = new TempDir())
+            {
+                var store = new Disk(tmp.Path, step, diskFull) { InJournal = true, Armed = false };
+                store.Files.CreateSession(Id);
+                var dir = store.SessionOutbox(Id);
+                using (var writer = new ChunkWriter(dir, store: store))
                 {
-                    if (broken) throw new IOException("disk full");
-                    if (disk.Fails > 0 && written + n > disk.FailAfter)
-                    {
-                        disk.Fails--;
-                        broken = true;
-                        disk.FailedAt = written;
-                        throw new IOException("disk full");
-                    }
-                    f.Write(b, o, n);
-                    written += n;
+                    writer.Append(First.ToCharArray(), First.Length);
+                    store.Armed = true;
+                    Assert.Throws<IOException>(() => writer.Append(Second.ToCharArray(), Second.Length));
+                    store.Armed = false;
+                    writer.Append(Second.ToCharArray(), Second.Length);
+                    writer.Rotate();
                 }
-                public override void Flush() => f.Flush();
-                protected override void Dispose(bool d) { if (d) f.Dispose(); base.Dispose(d); }
+                Assert.That(store.Injected, Is.EqualTo(1));
+                Assert.That(TempDir.Gunzip(Path.Combine(dir, FileChunkStore.ChunkName(1))), Is.EqualTo(First));
+                Assert.That(TempDir.Gunzip(Path.Combine(dir, FileChunkStore.ChunkName(2))), Is.EqualTo(Second));
+                Assert.IsEmpty(Directory.GetFiles(dir, "*.journal"));
+                Assert.IsEmpty(Directory.GetFiles(dir, "*.tmp"));
+            }
+        }
+
+        sealed class Disk : IChunkStore
+        {
+            public readonly FileChunkStore Files;
+            readonly string step;
+            readonly bool diskFull;
+            public bool InJournal, Armed = true;
+            public int Injected;
+
+            public Disk(string root, string step, bool diskFull)
+            {
+                Files = new FileChunkStore(root);
+                this.step = step;
+                this.diskFull = diskFull;
+            }
+
+            bool Fails(string path, string operation) => Armed && Injected == 0 && step == operation &&
+                InJournal == path.EndsWith(".journal", StringComparison.Ordinal);
+
+            void Fail()
+            {
+                Injected++;
+                throw diskFull ? new IOException("disk full", unchecked((int)0x80070070)) : new IOException("injected IO failure");
+            }
+
+            public Stream OpenTemp(string path, Func<string, Stream> openFile)
+            {
+                if (Fails(path, "create")) Fail();
+                return new FaultStream(Files.OpenTemp(path, openFile), path, this);
+            }
+
+            public void PublishChunk(string temp, string final)
+            {
+                if (Fails(temp, "rename")) Fail();
+                Files.PublishChunk(temp, final);
+            }
+
+            public string SessionOutbox(string session) => Files.SessionOutbox(session);
+            public void CreateSession(string session) => Files.CreateSession(session);
+            public int NextFree(string dir) => Files.NextFree(dir);
+            public (string temp, string final) ChunkPaths(string dir, int index) => Files.ChunkPaths(dir, index);
+            public bool TempExists(string path) => Files.TempExists(path);
+            public long TempLength(string path) => Files.TempLength(path);
+            public void DeleteTemp(string path) => Files.DeleteTemp(path);
+            public void TruncateJournal(string path, long length) => Files.TruncateJournal(path, length);
+            public void PublishFile(string path, byte[] bytes) => Files.PublishFile(path, bytes);
+            public void DeleteDir(string dir) => Files.DeleteDir(dir);
+
+            sealed class FaultStream : Stream
+            {
+                readonly Stream file;
+                readonly string path;
+                readonly Disk disk;
+                public FaultStream(Stream file, string path, Disk disk) { this.file = file; this.path = path; this.disk = disk; }
                 public override bool CanRead => false;
                 public override bool CanSeek => false;
                 public override bool CanWrite => true;
-                public override long Length => f.Length;
-                public override long Position { get => f.Position; set => throw new NotSupportedException(); }
+                public override long Length => file.Length;
+                public override long Position { get => file.Position; set => throw new NotSupportedException(); }
                 public override int Read(byte[] b, int o, int n) => throw new NotSupportedException();
                 public override long Seek(long o, SeekOrigin s) => throw new NotSupportedException();
-                public override void SetLength(long v) => throw new NotSupportedException();
-            }
-        }
-
-        [Serializable]
-        public class Line
-        {
-            public int i = -1;
-            public string p;
-        }
-
-        /// <summary>Lines <c>{"i":N,"p":"hex"}</c> numbered from <paramref name="first"/>, about <paramref name="chars"/>
-        /// long in all; hex padding barely compresses, so the gzip reaches the disk while the handoff is written.</summary>
-        static string Lines(int first, int chars, int seed, int pad = 87)
-        {
-            var rng = new System.Random(seed);
-            var sb = new StringBuilder();
-            for (var i = first; sb.Length < chars; i++)
-            {
-                sb.Append("{\"i\":").Append(i).Append(",\"p\":\"");
-                for (var k = 0; k < pad; k++) sb.Append("0123456789abcdef"[rng.Next(16)]);
-                sb.Append("\"}\n");
-            }
-            return sb.ToString();
-        }
-
-        /// <summary>The compressed size of <paramref name="text"/>: a file that took more than this has had text past it.</summary>
-        static long GzipLength(string text)
-        {
-            using (var m = new MemoryStream())
-            {
-                using (var g = new GZipStream(m, System.IO.Compression.CompressionLevel.Optimal, true))
+                public override void SetLength(long n) => throw new NotSupportedException();
+                public override void Flush() { file.Flush(); if (disk.Fails(path, "flush")) disk.Fail(); }
+                public override void Write(byte[] b, int o, int n)
                 {
-                    var b = Encoding.UTF8.GetBytes(text);
-                    g.Write(b, 0, b.Length);
+                    if (disk.Fails(path, "write")) { file.Write(b, o, n / 2); disk.Fail(); }
+                    file.Write(b, o, n);
                 }
-                return m.Length;
-            }
-        }
-
-        /// <summary>Every published chunk, decompressed, is whole JSON lines (each one parses); returns them in order.</summary>
-        static string[] PublishedLines(string dir)
-        {
-            Assert.AreEqual(0, Directory.GetFiles(dir, "*.tmp").Length, "no torn chunk left behind");
-            var all = new System.Collections.Generic.List<string>();
-            var chunks = Directory.GetFiles(dir, "chunk-*.jsonl.gz");
-            Array.Sort(chunks, StringComparer.Ordinal);
-            foreach (var chunk in chunks)
-            {
-                var text = TempDir.Gunzip(chunk);
-                var name = Path.GetFileName(chunk);
-                Assert.IsTrue(text.EndsWith("\n"), name + " ends with a whole line");
-                foreach (var line in text.Substring(0, text.Length - 1).Split('\n'))
-                {
-                    StringAssert.StartsWith("{\"i\":", line, name + " has a line that starts mid-record");
-                    StringAssert.EndsWith("\"}", line, name + " has a line that ends mid-record");
-                    Line parsed = null;
-                    Assert.DoesNotThrow(() => parsed = JsonUtility.FromJson<Line>(line), name + ": " + line);
-                    Assert.GreaterOrEqual(parsed.i, 0, name + ": " + line);
-                    all.Add(line);
-                }
-            }
-            return all.ToArray();
-        }
-
-        [Test]
-        public void AFailureAfterTheFirstBlockRetriesTheWholeHandoffFromALineStart()
-        {
-            using (var tmp = new TempDir())
-            {
-                var earlier = Lines(0, 2000, 1);              // an earlier handoff in the open chunk: torn with it
-                var handoff = Lines(1000, 96 * 1024, 2);      // the usual handoff: 3 blocks, a line across each boundary
-                Assert.AreNotEqual('\n', handoff[ChunkPump.BlockChars - 1], "the first block ends mid-line");
-                var disk = new FailingDisk { Fails = 1, FailAfter = GzipLength(earlier + handoff.Substring(0, ChunkPump.BlockChars)) };
-                using (var pump = new ChunkPump(null, disk.Open))
-                {
-                    pump.StartSession(tmp.Path);
-                    pump.Write(new StringBuilder(earlier));
-                    pump.Write(new StringBuilder(handoff));
-                    pump.Rotate();
-                    Assert.IsTrue(pump.Drain(5000));
-                    Assert.AreEqual(1, pump.Errors, pump.LastError);
-                    Assert.Greater(disk.FailedAt, 0, "the failure came after the first block was written");
-                    Assert.AreEqual(earlier.Length, pump.Lost, "only the torn chunk's earlier handoff is lost");
-                    Assert.AreEqual(handoff, TempDir.Gunzip(Path.Combine(tmp.Path, "chunk-0002.jsonl.gz")), "the whole handoff, once");
-                    Assert.AreEqual(handoff.Split('\n').Length - 1, PublishedLines(tmp.Path).Length);
-                }
-            }
-        }
-
-        [Test]
-        public void AFailureInTheMiddleOfALineNeverPublishesItsTail()
-        {
-            using (var tmp = new TempDir())
-            {
-                var line = Lines(7, 1, 3, 3 * ChunkPump.BlockChars); // one line over 3 blocks: every cut is mid-line
-                var disk = new FailingDisk { Fails = 1, FailAfter = GzipLength(line.Substring(0, ChunkPump.BlockChars)) };
-                using (var pump = new ChunkPump(null, disk.Open))
-                {
-                    pump.StartSession(tmp.Path);
-                    pump.Write(new StringBuilder(line));
-                    pump.Rotate();
-                    Assert.IsTrue(pump.Drain(5000));
-                    Assert.AreEqual(1, pump.Errors, pump.LastError);
-                    Assert.Greater(disk.FailedAt, 0, "the failure came after the first block was written");
-                    Assert.AreEqual(0, pump.Lost, "nothing lost: the retry wrote the line whole");
-                    Assert.AreEqual(new[] { line.TrimEnd('\n') }, PublishedLines(tmp.Path));
-                }
-            }
-        }
-
-        [Test]
-        public void ARetryThatFailsTooDropsTheWholeHandoffAndTheNextChunkStartsOnALine()
-        {
-            using (var tmp = new TempDir())
-            {
-                var earlier = Lines(0, 2000, 4);
-                var handoff = Lines(1000, 96 * 1024, 5);
-                var next = Lines(5000, 3000, 6);
-                var disk = new FailingDisk { Fails = 2, FailAfter = GzipLength(handoff.Substring(0, ChunkPump.BlockChars)) };
-                using (var pump = new ChunkPump(null, disk.Open))
-                {
-                    pump.StartSession(tmp.Path);
-                    pump.Write(new StringBuilder(earlier));
-                    pump.Write(new StringBuilder(handoff));
-                    Assert.IsTrue(pump.Drain(5000));
-                    Assert.AreEqual(2, pump.Errors, pump.LastError);
-                    Assert.AreEqual(earlier.Length + handoff.Length, pump.Lost, "both handoffs, each counted once");
-                    pump.Write(new StringBuilder(next));
-                    pump.Rotate();
-                    Assert.IsTrue(pump.Drain(5000));
-                    Assert.AreEqual(earlier.Length + handoff.Length, pump.Lost, "the next handoff is whole");
-                    Assert.AreEqual(next, TempDir.Gunzip(Path.Combine(tmp.Path, "chunk-0003.jsonl.gz")));
-                    Assert.AreEqual(next.Split('\n').Length - 1, PublishedLines(tmp.Path).Length);
-                }
+                protected override void Dispose(bool disposing) { if (disposing) file.Dispose(); base.Dispose(disposing); }
             }
         }
     }

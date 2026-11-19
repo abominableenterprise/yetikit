@@ -24,7 +24,7 @@ namespace YetiKit.Playtest.Tests
                 Assert.IsNull(w.Rotate(), "nothing written: no chunk");
                 var a = "{\"t\":0,\"k\":\"start\"}\n".ToCharArray();
                 w.Append(a, a.Length);
-                Assert.IsTrue(File.Exists(Path.Combine(tmp.Path, "chunk-0001.jsonl.gz.tmp")), "the open chunk is a .tmp");
+                Assert.IsTrue(File.Exists(Path.Combine(tmp.Path, "chunk-0001.jsonl.gz.journal")), "the open chunk is a journal");
                 Assert.IsFalse(File.Exists(Path.Combine(tmp.Path, "chunk-0001.jsonl.gz")));
                 Assert.AreEqual("chunk-0001.jsonl.gz", w.Rotate());
                 var b = "{\"t\":1,\"k\":\"grab\",\"name\":\"sample ü\"}\n".ToCharArray();
