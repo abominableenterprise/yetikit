@@ -58,17 +58,22 @@ qr_perf_manual_end() {
   }
   qr_perf_manual_note || return 3
   perf_prox=1
+  start_dir="$(jq -er '.dir | strings | select(length > 0)' <<< "$record")" || start_dir=''
   # Once stop owns the reservation, consume the window before querying the
-  # device. An interrupted stop or failed restore must never extend that window.
-  qr_perf_manual_save '{owner:$owner, dir:$dir}' || return 3
-  # Cancellation can record invalidation in the original run if the shared
-  # reservation cannot be rewritten. Never measure that window on retry.
-  if ! start_dir="$(jq -er '.dir | strings | select(length > 0)' <<< "$record")" ||
-     [ -e "$start_dir/${marker##*/}.cancelled" ] || ! jq -e --arg package "$QR_PKG" '
+  # device. If the shared reservation cannot be rewritten, use the same
+  # invalidation file as cancellation, in the original run rather than this one.
+  if ! qr_perf_manual_save '{owner:$owner, dir:$dir}'; then
+    perf_error='could not consume manual capture reservation; stop boundary is unknown'
+    if [ -n "$start_dir" ] && ! : > "$start_dir/${marker##*/}.cancelled"; then
+      perf_error+='; could not record invalidation; do not use results from a retry stop'
+    fi
+    return 3
+  fi
+  if [ ! -d "$start_dir" ] || [ -e "$start_dir/${marker##*/}.cancelled" ] || ! jq -e --arg package "$QR_PKG" '
     .package == $package and (.start | strings | test("^(0|[1-9][0-9]{0,11})\\.[0-9]{9}$")) and
     (.pid | strings | test("^[0-9]+$")) and (.host | strings | test("^[0-9]+$"))
   ' <<< "$record" >/dev/null; then
-    perf_error='no usable manual perf window (interrupted capture or package changed); restoring proximity only'; return 3
+    perf_error='no usable manual perf window (stop boundary unknown or package changed); restoring proximity only'; return 3
   fi
   perf_pid="$(jq -r .pid <<< "$record")"
   perf_model="$(jq -r .model <<< "$record")"
