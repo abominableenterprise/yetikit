@@ -106,10 +106,15 @@ rm "$t/Props/MethodCaptureTests.cs"
 
 # Run each literal form on its own so a successful FirstTests selection cannot
 # conceal a dropped sibling. Both fixtures have headless tests and Gfx methods.
-for prefix in '@' '$@' '@$'; do
-  case "$prefix" in
-    '@') text='// {' ;;
-    *) text='/* {{ {value ?? "/*"} ""quoted""' ;;
+for form in verbatim dollar-at at-dollar dollar-at-format at-dollar-format; do
+  case "$form" in
+    verbatim) prefix='@'; text='// {' ;;
+    dollar-at*) prefix='$@' ;;
+    at-dollar*) prefix='@$' ;;
+  esac
+  case "$form" in
+    *-format) text='{42:/*} {(value != null ? 1 : 2) /* expression comment: } */:/*} {global::System.Int32.MaxValue,12:/*}' ;;
+    dollar-at|at-dollar) text='/* {{ {value ?? "/*"} ""quoted""' ;;
   esac
   {
     cat <<'CS'
@@ -138,9 +143,9 @@ public class UntaggedTests { [Test] public void Rule() {} }
 CS
   } > "$t/Props/LiteralTests.cs"
   pr HEAD
-  check "${prefix} multiline literal preserves all pure fixtures despite a method-only RenderTool category" \
+  check "$form literal preserves all pure fixtures despite a method-only RenderTool category" \
     '[ "$rc" = 0 ] && [[ "$(pure_run)" == *"-testFilter ExampleGame.Pigeons.Tests.FlockTests;ShipFixtures.FirstTests;ShipFixtures.SiblingTests;ShipFixtures.UntaggedTests "* ]]'
-  check "${prefix} multiline literal preserves both Gfx fixtures without tagging the untagged sibling" \
+  check "$form literal preserves both Gfx fixtures without tagging the untagged sibling" \
     '[ "$rc" = 0 ] && [ "$(filter)" = "ShipFixtures.FirstTests;ShipFixtures.SiblingTests" ]'
 done
 rm "$t/Props/LiteralTests.cs"

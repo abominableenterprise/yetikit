@@ -23,23 +23,30 @@ cs_classes() {
       }
       # Mask verbatim literals and comments before scanning structure. Keep
       # ordinary quoted arguments intact for category matching.
-      function scan_line(s,   out, token, n) {
+      function scan_line(s,   out, token, n, quoted) {
         while (s != "") {
           if (block_comment) {
             if (!match(s, /\*\//)) return out
             s = substr(s, RSTART + RLENGTH)
             block_comment = 0
+          } else if (hole_format) {
+            # Format text is not C# code: comment markers have no effect here.
+            if (!match(s, /\}/)) return out
+            s = substr(s, RSTART + 1)
+            hole_format = hole_depth = 0
           } else if (hole_depth) {
-            # Skip interpolation expressions, including nested braces and
-            # quoted arguments, without counting them as fixture structure.
-            if (!match(s, /\/\/|\/\*|@"|[{}"\047]/)) return out
+            # Only a top-level colon starts a format, not a conditional colon
+            # inside parentheses or the :: of a namespace alias.
+            if (!match(s, /\/\/|\/\*|@"|::|[][(){}:"\047]/)) return out
             token = substr(s, RSTART, RLENGTH)
             s = substr(s, RSTART)
+            n = length(token)
             if (token == "//") return out
-            if (token == "/*") { block_comment = 1; n = 2 }
-            else if (token == "{") { hole_depth++; n = 1 }
-            else if (token == "}") { hole_depth--; n = 1 }
-            else { n = literal_length(s); if (!n) n = length(token) }
+            if (token == "/*") block_comment = 1
+            else if (token == "{" || token == "(" || token == "[") hole_depth++
+            else if (token == "}" || token == ")" || token == "]") hole_depth--
+            else if (token == ":" && hole_depth == 1) hole_format = 1
+            else if ((quoted = literal_length(s))) n = quoted
             s = substr(s, n + 1)
           } else if (verbatim) {
             if (verbatim == 2) match(s, /^([^"{}]|""|\{\{|\}\})*/)
