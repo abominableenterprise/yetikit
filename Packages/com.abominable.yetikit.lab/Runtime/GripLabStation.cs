@@ -20,8 +20,14 @@ namespace YetiKit.Lab
         public Transform Head { get => head; set => head = value; }
         public GripLabFlightEventSource FlightEvents { get; } = new GripLabFlightEventSource();
 
+        GripLabAdjuster adjuster;
+        public GripLabAdjuster Adjuster => adjuster ??= new GripLabAdjuster(this);
+
         /// <summary>Populate once, with the station origin at the center of the table's near edge.</summary>
-        public void Populate(IInteractableCatalog catalog)
+        public void Populate(IInteractableCatalog catalog) => Populate(catalog, null);
+
+        /// <summary>Load overrides from the optional store; without one, commits are session-only.</summary>
+        public void Populate(IInteractableCatalog catalog, IGripOverrideStore store)
         {
             if (!isActiveAndEnabled) throw new InvalidOperationException("The station must be active.");
             if (slots != null) throw new InvalidOperationException("The station already owns a catalog.");
@@ -47,7 +53,7 @@ namespace YetiKit.Lab
                         throw new InvalidOperationException($"Catalog entry '{entry.Id}' must spawn an active prop without a lab slot.");
                     item.name = entry.DisplayName;
                     var slot = item.AddComponent<GripLabSlot>();
-                    slot.Configure(this, entry);
+                    slot.Configure(this, entry, store);
                     slots[i] = slot;
                 }
                 GripLabLayout.Arrange(slots, transform.position, tableWidth);
@@ -74,6 +80,7 @@ namespace YetiKit.Lab
         {
             if (reset) reset.onClick.RemoveListener(ResetAll);
             if (back) back.onClick.RemoveListener(Back);
+            adjuster?.End();
         }
 
         void Update() => Tick(Time.deltaTime);
@@ -92,6 +99,7 @@ namespace YetiKit.Lab
 
         public void Back()
         {
+            adjuster?.End();
             ResetAll();
             backRequested.Invoke();
         }

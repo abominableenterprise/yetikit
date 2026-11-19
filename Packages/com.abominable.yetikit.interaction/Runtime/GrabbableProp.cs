@@ -35,11 +35,37 @@ namespace YetiKit.Interaction
         /// <summary>Optional per-input-mode runtime data. Missing entries retain the authored grip.</summary>
         public GripProfiles gripProfiles = new GripProfiles();
 
-        public string GripIdFor(HandMode mode) => gripProfiles?.For(mode)?.id ?? string.Empty;
+        GripProfile ProfileFor(HandMode mode)
+        {
+#if UNITY_EDITOR || (DEVELOPMENT_BUILD && YETIKIT_DEV)
+            return developmentGrips.For(mode) ?? gripProfiles?.For(mode);
+#else
+            return gripProfiles?.For(mode);
+#endif
+        }
 
-        /// <summary>Resolve the mode override before applying the existing left-hand rules.</summary>
-        public GripSpec GripFor(bool rightHand, HandMode mode) =>
-            ForHand(gripProfiles?.For(mode)?.spec ?? grip, rightHand);
+        public string GripIdFor(HandMode mode) => ProfileFor(mode)?.id ?? string.Empty;
+
+        /// <summary>Resolve the development override, baked mode profile, then authored spec.</summary>
+        public GripSpec GripFor(bool rightHand, HandMode mode) => ForHand(ProfileFor(mode)?.spec ?? grip, rightHand);
+
+#if UNITY_EDITOR || (DEVELOPMENT_BUILD && YETIKIT_DEV)
+        readonly GripProfiles developmentGrips = new GripProfiles();
+
+        /// <summary>Replace or clear the transient override; call outside XRI select callbacks.
+        /// Does not change the baked profile or the authored grip.</summary>
+        public void SetDevelopmentGrip(HandMode mode, GripProfile profile)
+        {
+            if (mode != HandMode.Controller && mode != HandMode.TrackedHand)
+                throw new System.ArgumentOutOfRangeException(nameof(mode));
+            var before = ProfileFor(mode)?.spec ?? grip;
+            var copy = profile == null ? null : new GripProfile(profile.id, profile.spec);
+            if (mode == HandMode.Controller) developmentGrips.controller = copy;
+            else developmentGrips.hand = copy;
+            var after = ProfileFor(mode)?.spec ?? grip;
+            if (grab && !before.Equals(after)) grab.RefitGripForMode(mode);
+        }
+#endif
 
         /// <summary>
         /// The authored grip for the <paramref name="rightHand"/> or left hand. On the left,

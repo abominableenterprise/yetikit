@@ -18,15 +18,27 @@ namespace YetiKit.Lab
         GripLabStation station;
         Pose home;
         float elapsed;
+        GripOverrideEntry controller, tracked;
 
         public bool IsFixedInSlot => atRestInSlot;
         public string Id { get; private set; }
         internal Collider[] Solids { get; private set; }
 
-        internal void Configure(GripLabStation owner, InteractableEntry entry)
+        internal GripLabStation Station => station;
+
+        internal GripOverrideEntry OverrideFor(HandMode mode) => mode switch
+        {
+            HandMode.Controller => controller,
+            HandMode.TrackedHand => tracked,
+            _ => throw new System.ArgumentOutOfRangeException(nameof(mode)),
+        };
+
+        internal void Configure(GripLabStation owner, InteractableEntry entry, IGripOverrideStore store)
         {
             station = owner;
             Id = entry.Id;
+            controller = new GripOverrideEntry(prop, Id, HandMode.Controller, store);
+            tracked = new GripOverrideEntry(prop, Id, HandMode.TrackedHand, store);
             Solids = GetComponentsInChildren<Collider>()
                 .Where(c => !c.isTrigger && c.attachedRigidbody == prop.Body).ToArray();
             prop.respawns = false;
@@ -52,6 +64,7 @@ namespace YetiKit.Lab
             grab.Grabbing -= OnGrabbing;
             grab.selectEntered.RemoveListener(OnSelected);
             prop.RecoverFromFall -= Recover;
+            if (station) station.Adjuster.End(this);
         }
 
         internal void SetHome(Pose pose)
