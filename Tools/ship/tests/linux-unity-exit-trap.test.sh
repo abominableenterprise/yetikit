@@ -30,7 +30,8 @@ for original in 0 42 143; do
       # An earlier failing handler must not prevent the final pidfile cleanup either.
       failing_cleanup() { echo failing_cleanup >> "$run/calls"; return 23; }
       PIDFILE="$run/pid"; PID_LINE="$$ test"; printf "%s\n" "$PID_LINE" > "$PIDFILE"
-      APK_SWAPFILE="$run/swapfile"
+      APK_SWAPFILE="$run/swapfile"; (umask 077; : > "$APK_SWAPFILE")
+      apk_swap_inactive() { return 0; } # Synthetic inactive file: exercise rm after swapoff fails.
       chain_exit_trap release_pidfile
       chain_exit_trap failing_cleanup
       UNITY_RETURN_ON_EXIT=1; arm_return_on_exit

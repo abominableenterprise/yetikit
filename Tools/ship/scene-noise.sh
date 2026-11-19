@@ -69,8 +69,8 @@ noise_path_lines() { tr '\000' '\n'; }
 # Include staged edits even if the working file was restored to HEAD: cleanup validates against HEAD,
 # but `git checkout -- <path>` restores from the index. Never reintroduce a staged setting as editor noise.
 noise_dirty_files() {
-  noise_git diff --name-only -z HEAD -- | noise_path_lines || return
-  noise_git diff --cached --name-only -z HEAD -- | noise_path_lines || return
+  noise_git diff --name-only -z "$@" HEAD -- | noise_path_lines || return
+  noise_git diff --cached --name-only -z "$@" HEAD -- | noise_path_lines || return
   noise_git ls-files -z --others --exclude-standard | noise_path_lines
 }
 
@@ -80,8 +80,9 @@ noise_merge_base() { noise_git merge-base HEAD "${NOISE_BASE:-origin/main}" 2>/d
 
 # Every path changed on this branch: working tree and untracked vs HEAD, and HEAD vs the merge-base $1 (when given).
 noise_changed_paths() {
-  noise_dirty_files || return
-  if [ -n "${1:-}" ]; then noise_git diff --name-only -z "$1" HEAD -- | noise_path_lines; fi
+  # A rename removes a source at its old path, even when the destination is outside props.
+  noise_dirty_files --no-renames || return
+  if [ -n "${1:-}" ]; then noise_git diff --no-renames --name-only -z "$1" HEAD -- | noise_path_lines; fi
 }
 
 # True when $1's diff against HEAD only adds `_ZTest` entries (and turns `m_Floats: []` into a `m_Floats:` list).
@@ -111,7 +112,7 @@ noise_sources_changed() {
 }
 
 # True when any code changed: anything under Assets/Scripts/ or Assets/Editor/, or any .cs/.asmdef. $1: changed paths.
-noise_code_changed() { grep -qE "$NOISE_CODE_RE" <<< "$1"; }
+noise_code_changed() { grep -qE -e "$NOISE_CODE_RE" <<< "$1"; }
 
 # Print the --keep path $2, as the caller typed it (relative to the current directory, ./x, absolute; file or
 # directory, existing or not), relative to the repository root $1 ("." for the root itself). Fails when the path is
@@ -170,7 +171,7 @@ noise_with_diff_paths() (
 )
 
 noise_revert_editor_paths() {
-  local before="$1" paths="$2" all_changed f prop reason mb="" unknown=""
+  local before="$1" paths="$2" all_changed f prop reason code_rc mb="" unknown=""
   if [ ! -s "$paths" ]; then
     noise_log "no changes under $NOISE_ART_ROOT or configured noise paths"; return 0
   fi
@@ -203,7 +204,13 @@ noise_revert_editor_paths() {
       prop="${BASH_REMATCH[1]:-$f}"
       if [ -n "$unknown" ]; then noise_log "keeping $f ($unknown)"; continue; fi
       if noise_sources_changed "$all_changed"; then noise_log "keeping $f (a prop source changed)"; continue; fi
-      if noise_code_changed "$all_changed"; then noise_log "keeping $f (code changed)"; continue; fi
+      code_rc=0
+      noise_code_changed "$all_changed" || code_rc=$?
+      case "$code_rc" in
+        0) noise_log "keeping $f (code changed)"; continue ;;
+        1) ;; # grep found no matching paths
+        *) noise_log "error: could not check for code changes; not reverting $f"; return "$code_rc" ;;
+      esac
       reason="re-pack of $prop, prop sources unchanged"
     else continue
     fi

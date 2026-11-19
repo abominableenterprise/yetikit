@@ -205,10 +205,10 @@ namespace YetiKit.Hands.Tests
         }
 
         [Test]
-        public void APunchAnOpenHandOrAForwardThumbNeverTurns()
+        public void AMovingFistAnOpenHandOrAForwardThumbNeverTurns()
         {
             var g = new HandTurnGesture();
-            for (var t = 0f; t < 2f; t += 0.02f) Assert.That(g.Tick(true, true, 0f, 1f, 0.08f, 2.5f, false, t), Is.Zero, "a moving fist (a punch)");
+            for (var t = 0f; t < 2f; t += 0.02f) Assert.That(g.Tick(true, true, 0f, 1f, 0.08f, 2.5f, false, t), Is.Zero, "a moving fist");
             for (var t = 2f; t < 4f; t += 0.02f) Assert.That(g.Tick(true, false, 0f, 1f, 0.08f, 0f, false, t), Is.Zero, "open, point or middle-only: not a fist");
             for (var t = 4f; t < 6f; t += 0.02f) Assert.That(g.Tick(true, true, 0f, 0.3f, 0.08f, 0f, false, t), Is.Zero, "a fist's thumb forward");
             for (var t = 6f; t < 8f; t += 0.02f) Assert.That(g.Tick(true, true, 0.9f, 1f, 0.08f, 0f, false, t), Is.Zero, "a tucked thumb");

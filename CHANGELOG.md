@@ -13,6 +13,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
   gesture detectors, and XR input adapters in the hands package.
 - Add an art-free `PlayerHand`, optional `IHandVisual`, and palm-following
   `HandGrabInteractor`.
+- Add hand teleport with an XRI arc and landing preview, rig-scoped aim
+  ownership, hand snap turn, and an event-driven wrist button.
 - Add the interaction package with throw and release math, configurable aim and
   respawn rules, and grip hand-off and carry helpers.
 
@@ -34,8 +36,22 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - `HandGrabInteractor.Palm(GloveRig)` is replaced by `PlayerHand.PalmPose`.
   `HandGrabInteractor.PreservePausedSelection` is not ported; pausing is a
   consumer policy. The near grab only uses `HandFarInteraction.UiHover` and
-  `Hover`; `Summoning`, `SummonLocked`, `Resolve`, `AllowsSummon`,
-  `AllowsTeleport`, and `HandFarMode` are not ported.
+  `Hover`. `HandFarInteraction.AllowsTeleport(held)` now checks only UI hover
+  and held selection; other far-interaction priorities stay in the consumer.
+- Set `HandTeleport.teleportLayerName` in the inspector (default `Teleport`),
+  or set `TeleportLayerName` in code. `TeleportAim.Cast` takes the layer name;
+  `Revalidate()` replaces `RevalidateUi()` and checks current UI and optional
+  `Blocker` / `LandingAllowed` policies before confirming a frozen aim.
+- `HandAimOwnership.For` takes a rig `Transform`, not a `PlayerHand`. `Claim`
+  replaces its lock flag with an optional preemption callback. By default
+  sibling hand roots share their parent's lease; assign `HandTeleport.rig`
+  explicitly for hands under different parents.
+- `HandUiGuard.Near(PlayerHand)` is not ported. Pass a point and a radius to
+  the geometry query instead; the old `Reach` constant is `TeleportAim.UiReach`.
+- `WristButton.toggle` (serialized) and the legacy style behavior are removed.
+  Wire `Pressed` or `onPressed` for actions; record counts in a listener instead
+  of using the removed `Presses` property. Author the wrist position on the
+  transform instead of relying on the removed `BackOffset` / `CuffOffset`.
 
 ## [0.1.12] - 2026-11-18
 

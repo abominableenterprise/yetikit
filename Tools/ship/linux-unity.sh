@@ -562,7 +562,9 @@ run_pass() {
     if [ "$rc" = 0 ]; then rc=1; TEST_EVIDENCE_ONLY=1; fi
     return "$rc"
   fi
-  [ "$rc" != 0 ] || return 0
+  # Unity returns 2 for failed tests. A timeout, signal, or editor error can leave
+  # complete XML too, but a passing retry must not hide that process failure.
+  [ "$rc" = 2 ] || return "$rc"
   while IFS= read -r -d '' f; do
     if [ -z "$f" ]; then complete=1; break; fi
     is_known_flake "$f" || { log "$stem: $f failed and is not a known flake"; return "$rc"; }
