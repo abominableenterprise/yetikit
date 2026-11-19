@@ -94,8 +94,9 @@ namespace YetiKit.Hands
                 needRelease = true;
                 return false;
             }
-            // An already-started half drop expires even if the first sample after its deadline is fully down.
-            if (droppingSince >= 0f && now - droppingSince > HalfDropGrace)
+            // An existing deadline also applies when this sample starts or completes a thumb drop.
+            if ((droppedAt >= 0f && now > droppedAt + DropGrace) ||
+                (droppingSince >= 0f && now - droppingSince > HalfDropGrace))
             {
                 Cancel();
                 return false;
@@ -118,11 +119,7 @@ namespace YetiKit.Hands
             }
             droppingSince = -1f;
             if (pose) droppedAt = -1f;
-            else
-            {
-                if (droppedAt < 0f) droppedAt = now;
-                if (now - droppedAt > DropGrace) Cancel();
-            }
+            else if (droppedAt < 0f) droppedAt = now;
             return false;
         }
 

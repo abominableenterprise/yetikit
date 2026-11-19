@@ -59,6 +59,30 @@ namespace YetiKit.Hands.Tests
             Assert.That(PlayerHand.Of(hand.controller.GetChild(0)), Is.SameAs(hand));
         }
 
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        public void UnavailableCueDoesNotConsumeStrongCooldown(bool disabledSource, bool missingClip)
+        {
+            space = new GameObject("Audio cue");
+            var cue = space.AddComponent<HandCue>();
+            cue.source = space.AddComponent<AudioSource>();
+            var clip = AudioClip.Create("Synthetic cue", 128, 1, 8000, false);
+            try
+            {
+                cue.source.enabled = !disabledSource;
+                cue.thump = missingClip ? null : clip;
+                Assert.That(cue.Play(1f, 0f), Is.False);
+                Assert.That(cue.Played, Is.Zero);
+
+                cue.source.enabled = true;
+                cue.thump = clip;
+                Assert.That(cue.Play(1f, HandCue.StrongInterval / 2f), Is.True);
+                Assert.That(cue.Played, Is.EqualTo(1));
+                Assert.That(cue.Play(1f, HandCue.StrongInterval * 0.75f), Is.False);
+            }
+            finally { Object.DestroyImmediate(clip); }
+        }
+
         [Test]
         public void UsesPalmJointEvenWhenTheFullPoseArrayIsUnavailable()
         {
@@ -73,6 +97,8 @@ namespace YetiKit.Hands.Tests
             tracking.FullPoses = true;
             hand.Tick(0.1f);
             Assert.That(visual.Joints, Has.Length.EqualTo(XrHandTracking.AllJoints));
+            Assert.That(hand.TryJointPoses(new Pose[0]), Is.False);
+            Assert.That(hand.TryJointPoses(new Pose[XrHandTracking.AllJoints - 1]), Is.False);
             var poses = new Pose[XrHandTracking.AllJoints];
             Assert.That(hand.TryJointPoses(poses), Is.True);
             Assert.That(visual.Joints[XRHandJointID.Palm.ToIndex()], Is.EqualTo(hand.PalmPose));

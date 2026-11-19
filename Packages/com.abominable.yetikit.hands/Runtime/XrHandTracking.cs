@@ -35,6 +35,7 @@ namespace YetiKit.Hands
         public bool TryGetHand(bool right, Vector3[] points, out Pose wrist)
         {
             wrist = default;
+            if (points == null || points.Length < Joints.Length) return false;
             var s = Subsystem();
             if (s == null) return false;
             var hand = right ? s.rightHand : s.leftHand;
@@ -49,6 +50,7 @@ namespace YetiKit.Hands
 
         public bool TryGetJointPoses(bool right, Pose[] poses)
         {
+            if (poses == null || poses.Length == 0) return false;
             var s = Subsystem();
             if (s == null) return false;
             var hand = right ? s.rightHand : s.leftHand;
@@ -88,10 +90,12 @@ namespace YetiKit.Hands
             if (type == XRHandSubsystem.UpdateType.BeforeRender) RaiseBeforeRender();
             else
             {
-                if ((flags & XRHandSubsystem.UpdateSuccessFlags.LeftHandJoints) != 0)
-                    leftDynamicAt = Time.unscaledTime;
-                if ((flags & XRHandSubsystem.UpdateSuccessFlags.RightHandJoints) != 0)
-                    rightDynamicAt = Time.unscaledTime;
+                const XRHandSubsystem.UpdateSuccessFlags left = XRHandSubsystem.UpdateSuccessFlags.LeftHandRootPose |
+                    XRHandSubsystem.UpdateSuccessFlags.LeftHandJoints;
+                const XRHandSubsystem.UpdateSuccessFlags right = XRHandSubsystem.UpdateSuccessFlags.RightHandRootPose |
+                    XRHandSubsystem.UpdateSuccessFlags.RightHandJoints;
+                leftDynamicAt = (flags & left) == left ? Time.unscaledTime : float.NegativeInfinity;
+                rightDynamicAt = (flags & right) == right ? Time.unscaledTime : float.NegativeInfinity;
             }
         }
 

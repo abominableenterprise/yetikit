@@ -23,7 +23,7 @@ namespace YetiKit.Hands
     public interface IHandTracking
     {
         /// <summary>The side's wrist pose and its <see cref="HandCurls.Points"/> joint positions, in tracking space (the
-        /// XR Origin's Camera Offset); false when that hand is not tracked.</summary>
+        /// XR Origin's Camera Offset). The destination must hold all points; false when that hand is not tracked.</summary>
         bool TryGetHand(bool right, Vector3[] points, out Pose wrist);
     }
 
@@ -31,7 +31,7 @@ namespace YetiKit.Hands
     public interface IHandJointPoses
     {
         /// <summary>Joint poses in XRHandJointID index order (Wrist, Palm, thumb ...), in tracking space.
-        /// Fill the requested prefix up to <see cref="XrHandTracking.AllJoints"/>; return false if any requested joint is unavailable.</summary>
+        /// Fill a nonempty prefix up to <see cref="XrHandTracking.AllJoints"/>; return false if any requested joint is unavailable.</summary>
         bool TryGetJointPoses(bool right, Pose[] poses);
     }
 }
