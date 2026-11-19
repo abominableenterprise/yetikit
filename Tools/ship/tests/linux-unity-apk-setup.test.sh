@@ -7,18 +7,38 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/linux-unity-apk-fixture.sh"
 
 # --- setup --android ------------------------------------------------------------------------------------------------
-# Fake images: crane export <image> streams a tar of opt/unity; only the android one has AndroidPlayer/SDK and NDK.
+# Fake images expose config metadata and stream tiny editor archives. The wrong image
+# deliberately has an unversioned tag so the test can't pass by inspecting its name.
 img="$tmp/img"; lcrel="opt/unity/Editor/Data/Resources/Licensing/Client"
-for i in base android; do
+for i in base android wrong; do
   mkdir -p "$img/$i/$lcrel"
-  printf '#!/bin/sh\n# Unity 6000.6.6f1\n' > "$img/$i/opt/unity/Editor/Unity"; cp "$img/$i/opt/unity/Editor/Unity" "$img/$i/$lcrel/Unity.Licensing.Client"
+  version=6000.6.6f1; [ "$i" != wrong ] || version=6000.6.6f2
+  printf '#!/bin/sh\n# Unity %s\n' "$version" > "$img/$i/opt/unity/Editor/Unity"
+  cp "$img/$i/opt/unity/Editor/Unity" "$img/$i/$lcrel/Unity.Licensing.Client"
   chmod +x "$img/$i/opt/unity/Editor/Unity" "$img/$i/$lcrel/Unity.Licensing.Client"
+  printf '{"history":[{"created_by":"RUN |2 version=%s module=android /bin/sh -c echo $version > \\"$UNITY_PATH/version\\" # buildkit"}]}\n' "$version" > "$img/$i/config.json"
 done
-mkdir -p "$img/android/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" "$img/android/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/NDK"
+for i in android wrong; do
+  mkdir -p "$img/$i/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/"{SDK,NDK}
+done
+android_digest="unityci/editor@sha256:$(printf '%064d' 1)"
+wrong_digest="fixture@sha256:$(printf '%064d' 2)"
+unknown_digest="fixture@sha256:$(printf '%064d' 3)"
 cat > "$tmp/bin/crane" <<EOF
 #!/bin/sh
 echo "\$*" >> "$tmp/crane-calls"
-case "\$2" in *-android-3) tar -c -C "$img/android" opt/unity ;; *-base-3) tar -c -C "$img/base" opt/unity ;; *) exit 1 ;; esac
+case "\$*" in
+  'digest --platform linux/amd64 --full-ref unityci/editor:ubuntu-6000.6.6f1-android-3') echo '$android_digest' ;;
+  'digest --platform linux/amd64 --full-ref fixture:override') echo '$wrong_digest' ;;
+  'digest --platform linux/amd64 --full-ref fixture:unknown') echo '$unknown_digest' ;;
+  'config $android_digest') cat "$img/android/config.json" ;;
+  'config $wrong_digest') cat "$img/wrong/config.json" ;;
+  'config $unknown_digest') echo '{}' ;;
+  'export $android_digest -'|export\ *-android-3\ -) tar -c -C "$img/android" opt/unity ;;
+  'export fixture:override -') tar -c -C "$img/wrong" opt/unity ;;
+  export\ *-base-3\ -) tar -c -C "$img/base" opt/unity ;;
+  *) exit 1 ;;
+esac
 EOF
 printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/dpkg"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/ldd"
 chmod +x "$tmp/bin/crane" "$tmp/bin/dpkg" "$tmp/bin/ldd"
@@ -27,8 +47,14 @@ setup() { : > "$tmp/crane-calls"; env -u UNITY_IMAGE -u SHIP_FIXTURE_PIDS PATH="
 check "setup (no flag) still installs the base image" \
   'setup env && grep -qx "export unityci/editor:ubuntu-6000.6.6f1-base-3 -" "$tmp/crane-calls" && [ ! -e "$tmp/root/unity/Editor/Data/PlaybackEngines/AndroidPlayer" ]'
 check "setup again: editor already there, no pull" 'setup env && grep -q "editor already" "$tmp/setup-out" && [ ! -s "$tmp/crane-calls" ]'
-check "setup --android over a base editor replaces it with the android image" \
-  'SETUP_ARGS=--android setup env && grep -q "replacing the editor" "$tmp/setup-out" && grep -qx "export unityci/editor:ubuntu-6000.6.6f1-android-3 -" "$tmp/crane-calls" && [ -d "$tmp/root/unity/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" ] && [ -f "$tmp/root/unity/.install-complete" ] && grep -q "setup ok" "$tmp/setup-out"'
+root="$tmp/root/unity"
+printf 'original marker\n' > "$root/.install-complete"
+check "setup --android rejects a wrong image version without replacing or downloading" \
+  '! SETUP_ARGS=--android setup env UNITY_IMAGE=fixture:override && grep -qF "fixture:override is Unity 6000.6.6f2, expected 6000.6.6f1" "$tmp/setup-out" && ! grep -q "^export " "$tmp/crane-calls" && [ "$(< "$root/.install-complete")" = "original marker" ] && [ -x "$root/Editor/Unity" ] && cmp -s "$root/Editor/Unity" "$img/base/opt/unity/Editor/Unity" && [ ! -e "$root/Editor/Data/PlaybackEngines/AndroidPlayer" ]'
+check "setup --android refuses an image with no editor version metadata before downloading" \
+  '! SETUP_ARGS=--android setup env UNITY_IMAGE=fixture:unknown && grep -qF "cannot verify Unity 6000.6.6f1 in fixture:unknown" "$tmp/setup-out" && ! grep -q "^export " "$tmp/crane-calls" && [ "$(< "$root/.install-complete")" = "original marker" ] && cmp -s "$root/Editor/Unity" "$img/base/opt/unity/Editor/Unity"'
+check "setup --android over a base editor installs the validated Android image digest" \
+  'SETUP_ARGS=--android setup env && grep -q "replacing the editor" "$tmp/setup-out" && grep -qxF "export $android_digest -" "$tmp/crane-calls" && [ -d "$root/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" ] && [ -d "$root/Editor/Data/PlaybackEngines/AndroidPlayer/NDK" ] && [ -f "$root/.install-complete" ] && [ ! -s "$root/.install-complete" ] && grep -q "setup ok" "$tmp/setup-out"'
 check "setup --android again: no pull" 'SETUP_ARGS=--android setup env && [ ! -s "$tmp/crane-calls" ] && grep -q "setup ok" "$tmp/setup-out"'
 check "setup (no flag) keeps an android editor (it is a superset)" 'setup env && [ ! -s "$tmp/crane-calls" ] && [ -d "$tmp/root/unity/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" ]'
 rm -rf "$tmp/root"

@@ -41,8 +41,12 @@ cp "$root/$lc/Unity.Licensing.Client" "$img/opt/unity/$lc/Unity.Licensing.Client
 chmod +x "$img/opt/unity/Editor/Unity"
 cat > "$tmp/bin/crane" <<EOF
 #!/bin/bash
-echo crane >> "$tmp/download-calls"
-tar -c -C "$img" opt/unity
+case "\$1" in
+  digest) echo 'fixture@sha256:$(printf '%064d' 1)' ;;
+  config) printf '%s\n' '{"history":[{"created_by":"RUN |2 version=6000.6.6f1 module=android /bin/sh -c echo \$version > \\"\$UNITY_PATH/version\\" # buildkit"}]}' ;;
+  export) echo crane >> "$tmp/download-calls"; tar -c -C "$img" opt/unity ;;
+  *) exit 1 ;;
+esac
 EOF
 for command in dpkg ldd nohup; do
   printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$command"
