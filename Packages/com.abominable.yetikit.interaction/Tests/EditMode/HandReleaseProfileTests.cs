@@ -57,6 +57,32 @@ namespace YetiKit.Interaction.Tests
             Assert.That(launch.magnitude, Is.EqualTo(Mathf.Abs(p.Expected)).Within(0.01f));
         }
 
+        [Test]
+        public void TwoFramesAfterDiscontinuityCannotBorrowSmoothingSupport()
+        {
+            var h = new ThrowHistory();
+            for (var frame = 0; frame < 4; frame++) Add(h, frame * Dt, 0f);
+            h.Discontinuity();
+            Add(h, 4 * Dt, -9f);
+            Add(h, 5 * Dt, -9f);
+
+            Assert.That(HandReleaseVelocity.Choose(5 * Dt, h, Smoothing, out var release), Is.True);
+            Assert.That(release.Linear, Is.EqualTo(Vector3.zero));
+        }
+
+        [Test]
+        public void DiscontinuityKeepsAnAlreadySmoothedPeak()
+        {
+            var h = new ThrowHistory();
+            for (var frame = 0; frame < 4; frame++) Add(h, frame * Dt, 8f);
+            h.Discontinuity();
+            Add(h, 4 * Dt, 0f);
+            Add(h, 5 * Dt, 0f);
+
+            Assert.That(h.Release(5 * Dt, out var release, Smoothing), Is.True);
+            Assert.That(release.Linear.z, Is.EqualTo(8f));
+        }
+
         [TestCase(12.96f, 0.6f, 0.6f, false)]
         [TestCase(0.6f, 12.96f, 0.6f, false)]
         [TestCase(0.6f, 0.6f, 12.96f, false)]
