@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Manual sessions reserve the serial in the shared device-lock root. The file is
-# modified only under the device lock. An owner-only record means restoration
-# is pending but the window was never committed (or stop already consumed it).
+# modified only under the device lock. A committed window also needs a nonempty
+# guard in its original run. Stop consumes that guard without allocating space.
 qr_perf_manual_save() {
   jq -n --arg owner "$manual_owner" --arg dir "$QR_RUN_DIR" "$@" \
     > "$marker.tmp" && mv -f "$marker.tmp" "$marker"
@@ -17,6 +17,13 @@ qr_perf_manual_note() {
   local journal="${QR_PERF_CURSOR%/*}/perf-manual"
   mkdir -p "$journal" && printf '%s\n' "$QUEST_SERIAL" > "$journal/${marker##*/}.tmp" &&
     mv -f "$journal/${marker##*/}.tmp" "$journal/${marker##*/}"
+}
+
+# Shrink the existing guard rather than allocating a replacement reservation
+# or a cancellation marker. Keep ownership in the shared record for recovery.
+qr_perf_manual_disarm() {
+  local guard="$1/${marker##*/}.armed"
+  [ ! -s "$guard" ] || : > "$guard" || rm -f "$guard"
 }
 
 qr_perf_manual_begin() {
@@ -35,12 +42,12 @@ qr_perf_manual_begin() {
     qr_perf_identity qr_perf_manual_adb || { perf_error='target app has no unique foreground PID; launch it before perf start'; return 3; }
   perf_thermal_start="$(qr_perf_thermal qr_perf_manual_adb)"
   qr_perf_note_device && qr_perf_manual_note &&
-    rm -f "$QR_RUN_DIR/${marker##*/}.cancelled" &&
     qr_perf_manual_save '{owner:$owner, dir:$dir}' || return 3
   perf_prox=1
   qr_perf_manual_adb shell am broadcast -a com.oculus.vrpowermanager.prox_close \
     > "$QR_RUN_DIR/perf-prox.log" 2>&1 || { perf_error='adb proximity override failed'; return 3; }
   qr_perf_clock || return 3
+  printf 'armed\n' > "$QR_RUN_DIR/${marker##*/}.armed" || return 3
   qr_perf_manual_save --arg start "$perf_clock" --arg host "$perf_clock_host_ms" \
     --arg pid "$perf_pid" --arg package "$QR_PKG" --arg model "$perf_model" \
     --arg metadata "$perf_package" --arg sha "$QR_PERF_SHA" --arg mode "$perf_mode" \
@@ -51,29 +58,27 @@ qr_perf_manual_begin() {
 }
 
 qr_perf_manual_end() {
-  local record elapsed start_dir
+  local record elapsed start_dir armed=0 noted=1
   if [ ! -e "$marker" ]; then perf_error='no matching perf start for this device'; return 3; fi
   record="$(jq -ec --arg owner "$manual_owner" 'select(.owner == $owner)' "$marker")" || {
     perf_error='manual capture is not owned by this checkout and log root (or its record is unreadable)'; return 3;
   }
-  qr_perf_manual_note || return 3
+  qr_perf_manual_note || noted=0
   perf_prox=1
   start_dir="$(jq -er '.dir | strings | select(length > 0)' <<< "$record")" || start_dir=''
-  # Once stop owns the reservation, consume the window before querying the
-  # device. If the shared reservation cannot be rewritten, use the same
-  # invalidation file as cancellation, in the original run rather than this one.
-  if ! qr_perf_manual_save '{owner:$owner, dir:$dir}'; then
-    perf_error='could not consume manual capture reservation; stop boundary is unknown'
-    if [ -n "$start_dir" ] && ! : > "$start_dir/${marker##*/}.cancelled"; then
-      perf_error+='; could not record invalidation; do not use results from a retry stop'
+  if [ -n "$start_dir" ] && [ -s "$start_dir/${marker##*/}.armed" ]; then
+    armed=1
+    if ! qr_perf_manual_disarm "$start_dir"; then
+      perf_error='could not disarm manual capture; stop boundary unknown; do not use results from a retry stop'
+      return 3
     fi
-    return 3
   fi
-  if [ ! -d "$start_dir" ] || [ -e "$start_dir/${marker##*/}.cancelled" ] || ! jq -e --arg package "$QR_PKG" '
+  [ "$noted" = 1 ] || return 3
+  if [ "$armed" != 1 ] || ! jq -e --arg package "$QR_PKG" '
     .package == $package and (.start | strings | test("^(0|[1-9][0-9]{0,11})\\.[0-9]{9}$")) and
     (.pid | strings | test("^[0-9]+$")) and (.host | strings | test("^[0-9]+$"))
   ' <<< "$record" >/dev/null; then
-    perf_error='no usable manual perf window (stop boundary unknown or package changed); restoring proximity only'; return 3
+    perf_error='no usable manual perf window (stop boundary unknown or package changed); restoring proximity only; run a fresh perf start'; return 3
   fi
   perf_pid="$(jq -r .pid <<< "$record")"
   perf_model="$(jq -r .model <<< "$record")"
@@ -155,14 +160,8 @@ qr_perf_manual_recover_locked() {
   owner="$(qr_perf_manual_owner)" || return 3
   QR_RUN_DIR="$(jq -er --arg owner "$owner" 'select(.owner == $owner) | .dir | strings' "$marker")" || return 3
   # Invalidate the window before attempting restoration, even if adb is down.
-  local manual_owner="$owner"
-  if ! qr_perf_manual_save '{owner:$owner, dir:$dir}'; then
-    printf 'WARN: could not invalidate manual capture state for %s in the device reservation\n' "$QUEST_SERIAL"
-    # Keep the reservation for retry if adb or removal fails. Record that the
-    # window is unusable outside the shared lock root before attempting adb.
-    if ! : > "$QR_RUN_DIR/${marker##*/}.cancelled"; then
-      printf 'WARN: could not record cancellation for %s; do not use results from a retry stop\n' "$QUEST_SERIAL"
-    fi
+  if ! qr_perf_manual_disarm "$QR_RUN_DIR"; then
+    printf 'WARN: could not disarm manual capture for %s; do not use results from a retry stop\n' "$QUEST_SERIAL"
   fi
   qr_perf_restore
 }
