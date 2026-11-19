@@ -251,6 +251,39 @@ namespace YetiKit.Playtest.Tests
             }
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void StartupRetriesRollbackThatWasStillBlockedOnShutdown(bool hasCommittedRecord)
+        {
+            using (var tmp = new TempDir())
+            {
+                var store = new Disk(tmp.Path, "flush", false) { InJournal = true, Armed = !hasCommittedRecord, BlockRollback = true };
+                store.CreateSession(Id);
+                var dir = store.SessionOutbox(Id);
+                var final = Path.Combine(dir, FileChunkStore.ChunkName(1));
+                using (var pump = new ChunkPump(store: store))
+                {
+                    pump.StartSession(dir);
+                    if (hasCommittedRecord)
+                    {
+                        Assert.IsTrue(pump.Write(new StringBuilder(First)));
+                        Assert.IsTrue(pump.Drain(5000));
+                        store.Armed = true;
+                    }
+                    Assert.IsTrue(pump.Write(new StringBuilder(Second)));
+                    Assert.IsTrue(pump.Stop(5000));
+                    Assert.IsTrue(File.Exists(final + ChunkJournal.Suffix));
+                    Assert.AreEqual(Second.Length, pump.Lost);
+                }
+
+                store.Files.RecoverChunks();
+                store.Files.RecoverChunks();
+                Assert.AreEqual(hasCommittedRecord, File.Exists(final));
+                if (hasCommittedRecord) Assert.AreEqual(First, TempDir.Gunzip(final));
+                Assert.AreEqual(hasCommittedRecord ? new[] { final } : Array.Empty<string>(), Directory.GetFiles(dir));
+            }
+        }
+
         sealed class Disk : IChunkStore
         {
             public readonly FileChunkStore Files;

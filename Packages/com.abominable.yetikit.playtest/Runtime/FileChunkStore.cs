@@ -99,7 +99,11 @@ namespace YetiKit.Playtest
 
         public void TruncateJournal(string path, long length)
         {
-            using (var file = File.OpenWrite(path)) file.SetLength(length);
+            using (var file = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
+            {
+                file.SetLength(length);
+                file.Flush(flushToDisk: true);
+            }
         }
 
         public void PublishChunk(string temp, string final) => File.Move(temp, final);
@@ -160,6 +164,7 @@ namespace YetiKit.Playtest
             foreach (var dir in Directory.GetDirectories(Outbox))
             {
                 if (!SessionRules.IsId(Path.GetFileName(dir)) || !ReconcileMetadata(dir)) continue;
+                if (!RecoverRollbacks(dir)) continue;
                 var journals = Directory.GetFiles(dir, "*" + ChunkJournal.Suffix);
                 Array.Sort(journals, (a, b) => JournalIndex(a).CompareTo(JournalIndex(b)));
                 foreach (var journal in journals)
@@ -180,6 +185,26 @@ namespace YetiKit.Playtest
                     else DeleteTemp(temp);
                 }
             }
+        }
+
+        bool RecoverRollbacks(string dir)
+        {
+            var suffix = ChunkJournal.Suffix + JournalRollback.Suffix;
+            foreach (var temp in Directory.GetFiles(dir, "*" + suffix + TmpSuffix))
+            {
+                var marker = temp.Substring(0, temp.Length - TmpSuffix.Length);
+                var name = Path.GetFileName(marker);
+                // A torn rollback marker might contain a shorter, but valid-looking offset.
+                if (ChunkIndex(name.Substring(0, name.Length - suffix.Length)) >= 0 && !File.Exists(marker)) return false;
+                File.Delete(temp);
+            }
+            foreach (var path in Directory.GetFiles(dir, "*" + suffix))
+            {
+                var name = Path.GetFileName(path);
+                if (ChunkIndex(name.Substring(0, name.Length - suffix.Length)) < 0) continue;
+                if (!JournalRollback.Recover(this, path)) return false;
+            }
+            return true;
         }
 
         static int JournalIndex(string path) => ChunkIndex(Path.GetFileName(path).Substring(0,
@@ -211,7 +236,9 @@ namespace YetiKit.Playtest
                 using (var file = File.OpenRead(path))
                 using (var json = JsonReaderWriterFactory.CreateJsonReader(file, XmlDictionaryReaderQuotas.Max))
                 {
-                    if (json.MoveToContent() != XmlNodeType.Element || json.GetAttribute("type") != "object")
+                    var root = json.MoveToContent();
+                    if (root == XmlNodeType.None) return Metadata.Malformed;
+                    if (root != XmlNodeType.Element || json.GetAttribute("type") != "object")
                         return Metadata.UnreadableOrUnsupported;
                     var seen = false;
                     json.ReadStartElement();

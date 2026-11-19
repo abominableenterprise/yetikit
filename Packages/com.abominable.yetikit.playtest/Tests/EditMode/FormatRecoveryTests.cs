@@ -5,8 +5,9 @@ namespace YetiKit.Playtest.Tests
 {
     public sealed class FormatRecoveryTests
     {
-        [Test]
-        public void RecoveryDiscardsTornTempBesideCommittedMetadataAndRecoversJournal()
+        [TestCase("")]
+        [TestCase("{\"format\":1,\"session\":\"")]
+        public void RecoveryDiscardsTornTempBesideCommittedMetadataAndRecoversJournal(string tempMetadata)
         {
             using (var tmp = new TempDir())
             {
@@ -18,7 +19,7 @@ namespace YetiKit.Playtest.Tests
                 var meta = Path.Combine(dir, FileChunkStore.MetaFile);
                 var metadata = new SessionMeta(id).ToJson(null);
                 File.WriteAllText(meta, metadata);
-                File.WriteAllText(meta + ".tmp", "{\"format\":1,\"session\":\"");
+                File.WriteAllText(meta + ".tmp", tempMetadata);
                 var final = Path.Combine(dir, FileChunkStore.ChunkName(1));
                 var journal = final + ChunkJournal.Suffix;
                 using (var file = new BinaryWriter(File.Create(journal)))

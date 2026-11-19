@@ -38,7 +38,10 @@ independent of gzip member parsing. Startup recovery publishes the complete
 records as one ordinary gzip chunk, counts any torn tail, and removes the
 journal. It still handles old gzip temporaries and skips unknown formats. A
 malformed metadata temp is discarded only when supported committed metadata
-is available; explicitly unsupported formats are left untouched.
+is available; explicitly unsupported formats are left untouched. If rollback
+of a failed journal write is blocked, the recorder tries to save the last
+committed byte offset for startup recovery. If storage rejects that checkpoint
+too, recovery can only infer completeness from the frames on disk.
 
 Set `pendingDiskBudgetBytes` on the store to opt into pruning. The pump checks
 at session start, rotation and completion; only completed sessions with no

@@ -42,8 +42,13 @@ namespace YetiKit.Playtest
         {
             if (!rollback.TryGetValue(final, out var length)) return;
             var path = final + ChunkJournal.Suffix;
-            if (length == 0) store.DeleteTemp(path);
-            else store.TruncateJournal(path, length);
+            try { JournalRollback.Apply(store, path, length); }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                // Best effort under a storage fault. Keep retrying in memory if even the marker cannot be written.
+                JournalRollback.Remember(store, path, length);
+                throw;
+            }
             rollback.Remove(final);
         }
 
