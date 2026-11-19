@@ -71,7 +71,9 @@ snap turn using synthetic input and the real scene’s locomotion providers. It
 also checks that the saved scene has no dev references, drives the desktop Lab
 controls, and reloads the scene to verify local tuning and reset. A wrist fixture
 uses synthetic controller and hand poses to select experiments, edit and reset,
-and check that UI input does not cause room grabs or teleports. To render its
+and check that UI input does not cause room grabs or teleports. The desktop and
+wrist fixtures also take synthetic photos, check their PNG and tuning sidecar in
+a temporary folder (with no outbox), and verify storage error reporting. To render its
 start and override states, set `YETIKIT_STARTER_LAB_CAPTURE` to an existing local
 output directory and filter to `WristInputRoutesWithoutRoomActions`. No headset
 or physical XR input device is required. Use the same activation/return procedure

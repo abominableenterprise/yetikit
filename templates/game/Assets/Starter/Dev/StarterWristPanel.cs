@@ -44,12 +44,12 @@ namespace Game.Dev
             panel.canvas = new GameObject("Wrist Canvas", typeof(RectTransform), typeof(Canvas)).GetComponent<Canvas>();
             var rect = (RectTransform)panel.canvas.transform;
             rect.SetParent(root.transform, false);
-            rect.sizeDelta = new Vector2(304, 230);
             rect.localScale = Vector3.one * UnitsPerPixel;
             panel.canvas.renderMode = RenderMode.WorldSpace;
             panel.canvas.worldCamera = camera;
             panel.controls = rect.gameObject.AddComponent<StarterLabPanel>();
             panel.controls.CreateControls(lab, panel.canvas, false);
+            rect.sizeDelta = panel.controls.Card.sizeDelta;
             panel.buttons = rect.GetComponentsInChildren<Button>(true);
             panel.canvas.gameObject.SetActive(false);
 

@@ -17,7 +17,8 @@ namespace Game.Dev
         const string Scope = "starter-sandbox";
 
         SnapTurnProvider turn;
-        float roomDefault;
+        Camera photoCamera;
+        float roomDefault, experimentDefault;
         Tuning tuning;
 
         public string CurrentId { get; private set; }
@@ -25,6 +26,8 @@ namespace Game.Dev
         public ITuningBinding Angle { get; private set; }
         public bool HasOverride => Angle != null && Angle.Get() != Angle.Default;
         internal float SnapAngle => turn.turnAmount;
+        internal string PhotoStatus { get; private set; }
+        internal string PhotoDirectory { get; set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetHooks() => SceneManager.sceneLoaded -= OnSceneLoaded;
@@ -72,6 +75,8 @@ namespace Game.Dev
             var lab = sandbox.gameObject.AddComponent<StarterLab>();
             lab.turn = turn;
             lab.roomDefault = turn.turnAmount;
+            lab.photoCamera = turn.GetComponentInChildren<Camera>();
+            lab.PhotoDirectory = Application.persistentDataPath;
             // A direct launch does not change the last explicit choice.
             lab.SuggestedId = new PlayerPrefsExperimentSelectionStore().Load(Scope);
             var direct = DevBoot.Consume(scene.path);
@@ -92,14 +97,28 @@ namespace Game.Dev
         void Bind(string id)
         {
             tuning?.Flush();
-            var authoredDefault = id == Compact ? 30f : 45f;
+            experimentDefault = id == Compact ? 30f : 45f;
+            PhotoStatus = null;
             // Lab bindings apply saved overrides on registration, but callers supply the live default first.
-            turn.turnAmount = authoredDefault;
+            turn.turnAmount = experimentDefault;
             var experimentId = Scope + "." + id;
             tuning = StarterTuningDocument.CanPersist(experimentId) ? new Tuning(experimentId) : null;
             Angle = tuning?.Float("Snap turn", () => turn.turnAmount, value => turn.turnAmount = value,
-                authoredDefault, min: 15f, max: 90f, step: 5f);
+                experimentDefault, min: 15f, max: 90f, step: 5f);
             CurrentId = id;
+        }
+
+        internal void SnapPhoto()
+        {
+            if (CurrentId == null) return;
+            PhotoStatus = StarterPhoto.Save(PhotoDirectory, photoCamera, new StarterPhoto.Context
+            {
+                experiment = CurrentId,
+                snapTurnDegrees = SnapAngle,
+                defaultSnapTurnDegrees = experimentDefault,
+                hasOverride = HasOverride,
+                tuningPersistenceAvailable = Angle != null
+            });
         }
 
         internal void ResetAngle()

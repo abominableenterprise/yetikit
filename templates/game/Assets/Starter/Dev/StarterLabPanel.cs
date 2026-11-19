@@ -11,7 +11,7 @@ namespace Game.Dev
     {
         StarterLab lab;
         RectTransform card;
-        Text compact, wide, status;
+        Text compact, wide, status, photoStatus;
         GameObject tuning;
         Button decrease, increase, reset;
         Font font;
@@ -41,19 +41,21 @@ namespace Game.Dev
             desktop = screenSpace;
             font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             card = Item("Starter Lab", canvas.transform);
-            Place(card, desktop ? 16 : 0, desktop ? 16 : 0, 304, 230);
+            Place(card, desktop ? 16 : 0, desktop ? 16 : 0, 304, 270);
             card.gameObject.AddComponent<Image>().color = new Color(0.07f, 0.10f, 0.13f, 0.95f);
             Label(card, desktop ? "Starter Lab  |  F8 to toggle" : "Starter Lab  |  Wrist controls", 12, 6, 280, 28);
             Label(card, "Choose a snap-turn experiment", 12, 35, 280, 24);
             compact = Button(card, "Compact turn", 12, 65, 136, () => lab.Select(StarterLab.Compact)).GetComponentInChildren<Text>();
             wide = Button(card, "Wide turn", 156, 65, 136, () => lab.Select(StarterLab.Wide)).GetComponentInChildren<Text>();
             var controls = Item("Tuning", card);
-            Place(controls, 0, 104, 304, 126);
+            Place(controls, 0, 104, 304, 166);
             tuning = controls.gameObject;
             status = Label(controls, "Tuning status", 12, 4, 280, 58);
             decrease = Button(controls, "−5°", 12, 69, 80, () => Step(-1));
             increase = Button(controls, "+5°", 102, 69, 80, () => Step(1));
             reset = Button(controls, "Reset", 192, 69, 100, lab.ResetAngle);
+            Button(controls, "Photo snap", 12, 115, 100, lab.SnapPhoto);
+            photoStatus = Label(controls, "Photo status", 122, 115, 170, 34);
             Refresh();
         }
 
@@ -77,6 +79,7 @@ namespace Game.Dev
             tuning.SetActive(selected);
             if (!selected) return;
             var angle = lab.Angle;
+            photoStatus.text = lab.PhotoStatus ?? "Local only";
             decrease.interactable = increase.interactable = reset.interactable = angle != null;
             status.text = angle != null
                 ? $"Snap turn: {angle.Get():0}° ({(lab.HasOverride ? "override" : "default")})\n" +
