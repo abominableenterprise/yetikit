@@ -4,14 +4,42 @@
 
 install_crane() {
   if command -v crane >/dev/null 2>&1 || [ -x "$BIN_DIR/crane" ]; then return; fi
-  log "installing crane $CRANE_VERSION into $BIN_DIR"
-  mkdir -p "$BIN_DIR"
-  local archive; archive="$(ship_config_get '.setup.craneArchive // empty')"
-  [ -n "$archive" ] || die "setup: crane is missing; with Go installed, run: GOBIN=$(printf %q "$BIN_DIR") go install github.com/google/go-containerregistry/cmd/crane@$CRANE_VERSION; then re-run setup (or set setup.craneArchive)"
-  supervise fetch_crane "$archive"
+  local archive sha platform stage prev_trap
+  archive="$(ship_config_get '.setup.craneArchive // empty')"
+  sha="$(ship_config_get '.setup.craneSha256 // empty')"
+  if [ -z "$archive" ]; then
+    platform="$(uname -s)/$(uname -m)"
+    [ "$platform" = Linux/x86_64 ] || die "setup: no default crane archive for $platform (only Linux/x86_64); preinstall crane or set setup.craneArchive for this host"
+    [ "$CRANE_VERSION" = v0.22.1 ] || die "setup: no pinned crane archive for $CRANE_VERSION; preinstall crane or set setup.craneArchive"
+    archive="https://github.com/google/go-containerregistry/releases/download/$CRANE_VERSION/go-containerregistry_Linux_x86_64.tar.gz"
+    # From checksums.txt in the v0.22.1 go-containerregistry release.
+    sha=0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+  fi
+  log "installing crane into $BIN_DIR"
+  mkdir -p -- "$BIN_DIR"
+  stage="$(mktemp -d "$BIN_DIR/.crane-install.XXXXXX")"
+  prev_trap="$(trap -p EXIT)"
+  chain_exit_trap "rm -rf -- $(printf %q "$stage")"
+  supervise fetch_crane "$archive" "${sha,,}" "$stage"
+  rm -rf -- "$stage"
+  trap - EXIT; eval "$prev_trap"
 }
 
-fetch_crane() { curl -fsSL "$1" | tar -xz -C "$BIN_DIR" crane; }
+fetch_crane() {
+  local archive="$1" sha="$2" stage="$3" actual
+  curl -fsSL -- "$archive" > "$stage/archive.tar.gz" \
+    || die "setup: could not download crane; preinstall crane or check setup.craneArchive"
+  if [ -n "$sha" ]; then
+    actual="$(sha256sum < "$stage/archive.tar.gz")" || die "setup: could not verify crane archive SHA-256"
+    [ "${actual%% *}" = "$sha" ] || die "setup: crane archive checksum mismatch; crane was not installed"
+  fi
+  # Stream only the crane member into a regular staged file; publish it only
+  # after verification and successful extraction, without unpacking other files.
+  tar -xzOf "$stage/archive.tar.gz" -- crane > "$stage/crane" && [ -s "$stage/crane" ] \
+    || die "setup: could not extract crane from archive"
+  chmod 755 "$stage/crane" && mv -fT -- "$stage/crane" "$BIN_DIR/crane" \
+    || die "setup: could not install crane into $BIN_DIR"
+}
 # Pass the supervisor as code rather than importing from a user checkout.
 setup_write() {
   local worker

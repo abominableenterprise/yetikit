@@ -111,6 +111,9 @@ elif has("quest") and (.quest.launcherChecks // {} | has("assets")) and
   (.quest.launcherChecks.assets | if type == "array" then all(.[]; apk_asset) else false end | not) then invalid("quest.launcherChecks.assets")
 elif has("setup") and (.setup | type) != "object" then invalid("setup")
 elif has("setup") and (.setup | has("craneArchive")) and (.setup.craneArchive | nonempty | not) then invalid("setup.craneArchive")
+elif has("setup") and (.setup | has("craneSha256")) and
+  (.setup.craneSha256 | if type == "string" then length != 64 or (test("^[0-9a-fA-F]{64}$") | not) else true end) then
+  invalid("setup.craneSha256 (expected 64 hexadecimal digits)")
 elif has("labMethod") and (.labMethod | nonempty | not) then invalid("labMethod")
 elif has("scene") and (.scene | type) != "object" then invalid("scene")
 elif has("scene") and (.scene.steps | methods | not) then invalid("scene.steps")
