@@ -20,18 +20,18 @@ Requirements: Linux, Bash 4+, `jq`, Git, GNU coreutils, util-linux (`flock`),
 Perl, curl, tar, and Xvfb/xauth plus the editor runtime libraries. `setup` uses
 `/usr/bin/python3` to supervise privileged writes and installs the runtime libraries.
 During interactive package work, Ctrl-C requests cancellation after the package
-command finishes. Put `crane` on PATH (or in `$BIN_DIR`, default `$HOME/bin`)
-first, or configure `setup.craneArchive` with an archive containing its Linux
-x86-64 executable. If Go is installed, this pinned one-line command installs
-crane into the default location (use your `$BIN_DIR` instead if overridden):
+command finishes. Setup prefers an existing `crane` on `PATH` or in `$BIN_DIR`
+(default `$HOME/bin`). Otherwise it downloads the Linux x86-64 archive from
+[go-containerregistry v0.22.1](https://github.com/google/go-containerregistry/releases/tag/v0.22.1),
+verifies it against the checked-in SHA-256, and installs only `crane` into
+`$BIN_DIR`. A checksum mismatch leaves nothing installed.
 
-```sh
-GOBIN="$HOME/bin" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
-```
-
-See the [pinned crane release](https://github.com/google/go-containerregistry/releases/tag/v0.22.1).
-Setup prints the corresponding command with its actual install directory when
-crane is missing; it does not silently download an unverified executable.
+On other architectures, or when requesting another `CRANE_VERSION`, preinstall
+an appropriate `crane` or explicitly set `setup.craneArchive`. An override must
+be a gzip tar archive with a top-level `crane` binary for the host. Set
+`setup.craneSha256` to its 64-digit hexadecimal SHA-256 to verify it before
+installation. For backward compatibility, an override with no checksum is
+trusted as configured and is not verified; use only a trusted source.
 
 ## Adopting / upgrading
 
@@ -249,7 +249,8 @@ or editor work, naming missing/invalid keys. Minimal execute-method example:
 | `build.cli` | Optional executable for profile builds; default `unity`. |
 | `knownFlakes` | Optional relative flakes-list path (Quest also accepts an absolute path); omitted or missing file means no flakes. |
 | `labMethod` | Optional fully qualified execute method for `lab`. |
-| `setup.craneArchive` | Optional download location for a crane archive; unnecessary with preinstalled crane. |
+| `setup.craneArchive` | Optional download location overriding the pinned crane archive; unused with preinstalled crane. |
+| `setup.craneSha256` | Optional SHA-256 of the override archive, as 64 hexadecimal digits. |
 | `scene` | Optional object. Omit entirely for projects without a generated scene. |
 | `scene.steps` | Required nonempty ordered array of fully qualified execute methods when `scene` exists. Logs use each method's declaring class. |
 | `scene.lightmapDir` | Required relative lightmap directory when `scene` exists; only `Lightmap-*.exr.meta` platform settings are eligible for cleanup. |
