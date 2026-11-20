@@ -39,6 +39,51 @@ In **File → Build Profiles**, switch to the desired desktop platform and add t
 
 The generated Build Profiles handler uses `StarterPlayerBuild.Build(BuildPlayerOptions)`; call that same entry point from build automation. Release leaves the playable room and authored snap turn, ignores the direct-boot argument, and omits the Lab controls and photo code. BuildAudit rejects forbidden assemblies before stripping and checks the final build report. For Android, it also inspects the packaged APK's permissions and rejects permissions that have not been explicitly allowed by the consumer. AABs and exported Gradle projects are not supported by this audit. The starter does not configure a live XR provider or validate an Android release; the build regression uses Linux desktop players in the synthetic Host.
 
+## Optional Quest setup (consumer-owned)
+
+The starter leaves XR provider setup to the generated project. If you target
+Quest, use the following probe configuration as a starting point, not as kit
+defaults or a supported version matrix:
+
+- The probe used Unity `6000.6.6f1` with OpenXR `1.18.0`. In **XR Plug-in
+  Management**, enable the OpenXR loader for **Android**.
+- In the Android OpenXR settings, enable **Meta Quest Support**, add the
+  **Oculus Touch Controller Profile**, and enable **Hand Tracking Subsystem**
+  and **Meta Hand Tracking Aim**.
+- In Android Player Settings, use **Linear** color space, **IL2CPP** scripting
+  backend, **ARM64** target architecture, and **Vulkan** as the graphics API.
+  Switch to the Android build profile and include the baked sandbox in its scene
+  list. Use APK output for the release audit.
+
+The probe APK installed on Quest and reached an active OpenXR session. That
+confirms neither in-headset rendering nor live hand or controller input; verify
+those separately on a headset. The probe's release build was rejected by
+BuildAudit, not validated for release.
+
+### Review Android release permissions
+
+BuildAudit uses `aapt2` to check the packaged APK's merged manifest, so the
+permissions may come from Unity, a plug-in, or a manifest in the project. The
+probe audit rejected permissions named `INTERNET`, `HAND_TRACKING`, `OPENXR`,
+`OPENXR_SYSTEM`, and `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (the last is
+prefixed by the application's ID). These are findings from one build, not a
+list of required Quest permissions.
+
+First trace each permission to its source and remove unused permissions by
+adjusting the relevant features, dependencies, or manifests. Explicitly review
+and record why each remaining permission is needed. In the generated project's
+`Assets/Starter/Editor/StarterPlayerBuild.cs`, the release path currently calls
+`BuildAuditHook.Enable(new BuildAuditRules())`, which denies all permissions by
+default. In that consumer-owned release entry point, set
+`BuildAuditRules.allowedPermissions` on the rules passed to `Enable` to only
+those justified, full manifest names (exact matches, including your application
+ID where applicable). Keep the default `forbiddenPermissions` policy (`"*"`),
+assembly checks, strict mode, and `BuildAuditHook.Disable()` in `finally`. Do not
+change the kit package or bypass the hook. Rebuild the release APK and rerun the
+audit before treating it as a release candidate. See the
+[BuildAudit guide](https://github.com/abominableenterprise/yetikit/blob/main/Packages/com.abominable.yetikit.quality/README.md#release-build-audit)
+for the hook and SDK requirements.
+
 ## Verify a clean starter import
 
 `python3 verify-packages.py --manifest-only` checks package sources before the
