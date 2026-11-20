@@ -51,6 +51,15 @@ if fixture org.examplechecks.sandbox 'Neutral Fixture' occupied > "$tmp/rejected
     exit 1
 fi
 
+# The hand path uses XRI's layer-name table at runtime, unlike the controller's numeric mask.
+# Check that the generated project ships the same Resources table that the Host exercises.
+settings=Assets/XRI/Settings/Resources/InteractionLayerSettings.asset
+for generation in first second; do
+    if ! cmp -s "Host/$settings" "$tmp/$generation/$settings" || [[ ! -f "$tmp/$generation/$settings.meta" ]]; then
+        printf 'Generated project lacks the Host XRI interaction layer table at %s.\n' "$settings" >&2
+        exit 1
+    fi
+done
 python3 -B "$here/check-guids.py" "$tmp/first/Assets" "$tmp/second/Assets"
 if $check_only; then exit 0; fi
 

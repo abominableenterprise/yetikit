@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using UnityEngine.XR.Interaction.Toolkit.Locomotion.Teleportation;
 
@@ -21,7 +22,9 @@ namespace YetiKit.Hands
         public GameObject reticle;
         [Tooltip("Shared aim lease key. Defaults to the hand's tracking-space parent.")]
         public Transform rig;
-        [SerializeField, Tooltip("XRI interaction layer, not a physics layer.")]
+        [SerializeField, Tooltip("XRI interaction mask, not a physics mask. None uses the layer name below.")]
+        InteractionLayerMask teleportInteractionMask;
+        [SerializeField, Tooltip("XRI interaction layer name used when no explicit mask is set.")]
         string teleportLayerName = "Teleport";
 
         readonly HandTeleportGesture gesture = new();
@@ -29,6 +32,8 @@ namespace YetiKit.Hands
         HandAimOwnership lease;
         PlayerHand blockedHand;
 
+        /// <summary>Nonzero XRI interaction mask to use instead of resolving <see cref="TeleportLayerName"/>.</summary>
+        public InteractionLayerMask TeleportInteractionMask { get => teleportInteractionMask; set => teleportInteractionMask = value; }
         public string TeleportLayerName { get => teleportLayerName; set => teleportLayerName = value; }
         public HandTeleportGesture Gesture => gesture;
         public TeleportAim Aim => aim;
@@ -80,7 +85,11 @@ namespace YetiKit.Hands
                 }
             }
 
-            if (Aiming && !gesture.Dropping) aim.Cast(origin, dir, controllerRay, teleportLayerName);
+            if (Aiming && !gesture.Dropping)
+            {
+                if (teleportInteractionMask.value != 0) aim.CastWithMask(origin, dir, controllerRay, teleportInteractionMask);
+                else aim.Cast(origin, dir, controllerRay, teleportLayerName);
+            }
             if ((gesture.Dropping || confirmed) && HasTarget) aim.Revalidate();
             var request = Target;
             var shouldQueue = confirmed && HasTarget && provider;

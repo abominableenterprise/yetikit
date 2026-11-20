@@ -1,29 +1,35 @@
 # Starter hand teleport: red arc on Quest 3
 
-## Status
+Part of [#263](https://github.com/abominableenterprise/yetikit/issues/263). **Device: pending candidate.**
 
-A reported Quest 3 wear test of a generated starter at [`0289469`](https://github.com/abominableenterprise/yetikit/commit/0289469) could teleport with a forward index point, thumb raised to show the arc, then lowered to confirm. At [`d453494`](https://github.com/abominableenterprise/yetikit/commit/d453494), using the same probe-only OpenXR configuration, the hand arc appeared but stayed red when aiming toward a pad. Controller teleport, hand and controller visuals, and impact audio worked. No new device test was run for this investigation. This is part of [#263](https://github.com/abominableenterprise/yetikit/issues/263).
+## Device evidence and root cause
 
-**The Host did not reproduce the red arc; the device root cause is not confirmed.** On unchanged production code at [`e5de7d9`](https://github.com/abominableenterprise/yetikit/commit/e5de7d9), the new `TrackedHandAimsAndTeleportsWithVisibleJoints` fixture passed. It generated and baked the room, reopened it in Play Mode, fed a tracked index point through `PlayerHand` and `HandTeleport` with the baked visual active, checked the valid arc and pad hit, then dropped the thumb and verified the rig moved. A deliberately different before-render sample moved the index marker without changing the gameplay tip. The synthetic provider does not model OpenXR sample delivery or the exact headset pose and room alignment.
+The [#316 diagnostic](https://github.com/abominableenterprise/yetikit/pull/316) in the Quest 3 development build at [`1388552`](https://github.com/abominableenterprise/yetikit/commit/1388552) saw the same result on both pads:
 
-## What the source and fixture rule out
+| Aim mode | Hit interaction mask | Aim mask | Outcome |
+| --- | --- | --- | --- |
+| Tracked hand | `0x00000001` | `0x00000000` | `aimValid=False`, `interaction-layer-mismatch` |
+| Controller | `0x00000001` | `0x00000001` | `aimValid=True`, `xriValid=True` |
 
-- [#310](https://github.com/abominableenterprise/yetikit/pull/310) assigns the existing visual callback but does not change the gameplay wrist transform, pad masks, ray settings or kit pin. `HandTeleport` casts from the Dynamic index tip along the proximal-to-tip vector, not from a mesh, joint marker or wrist rotation. The render callback uses separate point and curl buffers and converts joint poses in the visual-only array. The baked marker hierarchy has renderers but no colliders; toggling it does not disable the hand root.
-- [#309](https://github.com/abominableenterprise/yetikit/pull/309) changes the impact cue and falloff, not the geometry or teleport bindings. Controller success is consistent with correctly registered pads, but the controller and hand arcs start from different poses.
-- Seeing the red arc means the hand gesture armed. The remaining question is why that live arc has no accepted landing. A visible pointing finger is not a landing prediction: the cast uses a gravity-driven path and stops at the first obstruction, or rejects a hit that fails the pad, normal, layer or UI checks. A marker can also show a newer pose than the one that drove the arc. These are diagnostic distinctions, not a diagnosis of the wear test.
+The hand arc reached the pad. The landing filter rejected it because its interaction mask was zero, not because of the gesture, cast pose, or visual mesh. The hand path called `InteractionLayerMask.GetMask("Default")`; the controller and pads used the serialized bit directly.
+
+XRI 3.6.1 resolves names through `InteractionLayerSettings`. XR Core Utilities loads that settings object from `Resources`; if it cannot load the resource, it creates an instance. XRI sets the `Default` entry in `OnBeforeSerialize`, not on runtime creation. An instance without a populated name table therefore returns no layer for `Default`, so `GetMask` returns zero. The Editor can create and save settings during initialization. The Host already has a [Resources asset](../../../Host/Assets/XRI/Settings/Resources/InteractionLayerSettings.asset), which explains why the normal Host fixture resolved the name. Clean generations from both device revisions omit that asset before import. This verifies the missing-resource failure path, but the trace does not prove whether the failing APK lacked the asset, could not load it, or loaded an unpopulated table. The original APKs and generated project state were not compared.
+
+## Why the earlier build could work
+
+The reported wear test at [`0289469`](https://github.com/abominableenterprise/yetikit/commit/0289469) could show the hand arc and confirm a landing. Source comparison with `1388552` found the same kit pin, XRI version, hand lookup for `Default`, and bit-0 masks on the ray and pads. [`d1b5e47`](https://github.com/abominableenterprise/yetikit/commit/d1b5e47) was already in the earlier history and its locomotion changes were also in the pinned hands runtime; it did not change the mask lookup. The [visuals change](https://github.com/abominableenterprise/yetikit/pull/310) added a render-only hand callback and marker hierarchy without colliders; it did not change the gameplay joint sample or masks. The [audio change](https://github.com/abominableenterprise/yetikit/pull/309) did not touch teleport wiring. There is no source-level difference in mask resolution to explain the two outcomes. A layer table created and saved during one import but absent or unusable in the other player fits both the implementation and the logs; which project or build state differed remains unverified.
+
+## Fix and regression coverage
+
+- The generator supplies the same XRI Resources table as the Host. This fixes the lookup for fresh starters using the unchanged package pin; the template does not call a newer package API than its pin provides.
+- The hands package also accepts a serialized numeric interaction mask. When set, it bypasses the name lookup; existing scenes keep their named fallback. The Host drives a hand at a valid pad with an unknown layer name: the named path rejects, a mismatched numeric mask rejects, and a matching numeric mask previews and queues the landing. This simulates the zero lookup without touching global settings. The generated starter fixture still checks the pinned name-based wiring with the baked joint visuals and diagnostic active.
 
 ## Capture on device
 
-Bake the generated starter and install a development build made through the starter build entry point, which supplies `YETIKIT_DEV`. Release players do not contain the diagnostic. With the room open, run:
+Build and install a development player from a fresh generation using the starter build entry point, which supplies `YETIKIT_DEV`. Release players do not contain the diagnostic. With the room open, run:
 
 ```sh
 adb logcat -s Unity | grep StarterAim
 ```
 
-Hold the index point with the thumb raised over each pad, then lower the thumb. Repeat with the controller from the same standing pose as a control. The logger emits changed snapshots only, at most five lines per second total across both sides. Vectors are world-space and rounded to three decimals. On thumb drop, `origin`, `forward`, and the hit describe the frozen arc; `wrist` and `indexTip` still describe the current Dynamic hand sample. When `handTracked=False`, those joint fields are not a current tracked pose.
-
-For controllers, `xriValid` is the ray's XRI hit validity and `aimValid` also checks whether the teleport target can be selected. For hands, the starter draws a kit arc and submits the destination to XRI's provider without using an XRI ray interactor, so `xriValid=n/a`; read `aimValid` for the hand arc. `interactionMask` belongs to the hit interactable, `aimMask` is the expected interaction mask, and `gameObjectLayer` is the physics layer index. `firstBlocker` names a non-teleport collider that stopped the cast; it does not establish that the arc would have reached a pad behind it. Handle device traces locally and share only non-identifying excerpts.
-
-## Next device check
-
-Repeat the reported gesture on both fresh bakes from the same standing pose, using the same provider settings and recording only synthetic or non-identifying diagnostics. For a red frame, capture the Dynamic index tip and proximal positions in tracking and world space, the rendered marker pose, the ray settings, and the first rejected segment (collider or UI blocker, hit position and normal, or no hit). Record whether the thumb was already dropping, which freezes the aim. Check where the arc actually stops relative to the pad rather than where the finger appears to point. An A/B on the affected build with only the hand visual callback disabled can isolate render sampling without changing the XR setup or room. Replay the measured aim in Host before changing runtime behavior.
+Hold the point with the thumb raised over each pad, then lower the thumb. Repeat with the controller. Expect `interactionMask=0x00000001`, `aimMask=0x00000001`, `aimValid=True` on both paths and a completed landing on thumb drop. For controllers, `xriValid` is XRI's ray validity; for hands it is `n/a` because the hand arc submits directly to the teleport provider. On thumb drop the aim and hit fields describe the frozen arc, while the joint fields reflect the current Dynamic sample. If a fresh build still shows a zero mask, check whether the generated XRI Settings resource is in the player and loads with its `Default` entry, and compare those facts against the earlier builds if available. Handle device traces locally and share only non-identifying excerpts.

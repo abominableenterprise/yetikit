@@ -76,6 +76,10 @@ def generate(out, app_id, title):
     (packages / "manifest.json").write_text(json.dumps({"dependencies": deps}, indent=2) + "\n", encoding="utf-8")
 
     assets = out / "Assets"
+    # The pinned hands package still resolves "Default" by name at runtime.
+    layer_table = Path("XRI/Settings/Resources/InteractionLayerSettings.asset")
+    (assets / layer_table).parent.mkdir(parents=True)
+    shutil.copyfile(HOST / "Assets" / layer_table, assets / layer_table)
     impact = assets / "Starter/Impact.wav"
     impact_sound(impact)
     for asset in sorted(assets.rglob("*")):

@@ -60,6 +60,12 @@ confirms neither in-headset rendering nor live hand or controller input; verify
 those separately on a headset. The probe's release build was rejected by
 BuildAudit, not validated for release.
 
+Fresh starters include `Assets/XRI/Settings/Resources/InteractionLayerSettings.asset`
+so the pinned hand teleport code can resolve `Default` in a player. For an
+older generated project, ensure its XR Interaction Toolkit settings have a
+saved Resources asset with `Default` at index 0 before rebuilding. Preserve
+any custom layer names rather than replacing the project's settings outright.
+
 ### Review Android release permissions
 
 BuildAudit uses `aapt2` to check the packaged APK's merged manifest, so the
