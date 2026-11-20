@@ -93,6 +93,18 @@ namespace YetiKit.Starter.HostTests
         }
 
         [UnityTest]
+        public IEnumerator TrackedHandAimsAndTeleportsWithVisibleJoints()
+        {
+            SandboxBuilder.Build(PrepareBake());
+            yield return new EnterPlayMode();
+            var scene = EditorSceneManager.LoadSceneInPlayMode(SessionState.GetString(OutputKey, "") + "/Sandbox.unity",
+                new LoadSceneParameters(LoadSceneMode.Single));
+            yield return null;
+            yield return StarterHandTeleportChecks.Drive(scene);
+            yield return new ExitPlayMode();
+        }
+
+        [UnityTest]
         public IEnumerator ThrownBallStartsImpactCueConfiguredForRoomDistance()
         {
             SandboxBuilder.Build(PrepareBake());

@@ -13,6 +13,7 @@
     "YetiKit.Interaction",
     "Unity.InputSystem",
     "Unity.XR.CoreUtils",
+    "Unity.XR.Hands",
     "Unity.XR.Interaction.Toolkit",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
