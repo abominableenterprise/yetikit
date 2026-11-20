@@ -28,9 +28,11 @@ commit() {
 
 check() {
   local label=$1 expected=$2
+  shift 2
+  if (($# == 0)); then set -- --changed HEAD; fi
   : > "$RUN_LOG"
   printf '%s' "$expected" > "$tmp/expected"
-  if TEST_JOBS=1 bash "$tools/test-all.sh" --changed HEAD > "$tmp/out" 2>&1 &&
+  if TEST_JOBS=1 bash "$tools/test-all.sh" "$@" > "$tmp/out" 2>&1 &&
      cmp -s "$tmp/expected" "$RUN_LOG"; then
     printf 'ok   %s\n' "$label"
   else
@@ -69,5 +71,42 @@ printf '# test-all: slow %s\necho slow >> "$RUN_LOG"\n' "$helper" > "$tools/test
 commit
 touch "$tools/$helper"
 check 'slow dependency basename keeps a literal backslash' $'quick\nslow\n'
+
+setup refs 'Tools/vendor/kit'
+printf 'echo other >> "$RUN_LOG"\n' > "$tools/tests/other.test.sh"
+commit
+git -C "$repo" update-ref refs/remotes/origin/main HEAD
+printf '# changed\n' >> "$tools/tests/quick.test.sh"
+commit
+git -C "$repo" tag -a fixture-base -m 'Synthetic comparison base'
+printf '# changed\n' >> "$tools/tests/other.test.sh"
+# The refs must resolve in the checkout containing the runner, not the caller.
+cd "$tmp/unusual"
+check 'changed filter uses the default base and selects only the matching test' $'quick\n' --changed quick
+check 'legacy changed ref still accepts a following filter' $'quick\n' --changed origin/main quick
+check 'explicit ref compares from that commit and still applies the filter' '' --base fixture-base quick
+check 'explicit ref with a matching change selects just that test' $'other\n' --base fixture-base other
+check 'explicit base wins over legacy ref in either order' '' --base fixture-base --changed origin/main quick
+check 'a later explicit base also wins over the legacy ref' '' --changed origin/main --base fixture-base quick
+
+check_bad_base() {
+  local status=0
+  : > "$RUN_LOG"
+  TEST_JOBS=1 bash "$tools/test-all.sh" "$@" > "$tmp/out" 2>&1 || status=$?
+  if [[ $status == 1 && ! -s "$RUN_LOG" ]] &&
+     grep -q '^ERROR:.*--base' "$tmp/out" && grep -q '^Usage:' "$tmp/out"; then
+    printf 'ok   invalid explicit base fails with usage: %s\n' "$*"
+  else
+    printf 'FAIL: invalid explicit base: %s (exit %s)\n' "$*" "$status" >&2
+    cat "$tmp/out" >&2
+    failures=$((failures + 1))
+  fi
+}
+check_bad_base --base missing-ref quick
+check_bad_base --base
+check_bad_base --base --all
+check_bad_base --base ''
+check_bad_base --all --base origin/main:Tools/vendor/kit/tests/quick.test.sh
+check_bad_base --changed origin/main --base missing-ref
 
 ((failures == 0))

@@ -16,10 +16,17 @@ cat > "$tmp/bin/git" <<'EOF'
 shift 2
 case "$1" in
   rev-parse)
+    if [[ "$*" == 'rev-parse --verify --quiet --end-of-options HEAD^{commit}' ]]; then
+      [ -z "${FAKE_REF_FAILURE:-}" ] || exit 128
+      echo fixture-head
+      exit 0
+    fi
     [ "$2" = --show-toplevel ] || exit 2
     [ -z "${FAKE_REV_PARSE_FAIL:-}" ] || exit 1
     printf '%s\n' "$FAKE_REPO" ;;
-  merge-base) echo fixture-base ;;
+  merge-base)
+    [ -z "${FAKE_MERGE_BASE_FAILURE:-}" ] || exit 1
+    echo fixture-base ;;
   diff|ls-files)
     command=$1
     shift
@@ -116,6 +123,18 @@ for producer in diff ls-files; do
   [ ! -s "$RUN_LOG" ] || fail "runner selected tests after failed git $producer"
 done
 echo 'ok   either Git producer failing aborts before launching tests'
+
+: > "$RUN_LOG"
+if FAKE_REF_FAILURE=1 bash "$runner" --changed HEAD > "$tmp/out" 2>&1; then
+  fail 'runner ignored a fatal error checking a legacy ref'
+fi
+grep -q '^ERROR: cannot check Git comparison ref: HEAD' "$tmp/out" || fail 'missing ref diagnostic'
+if FAKE_MERGE_BASE_FAILURE=1 bash "$runner" --changed > "$tmp/out" 2>&1; then
+  fail 'runner ignored a failed merge-base'
+fi
+grep -q '^ERROR: cannot find merge-base with origin/main' "$tmp/out" || fail 'missing merge-base diagnostic'
+[ ! -s "$RUN_LOG" ] || fail 'runner selected tests after a Git failure'
+echo 'ok   ref lookup and merge-base failures abort before launching tests'
 
 check $'legacy\n'"$slow"$'quick\n' --all
 check "$slow" --all linux-unity
