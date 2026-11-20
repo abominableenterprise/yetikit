@@ -72,6 +72,26 @@ namespace YetiKit.Starter.HostTests
             yield return new ExitPlayMode();
         }
 
+        [Test]
+        public void BakedRigHasGameOwnedVisuals()
+        {
+            var output = PrepareBake();
+            var path = SandboxBuilder.Build(output);
+            StarterVisualChecks.AssertSaved(EditorSceneManager.OpenScene(path, OpenSceneMode.Single), output);
+        }
+
+        [UnityTest]
+        public IEnumerator RigVisualsFollowTrackingPerSide()
+        {
+            SandboxBuilder.Build(PrepareBake());
+            yield return new EnterPlayMode();
+            var scene = EditorSceneManager.LoadSceneInPlayMode(SessionState.GetString(OutputKey, "") + "/Sandbox.unity",
+                new LoadSceneParameters(LoadSceneMode.Single));
+            yield return null;
+            yield return StarterVisualChecks.Drive(scene);
+            yield return new ExitPlayMode();
+        }
+
         [UnityTest]
         public IEnumerator WristInputRoutesWithoutRoomActions()
         {

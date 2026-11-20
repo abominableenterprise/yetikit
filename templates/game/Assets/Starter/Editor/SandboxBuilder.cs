@@ -72,7 +72,9 @@ namespace Game.Starter.Editor
                 var pads = Material(output, "Pads", new Color(0.12f, 0.65f, 0.72f));
                 var arc = new Material(Shader.Find("Sprites/Default"));
                 AssetDatabase.CreateAsset(arc, output + "/Aim.mat");
-                SandboxRigBuilder.Build(manager, pads, arc);
+                var controllerMaterial = Material(output, "Controller", new Color(0.14f, 0.46f, 0.86f));
+                var jointMaterial = Material(output, "Hand Joints", new Color(0.21f, 0.86f, 0.61f));
+                SandboxRigBuilder.Build(manager, pads, arc, new SandboxRigVisuals(output, controllerMaterial, jointMaterial));
                 BuildLight();
                 var path = output + "/Sandbox.unity";
                 if (!EditorSceneManager.SaveScene(scene, path)) throw new IOException("Could not save sandbox scene.");

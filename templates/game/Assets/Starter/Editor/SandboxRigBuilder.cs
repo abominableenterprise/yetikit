@@ -23,7 +23,7 @@ namespace Game.Starter.Editor
         const float PadSize = 0.95f, PadHeight = 0.02f;
         const float SnapDegrees = 30f;
 
-        public static void Build(XRInteractionManager manager, Material pads, Material lineMaterial)
+        public static void Build(XRInteractionManager manager, Material pads, Material lineMaterial, SandboxRigVisuals visuals)
         {
             var root = new GameObject("XR Origin");
             root.SetActive(false);
@@ -50,15 +50,15 @@ namespace Game.Starter.Editor
             turn.leftHandTurnInput.inputSourceMode = XRInputValueReader.InputSourceMode.ManualValue;
             turn.rightHandTurnInput.inputSourceMode = XRInputValueReader.InputSourceMode.ManualValue;
 
-            BuildSide(space.transform, head.transform, manager, teleport, turn, lineMaterial, false);
-            BuildSide(space.transform, head.transform, manager, teleport, turn, lineMaterial, true);
+            BuildSide(space.transform, head.transform, manager, teleport, turn, lineMaterial, visuals, false);
+            BuildSide(space.transform, head.transform, manager, teleport, turn, lineMaterial, visuals, true);
             Pad("Left Teleport Pad", new Vector3(-1.8f, 0f, 1.45f), manager, teleport, pads);
             Pad("Right Teleport Pad", new Vector3(1.8f, 0f, 1.45f), manager, teleport, pads);
             root.SetActive(true);
         }
 
         static void BuildSide(Transform space, Transform head, XRInteractionManager manager,
-            TeleportationProvider teleport, SnapTurnProvider turn, Material lineMaterial, bool right)
+            TeleportationProvider teleport, SnapTurnProvider turn, Material lineMaterial, SandboxRigVisuals visuals, bool right)
         {
             var side = right ? "RightHand" : "LeftHand";
             var device = "<XRController>{" + side + "}";
@@ -112,6 +112,7 @@ namespace Game.Starter.Editor
             handTurn.provider = turn;
 
             handRoot.AddComponent<ControllerTracking>().Configure(hand, direct, ray, handTurn, turn, device);
+            visuals.Build(hand);
         }
 
         static T Direct<T>(GameObject root, XRInteractionManager manager) where T : XRDirectInteractor
