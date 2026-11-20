@@ -98,6 +98,27 @@ namespace YetiKit.Hands.Tests
             Assert.That(teleport.hand.GrabBlocked, Is.False);
         }
 
+        [Test]
+        public void ExplicitMaskAllowsPadWhenNameLookupIsZero()
+        {
+            teleport.TeleportLayerName = "Missing Fixture Layer";
+            Assert.That(InteractionLayerMask.GetMask(teleport.TeleportLayerName), Is.Zero);
+            Step(0f);
+            Step(.32f);
+            Assert.That(teleport.Aiming, Is.True);
+            Assert.That(teleport.HasTarget, Is.False);
+
+            teleport.TeleportInteractionMask = 1 << 1;
+            Step(.33f);
+            Assert.That(teleport.HasTarget, Is.False, "A nonmatching mask must still reject the pad.");
+            teleport.TeleportInteractionMask = 1;
+            Step(.34f);
+            Assert.That(teleport.HasTarget, Is.True, "The explicit mask must allow the pad despite the zero lookup.");
+            DropThumb();
+            Assert.That(Step(.36f), Is.True);
+            Assert.That(provider.Count, Is.EqualTo(1));
+        }
+
         [TestCase("pinch")]
         [TestCase("held")]
         [TestCase("ui hover")]

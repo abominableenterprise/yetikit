@@ -31,11 +31,19 @@ namespace YetiKit.Hands
         public void Cast(Vector3 origin, Vector3 normalizedDir, XRRayInteractor controllerRay, string teleportLayerName,
             float? launchSpeed = null)
         {
+            CastWithMask(origin, normalizedDir, controllerRay,
+                string.IsNullOrEmpty(teleportLayerName) ? 0 : InteractionLayerMask.GetMask(teleportLayerName), launchSpeed);
+        }
+
+        /// <summary>Casts using a numeric XRI interaction mask, without looking up layer names.</summary>
+        public void CastWithMask(Vector3 origin, Vector3 normalizedDir, XRRayInteractor controllerRay,
+            InteractionLayerMask interactionMask, float? launchSpeed = null)
+        {
             var speed = launchSpeed ?? (controllerRay ? controllerRay.velocity : 10f);
             var gravity = controllerRay ? controllerRay.acceleration : 9.8f;
             var mask = controllerRay ? (int)controllerRay.raycastMask : Physics.DefaultRaycastLayers;
             var triggers = controllerRay ? controllerRay.raycastTriggerInteraction : QueryTriggerInteraction.Ignore;
-            teleportMask = string.IsNullOrEmpty(teleportLayerName) ? 0 : (int)InteractionLayerMask.GetMask(teleportLayerName);
+            teleportMask = interactionMask;
             TeleportArc.Sample(origin, normalizedDir, speed, gravity, arc);
             HasTarget = false;
             landingArea = null;

@@ -17,9 +17,13 @@ middle-finger extension without assigning it an action.
 
 - Set `HandTeleport.hand`, `head` (the XR camera), and the rig's XRI
   `TeleportationProvider`. Give it a line and reticle to show the preview.
-  Assign the controller's teleport ray to share its arc settings. Configure
-  the teleport **interaction** layer (default `Teleport`) in the project and
-  use it on XRI `TeleportationArea` surfaces. Anchors and anchor volumes
+  Assign the controller's teleport ray to share its arc settings. Set
+  `TeleportInteractionMask` to the XRI **interaction** mask used by the
+  `TeleportationArea` surfaces, not their physics layers. A nonzero mask
+  bypasses the XRI layer-name lookup. Leave the mask at None to keep using
+  `TeleportLayerName` (default `Teleport`), which requires that name in the
+  project's XRI interaction layer settings. Call `TeleportAim.CastWithMask`
+  to supply a numeric mask when casting directly. Anchors and anchor volumes
   are not freeform landing surfaces. Use stationary landing surfaces only (both
   the area and its colliders). Hand teleport does not support moving platforms:
   the preview freezes at a world-space hit during the thumb drop, and the

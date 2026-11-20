@@ -18,7 +18,7 @@ def starter_guids(assets):
             raise ValueError(f"{source}: missing .meta")
 
     guids = {}
-    for meta in [assets / "Starter.meta", *starter.rglob("*.meta")]:
+    for meta in assets.rglob("*.meta"):
         matches = GUID.findall(meta.read_text(encoding="utf-8"))
         if len(matches) != 1 or int(matches[0], 16) == 0:
             raise ValueError(f"{meta}: expected one nonzero 32-digit GUID")
