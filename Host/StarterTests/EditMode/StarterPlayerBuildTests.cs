@@ -68,6 +68,11 @@ namespace YetiKit.Starter.HostTests
                     var assemblies = Directory.GetFiles(managed, "*.dll").Select(Path.GetFileNameWithoutExtension).ToArray();
                     Assert.That(assemblies, Does.Contain("Game.Starter"));
                     Assert.That(assemblies.Contains("Game.Dev"), Is.EqualTo(development), "Dev controls in the shipped player");
+                    // The ASCII type name lives in the managed metadata, independent of the log string.
+                    var diagnostic = nameof(Game.Dev.StarterAimDiagnostic);
+                    Assert.That(Directory.EnumerateFiles(managed, "*.dll").Any(dll =>
+                        System.Text.Encoding.ASCII.GetString(File.ReadAllBytes(dll)).Contains(diagnostic)),
+                        Is.EqualTo(development), "Starter aim diagnostic in the shipped player");
                     if (!development)
                     {
                         var rules = new BuildAuditRules();
