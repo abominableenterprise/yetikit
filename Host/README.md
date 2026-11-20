@@ -65,10 +65,12 @@ Unity, even if the Host already has staged assets. It does not copy the generate
 manifest or project settings. The EditMode test bakes and reopens the sandbox in
 an isolated subfolder of `Assets/StarterTests`, then briefly enters Play Mode to
 check the sandbox's runtime bindings, drive the kit grab/release through XRI,
-and verify one accepted hit per throw using synthetic contacts. It also checks
-serialized rig wiring, controller/hand transitions, teleport landing rules and
-snap turn using synthetic input and the real scene’s locomotion providers. It
-also checks that the saved scene has no dev references, drives the desktop Lab
+and verify one accepted hit per throw using synthetic contacts. A separate
+physics throw verifies that a real collision starts the preloaded target cue
+and checks its rolloff across the room. The integration also checks serialized
+rig wiring, controller/hand transitions, teleport landing rules and snap turn
+using synthetic input and the real scene’s locomotion providers. It checks that
+the saved scene has no dev references, drives the desktop Lab
 controls, and reloads the scene to verify local tuning and reset. A wrist fixture
 uses synthetic controller and hand poses to select experiments, edit and reset,
 and check that UI input does not cause room grabs or teleports. The desktop and

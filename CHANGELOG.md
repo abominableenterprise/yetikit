@@ -12,7 +12,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Make the generated starter’s target-hit cue easier to hear across the room.
 
 ### Behaviour changes
 - None.
