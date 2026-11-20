@@ -26,8 +26,10 @@ def placeholder(value):
 
 def impact_sound(path):
     rate = 22050
-    count = rate // 12
-    samples = (int(13000 * math.sin(2 * math.pi * 620 * i / rate) * (1 - i / count) ** 3)
+    count = rate // 5
+    attack = rate * 0.005
+    samples = (int(24000 * math.sin(2 * math.pi * 620 * i / rate)
+                   * min(1, i / attack) * (1 - i / count) ** 2)
                for i in range(count))
     with wave.open(str(path), "wb") as wav:
         wav.setparams((1, 2, rate, count, "NONE", "not compressed"))
@@ -74,12 +76,27 @@ def generate(out, app_id, title):
     (packages / "manifest.json").write_text(json.dumps({"dependencies": deps}, indent=2) + "\n", encoding="utf-8")
 
     assets = out / "Assets"
-    impact_sound(assets / "Starter/Impact.wav")
+    impact = assets / "Starter/Impact.wav"
+    impact_sound(impact)
     for asset in sorted(assets.rglob("*")):
         if asset.suffix == ".meta":
             continue
-        folder = "folderAsset: yes\n" if asset.is_dir() else ""
-        Path(f"{asset}.meta").write_text(f"fileFormatVersion: 2\nguid: {uuid.uuid4().hex}\n{folder}", encoding="utf-8")
+        settings = "folderAsset: yes\n" if asset.is_dir() else ""
+        if asset == impact:
+            # Small, latency-sensitive cue: preload PCM on all platforms, including Android.
+            settings = """AudioImporter:
+  serializedVersion: 8
+  defaultSettings:
+    loadType: 0
+    sampleRateSetting: 0
+    sampleRateOverride: 44100
+    compressionFormat: 0
+    quality: 1
+    preloadAudioData: 1
+  platformSettingOverrides: {}
+  loadInBackground: 0
+"""
+        Path(f"{asset}.meta").write_text(f"fileFormatVersion: 2\nguid: {uuid.uuid4().hex}\n{settings}", encoding="utf-8")
 
 
 def main():

@@ -93,6 +93,63 @@ namespace YetiKit.Starter.HostTests
         }
 
         [UnityTest]
+        public IEnumerator ThrownBallStartsImpactCueConfiguredForRoomDistance()
+        {
+            SandboxBuilder.Build(PrepareBake());
+            yield return new EnterPlayMode();
+            var scene = EditorSceneManager.LoadSceneInPlayMode(SessionState.GetString(OutputKey, "") + "/Sandbox.unity",
+                new LoadSceneParameters(LoadSceneMode.Single));
+            yield return null;
+            yield return AssertPhysicalImpact(scene);
+            yield return new ExitPlayMode();
+        }
+
+        // Keep the contact callback's captured state on the Play Mode side of the domain reload.
+        static IEnumerator AssertPhysicalImpact(Scene scene)
+        {
+            var target = Root(scene, "Target 2");
+            var source = ComponentOn<AudioSource>(target);
+            var listener = Root(scene, "XR Origin").GetComponentInChildren<AudioListener>(true);
+            Assert.That(listener, Is.Not.Null);
+            Assert.That(listener.isActiveAndEnabled, Is.True);
+            Assert.That(source.isPlaying, Is.False, "The cue must not play on scene load.");
+            var clip = source.clip;
+            Assert.That(clip, Is.Not.Null);
+            var initialLoadState = clip.loadState;
+
+            var prop = ComponentOn<GrabbableProp>(Root(scene, "Ball"));
+            var contactedTarget = false;
+            prop.LaunchedPropContacted += (_, other) => contactedTarget |= other.gameObject == target;
+            prop.Body.useGravity = false;
+            prop.Body.position = new Vector3(0f, target.transform.position.y, 0.8f);
+            prop.Body.linearVelocity = Vector3.forward * 7f;
+            prop.Thrown(Time.time);
+            // The EditMode runner does not drive WaitForFixedUpdate; wait for actual physics time.
+            var deadline = Time.fixedTime + 0.6f;
+            while (!contactedTarget && Time.fixedTime < deadline) yield return null;
+
+            Assert.That(contactedTarget, Is.True, $"The launched ball must physically contact the target (ball: {prop.Body.position}).");
+            Assert.That(source.isPlaying, Is.True, $"An eligible collision should start the target's one-shot (clip: {initialLoadState} → {clip.loadState}).");
+            Assert.That(initialLoadState, Is.EqualTo(AudioDataLoadState.Loaded), "The cue should be ready before the first hit.");
+            var importer = (AudioImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(clip));
+            Assert.That(importer.ContainsSampleSettingsOverride(BuildTargetGroup.Android), Is.False,
+                "Android should inherit the preloaded PCM settings.");
+            var settings = importer.defaultSampleSettings;
+            Assert.That(settings.preloadAudioData, Is.True);
+            Assert.That(settings.loadType, Is.EqualTo(AudioClipLoadType.DecompressOnLoad));
+            Assert.That(settings.compressionFormat, Is.EqualTo(AudioCompressionFormat.PCM));
+            Assert.That(source.mute, Is.False);
+            Assert.That(source.spatialBlend, Is.EqualTo(1f));
+            Assert.That(source.rolloffMode, Is.EqualTo(AudioRolloffMode.Linear), "Keep the positional cue audible across the room.");
+            foreach (var (distance, minimumGain) in new[] { (3f, 0.7f), (7f, 0.3f) })
+            {
+                var gain = source.volume * (1f - Mathf.InverseLerp(source.minDistance, source.maxDistance, distance));
+                Assert.That(gain, Is.GreaterThanOrEqualTo(minimumGain), $"Source gain at {distance} m.");
+            }
+            Assert.That(clip.length, Is.GreaterThanOrEqualTo(0.15f));
+        }
+
+        [UnityTest]
         public IEnumerator WristInputRoutesWithoutRoomActions()
         {
             SandboxBuilder.Build(PrepareBake());

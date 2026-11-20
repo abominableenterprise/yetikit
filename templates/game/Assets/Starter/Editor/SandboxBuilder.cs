@@ -65,6 +65,10 @@ namespace Game.Starter.Editor
                     var source = target.AddComponent<AudioSource>();
                     source.playOnAwake = false;
                     source.spatialBlend = 1f;
+                    // Preserve direction without burying this short cue across the 6 m room.
+                    source.rolloffMode = AudioRolloffMode.Linear;
+                    source.minDistance = 2f;
+                    source.maxDistance = 10f;
                     source.clip = clip;
                     targets[i] = target.AddComponent<ImpactCue>();
                 }
