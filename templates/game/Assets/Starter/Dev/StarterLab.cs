@@ -83,6 +83,9 @@ namespace Game.Dev
             if (Known(direct)) lab.Bind(direct);
             StarterLabPanel.Build(lab);
             StarterWristPanel.Build(lab, turn.transform);
+#if UNITY_EDITOR || YETIKIT_DEV
+            StarterAimDiagnostic.Install(lab, turn.transform);
+#endif
         }
 
         public bool Select(string id)

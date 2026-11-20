@@ -9,6 +9,7 @@
 - Route thrown-prop contacts to room targets: `Assets/Starter/Runtime/SandboxBindings.cs`.
 - Play the synthetic local tone: `Assets/Starter/Runtime/ImpactCue.cs`.
 - Install dev-only direct boot and snap-turn tuning: `Assets/Starter/Dev/StarterLab.cs`.
+- Log changed teleport aim snapshots in dev builds: `Assets/Starter/Dev/StarterAimDiagnostic.cs`.
 - Render local stills and save them with tuning context: `Assets/Starter/Dev/StarterPhoto.cs`.
 - Share start, tuning and photo controls between desktop and wrist: `Assets/Starter/Dev/StarterLabPanel.cs`.
 - Attach the dev-only wrist UI and route pointing or poking before room selections: `Assets/Starter/Dev/StarterWristPanel.cs`.

@@ -1,9 +1,12 @@
 using System.Collections;
 using System.Linq;
+using System.Text.RegularExpressions;
+using Game.Dev;
 using NUnit.Framework;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.TestTools;
 using UnityEngine.XR.Hands;
 using YetiKit.Hands;
 using static YetiKit.Starter.HostTests.StarterRigChecks;
@@ -58,6 +61,50 @@ namespace YetiKit.Starter.HostTests
             Assert.That(Vector3.Distance(destination, landing), Is.LessThan(0.04f));
             Assert.That(teleport.line.colorGradient.Evaluate(0f), Is.EqualTo(teleport.validColor.Evaluate(0f)));
 
+            var diagnostic = ComponentOn<StarterAimDiagnostic>(Root(scene, "Sandbox Bindings"));
+            var when = Time.unscaledTimeAsDouble;
+            var originField = Regex.Escape(World(tip));
+            var forwardField = Regex.Escape(World(space.TransformDirection(direction)));
+            var hitField = Regex.Escape(World(destination));
+            var wristField = Regex.Escape(World(hand.WristPose.position));
+            LogAssert.Expect(LogType.Log, new Regex(
+                $"^StarterAim side=right mode=hand gesture=aiming origin={originField} forward={forwardField} " +
+                $"hit=True collider=\"Right Teleport Pad\" gameObjectLayer=0 interactionMask=0x00000001 aimMask=0x00000001 " +
+                $"hitPoint={hitField} .*aimValid=True xriValid=n/a reason=\"none\" firstBlocker=\"n/a\" " +
+                $"handTracked=True wrist={wristField} indexTip={originField}$"));
+            diagnostic.Sample(when);
+
+            var blocker = new GameObject("Synthetic Occluder");
+            try
+            {
+                blocker.transform.position = teleport.line.GetPosition(2);
+                blocker.AddComponent<BoxCollider>().size = Vector3.one * 0.1f;
+                Physics.SyncTransforms();
+                Assert.That(teleport.Tick(now, false), Is.False);
+                Assert.That(teleport.Aiming && !teleport.HasTarget, Is.True);
+                var logCount = 0;
+                void Count(string message, string stack, LogType type)
+                {
+                    if (type == LogType.Log && message.StartsWith("StarterAim ")) logCount++;
+                }
+                Application.logMessageReceived += Count;
+                try
+                {
+                    diagnostic.Sample(when + 0.1);
+                    Assert.That(logCount, Is.Zero, "Changes cannot bypass the rate limit.");
+                    LogAssert.Expect(LogType.Log, new Regex("hit=True collider=\"Synthetic Occluder\" .*" +
+                        "aimValid=False xriValid=n/a reason=\"not-a-teleport-interactable/first-collider\" firstBlocker=\"Synthetic Occluder\""));
+                    diagnostic.Sample(when + 0.21);
+                    diagnostic.Sample(when + 0.42);
+                    Assert.That(logCount, Is.EqualTo(1), "An unchanged aim must not log again.");
+                }
+                finally { Application.logMessageReceived -= Count; }
+            }
+            finally { Object.DestroyImmediate(blocker); }
+            Physics.SyncTransforms();
+            Assert.That(teleport.Tick(now, false), Is.False);
+            Assert.That(teleport.HasTarget, Is.True);
+
             tracking.ThumbDropped = true;
             hand.Tick(now + 0.02f);
             Assert.That(teleport.Tick(now + 0.02f, false), Is.True, "The thumb drop must queue the previewed target.");
@@ -65,6 +112,8 @@ namespace YetiKit.Starter.HostTests
             var head = origin.Camera.transform.position;
             Assert.That(Vector3.Distance(new Vector3(head.x, destination.y, head.z), destination), Is.LessThan(0.001f));
         }
+
+        static string World(Vector3 v) => System.FormattableString.Invariant($"({v.x:F3},{v.y:F3},{v.z:F3})");
 
         sealed class PointingHand : IHandTracking, IHandJointPoses
         {
