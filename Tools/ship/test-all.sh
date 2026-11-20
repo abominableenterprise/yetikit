@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run shell tests in bounded parallel slots; positional filters match basenames.
-# Default: select changes since origin/main; --changed [base] changes the base.
+# Default: select changes since origin/main; --base overrides the comparison ref.
 # --all explicitly runs unchanged tests. Slow tests require their own change or
 # a changed script basename explicitly named in # test-all: slow [script ...].
 # --fast omits all slow-tagged files.
@@ -15,18 +15,49 @@ if ((${#tests[@]} == 0)); then
   exit 1
 fi
 
-fast=0; changed=1; base=origin/main
+usage() {
+  echo 'Usage: test-all.sh [--fast] [--changed [ref] | --all] [--base <ref>] [basename-filter ...]'
+}
+resolve_commit() {
+  git -C "$ci_dir" rev-parse --verify --quiet --end-of-options "$1^{commit}"
+}
+
+fast=0; changed=1; base=origin/main; base_commit=; explicit_base=; explicit_commit=
 filters=()
 while (($#)); do
   case "$1" in
     --fast) fast=1 ;;
     --all) changed=0 ;;
+    --base)
+      if (($# < 2)) || [[ -z "$2" || "$2" == --* || "$2" == -h ]]; then
+        echo 'ERROR: --base requires a commit ref' >&2
+        usage >&2
+        exit 1
+      fi
+      explicit_base=$2
+      explicit_commit="$(resolve_commit "$explicit_base")" || {
+        echo "ERROR: --base does not resolve to a commit: $explicit_base" >&2
+        usage >&2
+        exit 1
+      }
+      shift
+      ;;
     --changed)
       changed=1
-      if (($# > 1)) && [[ "$2" != --* ]]; then base=$2; shift; fi
+      if (($# > 1)) && [[ "$2" != --* && "$2" != -h ]]; then
+        if commit="$(resolve_commit "$2")"; then
+          base=$2; base_commit=$commit; shift
+        elif (($? != 1)); then
+          echo "ERROR: cannot check Git comparison ref: $2" >&2
+          exit 1
+        fi
+      fi
       ;;
     --help|-h)
-      echo 'Usage: test-all.sh [--fast] [--changed [base] | --all] [basename-filter ...]'
+      usage
+      echo '  --base <ref> overrides any legacy --changed ref; the default is origin/main.'
+      echo '  --changed consumes the next argument as a ref only if it resolves to a commit.'
+      echo '  Other positional arguments are basename filters. --all ignores a valid comparison base.'
       echo '  --changed skips slow tests unless their own file or a script named in their slow tag changes.'
       exit 0 ;;
     --*) echo "ERROR: unknown option: $1" >&2; exit 1 ;;
@@ -80,7 +111,10 @@ if ((changed)); then
     "${repo%/}/"*) tool_prefix="${ci_dir#"${repo%/}/"}" ;;
     *) echo 'ERROR: cannot determine tool directory relative to repository' >&2; exit 1 ;;
   esac
-  merge_base="$(git -C "$repo" merge-base "$base" HEAD)" || {
+  if [[ -n "$explicit_commit" ]]; then
+    base=$explicit_base; base_commit=$explicit_commit
+  fi
+  merge_base="$(git -C "$repo" merge-base "${base_commit:-$base}" HEAD)" || {
     echo "ERROR: cannot find merge-base with $base" >&2; exit 1;
   }
   # Keep Git's NUL stream intact and check both producers before selecting tests.

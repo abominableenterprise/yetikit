@@ -348,11 +348,21 @@ other Ship paths (including docs, shared tooling and fixtures) or the Ship
 workflow select all quick tests. Slow tests tagged
 `# test-all: slow [script-basename ...]` require a change to their own file or a
 shell/Python script explicitly named in the tag; incidental references do not
-opt them in. `--fast` omits all slow-tagged tests. Use
-`Tools/ship/test-all.sh --changed <base>` for another comparison base. Positional
-basename-substring filters intersect changed selection; use, for example,
-`Tools/ship/test-all.sh --all quest-release` to run matching tests regardless of
-changes. Unfiltered `--all` runs the full suite, including slow tests.
+opt them in. `--fast` omits all slow-tagged tests.
+
+Use `--base <ref>` to set the comparison base. For compatibility, `--changed`
+also accepts a following ref, but consumes it only if it resolves to a commit
+in the tool's repository. Otherwise the argument stays a basename filter, so
+`Tools/ship/test-all.sh --changed quest-release-wait` filters changes since the
+merge-base with `origin/main`. A resolvable ref takes precedence over a filter
+immediately after `--changed`. An explicit `--base` wins over a legacy ref in
+either order; a missing or invalid explicit ref exits 1 with usage, even with
+`--all`. A valid `--base` has no effect on `--all` selection.
+
+Positional basename-substring filters intersect changed selection. For example,
+`Tools/ship/test-all.sh --base HEAD quest-release-wait` compares against `HEAD`,
+and `Tools/ship/test-all.sh --all quest-release` runs matching tests regardless
+of changes. Unfiltered `--all` runs the full suite, including slow tests.
 
 Part B adds the offline shell tests and CI entry point. No editor, account,
 network, activation or seat is needed. Generated-scene and no-scene fixtures
