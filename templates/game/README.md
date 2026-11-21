@@ -21,6 +21,8 @@ The bake imports only the controller prefabs and their dependencies, not the dem
 
 ### Point & Pinch hand teleport
 
+The rig below requires the Point & Pinch APIs in the current kit checkout. The generated manifest still pins an earlier revision that does not contain those APIs; it cannot compile this rig until a compatible kit revision is released and all kit pins are advanced together. The Host uses the current checkout's package sources.
+
 Point with your index extended and the other three fingers curled, palm facing down or forward. Hold the point for 0.10 s to preview an arc, pinch thumb to index to highlight a valid pad, then release the pinch while keeping the other fingers curled. Keep the aim on the pad through release. An open hand, lost tracking, or an invalid landing cancels the gesture. Only the first pinch owns the aim; holding props or reaching near props and UI takes priority.
 
 `PointPinchPose` uses 0.30/0.42 index and 0.60/0.45 grip-finger enter/stay curl thresholds, with 0.15 s exit grace. `PointPinchGesture` closes below 1.5 cm and opens above 3 cm. `PointPinchPalm` and `AngularOneEuro` tune the shoulder offset and yaw/pitch smoothing. `PointPinchTeleport` controls the 0.75 s cooldown and 0.10 s post-grab quiet period. `TeleportAim` and `TeleportGround` handle the arc and landing; the hand arc uses the controller's launch speed and gravity, but not its input.
@@ -110,7 +112,7 @@ The generator's manifest pins all kit modules to the public commit
 The package tree on starter baseline [`8b2bb0c`](https://github.com/abominableenterprise/yetikit/commit/8b2bb0c)
 is identical to [v0.1.13](https://github.com/abominableenterprise/yetikit/releases/tag/v0.1.13);
 the post-tag starter build code is copied into `Assets` by the generator, not
-fetched as a package. No later package commit is needed for the tag smoke test.
+fetched as a package. Point & Pinch requires newer package code, as noted above.
 For a cold import, start with a new project (no lock or `Library`), an empty
 `UPM_CACHE_ROOT`, and no per-cache overrides (`UPM_CACHE_PATH`,
 `UPM_NPM_CACHE_PATH`, `UPM_GIT_LFS_CACHE_PATH`). To check a tag before adoption,
