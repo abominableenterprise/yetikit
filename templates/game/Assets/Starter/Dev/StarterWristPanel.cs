@@ -3,6 +3,7 @@ using Game.Starter;
 using UnityEngine;
 using UnityEngine.UI;
 using YetiKit.Hands;
+using YetiKit.Interaction;
 
 namespace Game.Dev
 {
@@ -54,7 +55,7 @@ namespace Game.Dev
             panel.canvas.gameObject.SetActive(false);
 
             panel.beam = root.AddComponent<LineRenderer>();
-            panel.beam.sharedMaterial = right.GetComponent<HandTeleport>().line.sharedMaterial;
+            panel.beam.sharedMaterial = right.GetComponent<PointPinchTeleport>().line.sharedMaterial;
             panel.beam.widthMultiplier = 0.003f;
             panel.beam.positionCount = 2;
             panel.beam.enabled = false;

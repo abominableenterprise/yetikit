@@ -27,3 +27,18 @@ test "$(grep -Ec '^[0-9]+\. \*\*' "$readme")" = 10
 grep -Fq 'pending separate headset validation' "$readme"
 grep -Eq '≤2 hours.*≤4 hours.*unmeasured' "$readme"
 python3 -B "$repo/Tools/ship/tests/starter-package-sources.py" "$out/game"
+
+# Opt in by running this fixture directly after activating Unity. CI stays offline.
+if [[ ${STARTER_COMPILE:-0} == 1 ]]; then
+    project="$out/standalone"
+    python3 "$repo/templates/game/new-game.py" --id org.examplechecks.sandbox --title 'Neutral Fixture' --out "$project"
+    PROJECT="$project" YETIKIT_CONFIG="$repo/Host/yetikit.json" OUT_DIR="$project/build" \
+        TASK_CACHE=skip-unity-library-cache SEAT_STATE="${SEAT_STATE:-$repo/Host/build/unity-seat.held}" \
+        "$repo/Tools/ship/linux-unity.sh" open || {
+        grep -E 'error CS[0-9]+|\[Package Manager\].*[Ee]rror' "$project/build/open.log" >&2 || true
+        exit 1
+    }
+    python3 -B "$project/verify-packages.py"
+    test -f "$project/Library/ScriptAssemblies/Game.Starter.Editor.dll"
+    test -f "$project/Library/ScriptAssemblies/Game.Dev.dll"
+fi

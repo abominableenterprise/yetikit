@@ -98,19 +98,32 @@ namespace Game.Starter.Editor
             var motion = handRoot.AddComponent<ControllerMotion>();
             motion.hand = hand;
             motion.rightHand = right;
-            var aim = handRoot.AddComponent<HandTeleport>();
+            var aim = handRoot.AddComponent<PointPinchTeleport>();
             aim.hand = hand;
             aim.head = head;
             aim.provider = teleport;
             aim.controllerRay = ray;
-            aim.TeleportLayerName = "Default";
+            // Match the starter pads even in projects without a named Teleport interaction layer.
+            aim.teleportInteractionMask = PadsMask;
             aim.line = Line(handRoot, lineMaterial);
             aim.validColor = visual.validColorGradient;
             aim.invalidColor = visual.invalidColorGradient;
+            var ring = Line(Child(handRoot.transform, "Teleport Highlight"), lineMaterial);
+            ring.useWorldSpace = false;
+            ring.loop = true;
+            ring.startColor = ring.endColor = Color.cyan;
+            ring.positionCount = 32;
+            for (var i = 0; i < ring.positionCount; i++)
+            {
+                var angle = i * 2f * Mathf.PI / ring.positionCount;
+                ring.SetPosition(i, new Vector3(Mathf.Cos(angle) * 0.14f, 0.012f, Mathf.Sin(angle) * 0.14f));
+            }
+            ring.enabled = true;
+            aim.reticle = ring.gameObject;
+            aim.reticle.SetActive(false);
             var handTurn = handRoot.AddComponent<HandSnapTurn>();
             handTurn.hand = hand;
             handTurn.head = head;
-            handTurn.teleport = aim;
             handTurn.provider = turn;
 
             handRoot.AddComponent<ControllerTracking>().Configure(hand, direct, ray, handTurn, turn, device);

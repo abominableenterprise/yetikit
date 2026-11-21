@@ -5,6 +5,7 @@
     "YetiKit.Lab",
     "YetiKit.Playtest",
     "YetiKit.Hands",
+    "YetiKit.Interaction",
     "Unity.InputSystem",
     "UnityEngine.UI",
     "Unity.XR.Interaction.Toolkit"

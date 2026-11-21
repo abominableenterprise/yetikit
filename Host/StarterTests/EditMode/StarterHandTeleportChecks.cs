@@ -1,4 +1,5 @@
 using System.Collections;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Game.Dev;
@@ -9,6 +10,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.XR.Hands;
 using YetiKit.Hands;
+using YetiKit.Interaction;
 using static YetiKit.Starter.HostTests.StarterRigChecks;
 using static YetiKit.Starter.HostTests.StarterSandboxTests;
 
@@ -20,22 +22,24 @@ namespace YetiKit.Starter.HostTests
         {
             var origin = ComponentOn<XROrigin>(Root(scene, "XR Origin"));
             var hand = origin.GetComponentsInChildren<PlayerHand>().Single(h => h.RightHand);
-            var teleport = ComponentOn<HandTeleport>(hand.gameObject);
+            var teleport = ComponentOn<PointPinchTeleport>(hand.gameObject);
             var pad = ComponentOn<BoxCollider>(Root(scene, "Right Teleport Pad"));
             var model = hand.transform.Find("Hand Visual");
             Assert.That(hand.Visual, Is.Not.Null, "Use the visual wired by the starter bake.");
             Assert.That(model, Is.Not.Null);
             Assert.That(teleport.controllerRay.isActiveAndEnabled, Is.False);
 
-            // Choose an unobstructed horizontal point whose projectile crosses the center of the pad.
-            const float height = 1.2f;
+            // Solve the shoulder ray and projectile together for an unobstructed hit near pad center.
+            const float flight = 0.42f;
             var landing = pad.bounds.center + Vector3.up * pad.bounds.extents.y;
-            var range = teleport.controllerRay.velocity * Mathf.Sqrt(2f * (height - landing.y) / teleport.controllerRay.acceleration);
-            const float reachX = 1.3f;
-            var tip = new Vector3(landing.x - reachX, height, landing.z - Mathf.Sqrt(range * range - reachX * reachX));
             var space = hand.transform.parent;
-            var direction = space.InverseTransformDirection(Vector3.ProjectOnPlane(landing - tip, Vector3.up).normalized);
-            var tracking = new PointingHand(space.InverseTransformPoint(tip), Quaternion.LookRotation(direction));
+            var shoulder = teleport.head.position + Vector3.down * 0.20f + Vector3.right * 0.17f;
+            var displaced = landing - shoulder + Vector3.up * (0.5f * teleport.controllerRay.acceleration * flight * flight);
+            var direction = displaced.normalized;
+            var midpoint = landing + Vector3.up * (0.5f * teleport.controllerRay.acceleration * flight * flight) -
+                direction * (teleport.controllerRay.velocity * flight);
+            var tracking = new PointingHand(space.InverseTransformPoint(midpoint), Quaternion.identity);
+            var tip = midpoint + Vector3.right * 0.025f;
             hand.Tracking = tracking;
             var now = Time.time;
             hand.Tick(now);
@@ -44,7 +48,7 @@ namespace YetiKit.Starter.HostTests
             Assert.That(model.gameObject.activeInHierarchy, Is.True);
             Assert.That(teleport.Tick(now, false), Is.False);
 
-            now += HandTeleportGesture.ArmTime + 0.01f;
+            now += PointPinchPose.EnterDwell + 0.01f;
             hand.Tick(now);
             // Draw a different before-render sample without changing the Dynamic joints used by the arc.
             tracking.RenderOffset = 0.4f;
@@ -56,22 +60,24 @@ namespace YetiKit.Starter.HostTests
             Physics.SyncTransforms();
             Assert.That(teleport.Tick(now, false), Is.False, "Aiming alone cannot queue a teleport.");
             Assert.That(teleport.Aiming && teleport.line.enabled, Is.True);
-            Assert.That(teleport.HasTarget, Is.True, "The arc must hit the pad with the baked hand visual active.");
-            var destination = teleport.Target.destinationPosition;
+            Assert.That(teleport.Aim.HasTarget, Is.True, "The arc must hit the pad with the baked hand visual active.");
+            Assert.That(Vector3.Distance(teleport.AimRay.origin, midpoint), Is.LessThan(0.001f));
+            var destination = teleport.Aim.Target.destinationPosition;
             Assert.That(Vector3.Distance(destination, landing), Is.LessThan(0.04f));
             Assert.That(teleport.line.colorGradient.Evaluate(0f), Is.EqualTo(teleport.validColor.Evaluate(0f)));
 
             var diagnostic = ComponentOn<StarterAimDiagnostic>(Root(scene, "Sandbox Bindings"));
             var when = Time.unscaledTimeAsDouble;
-            var originField = Regex.Escape(World(tip));
-            var forwardField = Regex.Escape(World(space.TransformDirection(direction)));
+            var originField = Regex.Escape(World(midpoint));
+            var tipField = Regex.Escape(World(tip));
+            var forwardField = Regex.Escape(World(direction));
             var hitField = Regex.Escape(World(destination));
             var wristField = Regex.Escape(World(hand.WristPose.position));
             LogAssert.Expect(LogType.Log, new Regex(
                 $"^StarterAim side=right mode=hand gesture=aiming origin={originField} forward={forwardField} " +
                 $"hit=True collider=\"Right Teleport Pad\" gameObjectLayer=0 interactionMask=0x00000001 aimMask=0x00000001 " +
                 $"hitPoint={hitField} .*aimValid=True xriValid=n/a reason=\"none\" firstBlocker=\"n/a\" " +
-                $"handTracked=True wrist={wristField} indexTip={originField}$"));
+                $"handTracked=True wrist={wristField} indexTip={tipField}$"));
             diagnostic.Sample(when);
 
             var blocker = new GameObject("Synthetic Occluder");
@@ -81,7 +87,7 @@ namespace YetiKit.Starter.HostTests
                 blocker.AddComponent<BoxCollider>().size = Vector3.one * 0.1f;
                 Physics.SyncTransforms();
                 Assert.That(teleport.Tick(now, false), Is.False);
-                Assert.That(teleport.Aiming && !teleport.HasTarget, Is.True);
+                Assert.That(teleport.Aiming && !teleport.Aim.HasTarget, Is.True);
                 var logCount = 0;
                 void Count(string message, string stack, LogType type)
                 {
@@ -103,14 +109,51 @@ namespace YetiKit.Starter.HostTests
             finally { Object.DestroyImmediate(blocker); }
             Physics.SyncTransforms();
             Assert.That(teleport.Tick(now, false), Is.False);
-            Assert.That(teleport.HasTarget, Is.True);
+            Assert.That(teleport.Aim.HasTarget, Is.True);
 
-            tracking.ThumbDropped = true;
+            tracking.Pinched = true;
             hand.Tick(now + 0.02f);
-            Assert.That(teleport.Tick(now + 0.02f, false), Is.True, "The thumb drop must queue the previewed target.");
+            Assert.That(teleport.Tick(now + 0.02f, false), Is.False, "The pinch only highlights the live target.");
+            Assert.That(teleport.Pinching && teleport.reticle.activeInHierarchy, Is.True);
+            Assert.That(teleport.reticle.transform.parent, Is.Null);
+            Capture(origin.Camera, destination);
+            tracking.Pinched = false;
+            hand.Tick(now + 0.04f);
+            Assert.That(teleport.Tick(now + 0.04f, false), Is.True, "Only the release queues a teleport.");
+            Assert.That(teleport.reticle.activeSelf, Is.False);
             yield return Frames(4);
             var head = origin.Camera.transform.position;
             Assert.That(Vector3.Distance(new Vector3(head.x, destination.y, head.z), destination), Is.LessThan(0.001f));
+        }
+
+        static void Capture(Camera camera, Vector3 destination)
+        {
+            var path = System.Environment.GetEnvironmentVariable("YETIKIT_POINT_PINCH_CAPTURE");
+            if (string.IsNullOrEmpty(path)) return;
+            var screenshot = new GameObject("Synthetic capture camera").AddComponent<Camera>();
+            screenshot.CopyFrom(camera);
+            screenshot.transform.SetPositionAndRotation(camera.transform.position,
+                Quaternion.LookRotation(destination - camera.transform.position));
+            var target = RenderTexture.GetTemporary(768, 480, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            var prior = RenderTexture.active;
+            try
+            {
+                screenshot.targetTexture = target;
+                screenshot.Render();
+                RenderTexture.active = target;
+                image.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+                image.Apply();
+                File.WriteAllBytes(path, image.EncodeToPNG());
+            }
+            finally
+            {
+                RenderTexture.active = prior;
+                screenshot.targetTexture = null;
+                RenderTexture.ReleaseTemporary(target);
+                Object.DestroyImmediate(screenshot.gameObject);
+                Object.DestroyImmediate(image);
+            }
         }
 
         static string World(Vector3 v) => System.FormattableString.Invariant($"({v.x:F3},{v.y:F3},{v.z:F3})");
@@ -120,7 +163,7 @@ namespace YetiKit.Starter.HostTests
             readonly Vector3[] points = new Vector3[HandCurls.Points];
             readonly Quaternion rotation;
             public float RenderOffset;
-            public bool ThumbDropped;
+            public bool Pinched;
 
             public PointingHand(Vector3 tip, Quaternion rotation)
             {
@@ -139,13 +182,17 @@ namespace YetiKit.Starter.HostTests
                         points[offset + i] = p;
                     }
                 }
-                points[ThumbHammer.ThumbTip] = new Vector3(-0.06f, 0.07f, 0.04f);
                 var localTip = points[PinchStrength.IndexTip];
                 for (var i = 0; i < points.Length; i++) points[i] = tip + rotation * (points[i] - localTip);
+                points[PinchStrength.ThumbTip] = tip;
             }
 
-            Vector3 Point(int i) => Vector3.up * RenderOffset + (ThumbDropped && i == ThumbHammer.ThumbTip
-                ? points[ThumbHammer.IndexProximal] + rotation * Vector3.left * 0.01f : points[i]);
+            Vector3 Point(int i)
+            {
+                var spread = Pinched ? 0.005f : 0.025f;
+                var side = i == PinchStrength.IndexTip ? spread : i == PinchStrength.ThumbTip ? -spread : 0f;
+                return points[i] + Vector3.up * RenderOffset + rotation * Vector3.right * side;
+            }
 
             public bool TryGetHand(bool right, Vector3[] into, out Pose wrist)
             {

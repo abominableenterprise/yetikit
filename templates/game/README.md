@@ -12,12 +12,20 @@ From a kit checkout, run `python3 templates/game/new-game.py --id <your reverse-
 The baked rig uses the Input System and the kit’s hands and prop interaction. Each side uses its XR controller while tracked, otherwise it takes fresh XR Hands samples. If neither source is tracked, that side has no active interaction once the kit’s hand-grab dropout grace expires. A controller takeover or loss cancels the outgoing grab rather than throwing it. Each side shows an animated XR Interaction Toolkit Starter Assets controller when its controller is tracked, or joint markers when fresh hand poses are available. Neither model is shown when that side loses tracking.
 
 - **Controllers:** grip to grab. Aim at a colored pad, then squeeze and release the trigger on the pad to teleport. Push the stick left or right for 30° snap turns.
-- **Tracked hands:** use the kit’s near-grab gesture. To teleport, hold a forward index point with the thumb up until the arc appears, then drop the thumb. For a snap turn, briefly hold a still fist with the thumb pointing sideways. The kit handles the gesture thresholds and cooldown.
+- **Tracked hands:** use the kit’s near-grab gesture or Point & Pinch to teleport. For a snap turn, briefly hold a still fist with the thumb pointing sideways.
 - **Scene wiring:** pads use XRI’s Default interaction layer; props and near grabbers use bit 1 of the XRI interaction mask. Reserve that bit if you name layers in the consumer project. These are interaction masks, not physics layers. An arc hitting the floor or an obstruction is not a valid landing.
 
 The project uses one pinned kit revision and leaves the existing Unity and XRI versions unchanged. No OpenXR package, loader, controller profile or hand-tracking feature is configured: a consumer must configure a provider to receive live XR input. The bindings are tested in the Host with synthetic input only. Voice is off; there is no microphone capture or upload. The room, props, hand markers and tone are game-owned and get fresh asset GUIDs. The controllers come from the pinned package's [Starter Assets sample](https://docs.unity3d.com/Packages/com.unity.xr.interaction.toolkit@3.6/manual/samples-starter-assets.html) and keep their upstream GUIDs so the prefab references resolve. The package's `LICENSE.md` identifies the [Unity Companion License](https://unity.com/legal/licenses/unity-companion-license); the controller assets are imported into the generated project, not vendored under the kit's MIT license. If you already baked a sandbox, the builder will not upgrade it in place; keep your old assets and generate a fresh project to inspect or adopt the new rig.
 
 The bake imports only the controller prefabs and their dependencies, not the demo rig, so it needs no new package pins. If the sample cannot be imported, restore the pinned package and move any incomplete or older Starter Assets import out of `Assets/Samples`, then rerun **Game → Build Starter Sandbox**. To deliberately use the old capsule visuals, choose **Game → Build Starter Sandbox (Placeholder Controllers)**; the bake logs a warning. Scripted bakes call `StarterControllerSample.Import()`, wait for compilation if it returns `true`, then call `SandboxBuilder.Build(output)`.
+
+### Point & Pinch hand teleport
+
+Point with your index extended and the other three fingers curled, palm facing down or forward. Hold the point for 0.10 s to preview an arc, pinch thumb to index to highlight a valid pad, then release the pinch while keeping the other fingers curled. Keep the aim on the pad through release. An open hand, lost tracking, or an invalid landing cancels the gesture. Only the first pinch owns the aim; holding props or reaching near props and UI takes priority.
+
+`PointPinchPose` uses 0.30/0.42 index and 0.60/0.45 grip-finger enter/stay curl thresholds, with 0.15 s exit grace. `PointPinchGesture` closes below 1.5 cm and opens above 3 cm. `PointPinchPalm` and `AngularOneEuro` tune the shoulder offset and yaw/pitch smoothing. `PointPinchTeleport` controls the 0.75 s cooldown and 0.10 s post-grab quiet period. `TeleportAim` and `TeleportGround` handle the arc and landing; the hand arc uses the controller's launch speed and gravity, but not its input.
+
+To switch hand teleport off, disable `PointPinchTeleport` on both hand objects in the baked rig. Leave the controller rays and locomotion providers enabled to keep controller teleport and snap turn.
 
 ### Desktop Starter Lab
 
@@ -62,11 +70,7 @@ confirms neither in-headset rendering nor live hand or controller input; verify
 those separately on a headset. The probe's release build was rejected by
 BuildAudit, not validated for release.
 
-Fresh starters include `Assets/XRI/Settings/Resources/InteractionLayerSettings.asset`
-so the pinned hand teleport code can resolve `Default` in a player. For an
-older generated project, ensure its XR Interaction Toolkit settings have a
-saved Resources asset with `Default` at index 0 before rebuilding. Preserve
-any custom layer names rather than replacing the project's settings outright.
+The fresh starter wires the pads and hand teleports with the same explicit XRI interaction mask. This does not rely on interaction-layer name lookups in a player. In a custom rig, set `teleportInteractionMask` to the pad mask or leave it at zero to resolve the `Teleport` layer by name. Preserve your custom layer names.
 
 ### Review Android release permissions
 
@@ -101,17 +105,13 @@ as Git packages at their manifest pins. Both modes reject local paths and
 embedded packages; even the pre-import check validates an existing lock. This
 is a package-source check, not an editor, device or signing doctor.
 
-The generator's manifest pins all kit modules to the public commit
-[`0829f97`](https://github.com/abominableenterprise/yetikit/commit/0829f97d461466eee5381f3f05ca3d99c6ffe77b).
-The package tree on starter baseline [`8b2bb0c`](https://github.com/abominableenterprise/yetikit/commit/8b2bb0c)
-is identical to [v0.1.13](https://github.com/abominableenterprise/yetikit/releases/tag/v0.1.13);
-the post-tag starter build code is copied into `Assets` by the generator, not
-fetched as a package. No later package commit is needed for the tag smoke test.
+The generator pins all kit modules to one public commit with the Point & Pinch APIs.
+The starter scripts themselves are copied into `Assets`, not fetched as a package.
 For a cold import, start with a new project (no lock or `Library`), an empty
 `UPM_CACHE_ROOT`, and no per-cache overrides (`UPM_CACHE_PATH`,
-`UPM_NPM_CACHE_PATH`, `UPM_GIT_LFS_CACHE_PATH`). To check a tag before adoption,
-use a disposable generated copy with all kit URL fragments set to that tag;
-leave the generator and your working project's pins alone.
+`UPM_NPM_CACHE_PATH`, `UPM_GIT_LFS_CACHE_PATH`). To check a compatible tag before
+adoption, use a disposable generated copy with all kit URL fragments set to
+that tag; leave the generator and your working project's pins alone.
 
 ### Linux Ship adapter
 

@@ -4,7 +4,7 @@ using UnityEngine.XR.Interaction.Toolkit.Locomotion.Turning;
 namespace YetiKit.Hands
 {
     /// <summary>Feeds a tracked-hand turn gesture into one side of an XRI snap-turn provider.</summary>
-    [DefaultExecutionOrder(PlayerHand.ExecutionOrder + 2)]
+    [DefaultExecutionOrder(PlayerHand.ExecutionOrder + 5)]
     public sealed class HandSnapTurn : MonoBehaviour
     {
         public const int ThumbProximal = 2, ThumbTip = HandCurls.PointsPerFinger - 1;
@@ -67,7 +67,7 @@ namespace YetiKit.Hands
             var right = head ? Vector3.ProjectOnPlane(head.right, Vector3.up).normalized : Vector3.right;
             var sideways = Vector3.Dot(thumb.normalized, right);
             var reach = Vector3.Distance(tip, hand.Joint(IndexIntermediate));
-            var busy = holding || AimBusy || (teleport && teleport.Gesture.Busy);
+            var busy = holding || AimBusy || hand.GrabBlocked || (teleport && teleport.Gesture.Busy);
             var turn = Gesture.Tick(tracked, hand.Shape == HandShape.Fist, hand.FingerCurls.thumb, sideways, reach, speed, busy, now);
             if (turn != 0 || !tracked || busy) Input.Pulse(turn);
             return turn;

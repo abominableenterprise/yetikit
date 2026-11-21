@@ -51,7 +51,7 @@ namespace YetiKit.Starter.HostTests
                 var controllerGrab = ComponentOn<XRDirectInteractor>(hand.controller.gameObject);
                 Assert.That(ControllerMotion.Of(controllerGrab.transform).hand, Is.SameAs(hand));
                 Assert.That((int)controllerGrab.interactionLayers & padLayers, Is.Zero);
-                var aim = ComponentOn<HandTeleport>(hand.gameObject);
+                var aim = ComponentOn<PointPinchTeleport>(hand.gameObject);
                 Assert.That(aim.head, Is.SameAs(camera.transform));
                 Assert.That(aim.provider, Is.SameAs(teleport));
                 Assert.That(aim.controllerRay.transform.IsChildOf(hand.controller), Is.True);
@@ -59,7 +59,9 @@ namespace YetiKit.Starter.HostTests
                 Assert.That(AssetDatabase.GetAssetPath(aim.line.sharedMaterial), Is.EqualTo(output + "/Aim.mat"));
                 var handTurn = ComponentOn<HandSnapTurn>(hand.gameObject);
                 Assert.That(handTurn.provider, Is.SameAs(turn));
-                Assert.That(handTurn.teleport, Is.SameAs(aim));
+                Assert.That((int)aim.AimMask, Is.EqualTo(padLayers));
+                Assert.That(hand.GetComponent<HandTeleport>(), Is.Null, "One hand teleport source per side.");
+                Assert.That(aim.reticle.activeSelf, Is.False);
             }
         }
 
@@ -69,7 +71,7 @@ namespace YetiKit.Starter.HostTests
             var hand = origin.GetComponentsInChildren<PlayerHand>().Single(h => h.RightHand);
             var other = origin.GetComponentsInChildren<PlayerHand>().Single(h => !h.RightHand);
             var turn = ComponentOn<HandSnapTurn>(hand.gameObject);
-            var aim = ComponentOn<HandTeleport>(hand.gameObject);
+            var aim = ComponentOn<PointPinchTeleport>(hand.gameObject);
             var grab = ComponentOn<XRDirectInteractor>(hand.controller.gameObject);
             var prop = ComponentOn<GrabbableProp>(Root(scene, "Offset Grip"));
             const string layout = "StarterTestController";
@@ -184,14 +186,14 @@ namespace YetiKit.Starter.HostTests
 
                 var floor = Root(scene, "Floor");
                 Physics.SyncTransforms();
-                aim.Aim.Cast(new Vector3(-2.6f, 1f, -1f), Vector3.down, aim.controllerRay, aim.TeleportLayerName);
-                Assert.That(aim.HasTarget, Is.False, $"{floor.name} is not a landing area.");
-                aim.Aim.Cast(pad.transform.position + Vector3.up, Vector3.down, aim.controllerRay, aim.TeleportLayerName);
-                Assert.That(aim.HasTarget, Is.True);
-                var destination = aim.Target.destinationPosition;
+                aim.Aim.CastWithMask(new Vector3(-2.6f, 1f, -1f), Vector3.down, aim.controllerRay, aim.AimMask);
+                Assert.That(aim.Aim.HasTarget, Is.False, $"{floor.name} is not a landing area.");
+                aim.Aim.CastWithMask(pad.transform.position + Vector3.up, Vector3.down, aim.controllerRay, aim.AimMask);
+                Assert.That(aim.Aim.HasTarget, Is.True);
+                var destination = aim.Aim.Target.destinationPosition;
                 Assert.That(pad.GetComponent<Collider>().bounds.Contains(destination), Is.True);
                 Assert.That(destination.x, Is.EqualTo(pad.transform.position.x).Within(0.001f));
-                Assert.That(aim.provider.QueueTeleportRequest(aim.Target), Is.True);
+                Assert.That(aim.provider.QueueTeleportRequest(aim.Aim.Target), Is.True);
                 yield return Frames(3);
                 AssertLanding(origin, destination);
             }

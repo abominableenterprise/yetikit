@@ -14,6 +14,8 @@ namespace YetiKit.Hands
         public PlayerHand hand;
         PlayerHand Hand => hand ? hand : hand = GetComponentInParent<PlayerHand>(true);
 
+        public float SelectionEndedAt { get; private set; } = float.NegativeInfinity;
+
         public override bool isSelectActive
         {
             get
@@ -33,6 +35,12 @@ namespace YetiKit.Hands
             var h = Hand;
             if (h) h.Grab.Took();
             base.OnSelectEntering(args);
+        }
+
+        protected override void OnSelectExited(SelectExitEventArgs args)
+        {
+            SelectionEndedAt = Time.time;
+            base.OnSelectExited(args);
         }
 
         public override void PreprocessInteractor(XRInteractionUpdateOrder.UpdatePhase updatePhase)
