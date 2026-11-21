@@ -23,10 +23,12 @@ namespace Game.Starter.Editor
         const float PadSize = 0.95f, PadHeight = 0.02f;
         const float SnapDegrees = 30f;
 
-        public static void Build(XRInteractionManager manager, Material pads, Material lineMaterial, SandboxRigVisuals visuals)
+        public static void Build(XRInteractionManager manager, Material pads, Material lineMaterial,
+            SandboxRigVisuals visuals, InputActionAsset controllerActions)
         {
             var root = new GameObject("XR Origin");
             root.SetActive(false);
+            if (controllerActions) StarterControllerSample.AddInput(root, controllerActions);
             root.transform.position = new Vector3(0, 0, -0.55f);
             var space = Child(root.transform, "Tracking Space");
             var head = Child(space.transform, "Camera");
