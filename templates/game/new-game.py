@@ -14,8 +14,8 @@ import wave
 TEMPLATE = Path(__file__).resolve().parent
 HOST = TEMPLATE.parents[1] / "Host"
 KIT_URL = "https://github.com/abominableenterprise/yetikit.git"
-# All kit modules resolve to the same revision until the starter APIs are tagged.
-KIT_REVISION = "0829f97d461466eee5381f3f05ca3d99c6ffe77b"
+# Keep all kit modules at one published commit that includes PointPinchTeleport.
+KIT_REVISION = "8e1c7a0cfa682ab543e71815eb2e910049fb675c"
 PLACEHOLDERS = {"changeme", "default", "placeholder", "replace", "template", "todo", "yourcompany", "yourgame"}
 
 
