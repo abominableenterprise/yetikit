@@ -61,6 +61,55 @@ namespace YetiKit.Hands.Tests
             Assert.That(reticle.activeSelf, Is.False);
             Assert.That(line.enabled, Is.True);
             Assert.That(ArcEnd.z - Offset.z, Is.EqualTo(stop).Within(1e-4f));
+            Assert.That(aim.ArcEnd, Is.EqualTo(ArcEnd));
+            Assert.That(aim.ArcHit.HasValue, Is.False);
+        }
+
+        [Test]
+        public void ArcHitReportsASteepSurfaceEvenWhenItCannotBeALanding()
+        {
+            box.size = new Vector3(20f, 4f, .2f);
+            box.center = new Vector3(0f, 1f, 2f);
+            Physics.SyncTransforms();
+
+            Cast();
+            Assert.That(aim.HasTarget, Is.False);
+            Assert.That(aim.ArcHit.Value.collider, Is.SameAs(box));
+            Assert.That(aim.ArcHit.Value.normal.y, Is.LessThan(TeleportAim.MinUp));
+            Assert.That(aim.ArcEnd, Is.EqualTo(aim.ArcHit.Value.point));
+
+            RegisterPanel(Origin + Vector3.forward);
+            Cast();
+            Assert.That(aim.ArcHit.HasValue, Is.False, "a fresh cast clears the previous hit when UI stops the arc");
+        }
+
+        [Test]
+        public void LandingWithinUiRadiusIsRejectedEvenWhenArcDoesNotCrossTheUi()
+        {
+            Cast();
+            Assert.That(aim.HasTarget, Is.True);
+            var original = aim.Target.destinationPosition;
+            RegisterPanel(original + Vector3.forward * .1f);
+
+            Cast();
+            Assert.That(aim.HasTarget, Is.False);
+            Assert.That(aim.ArcHit.Value.point, Is.EqualTo(original));
+        }
+
+        [Test]
+        public void ArcWithoutControllerUsesProjectileDefaults()
+        {
+            box.enabled = false;
+            Physics.SyncTransforms();
+            Cast();
+            Preview();
+
+            const float speed = 10f;
+            const float gravity = 9.8f;
+            var t = TeleportArc.MaxTime;
+            Assert.That(line.positionCount, Is.EqualTo(TeleportArc.Segments + 1));
+            Assert.That(ArcEnd, Is.EqualTo(Origin + Vector3.forward * (speed * t) + Vector3.down * (.5f * gravity * t * t)));
+            Assert.That(aim.ArcHit.HasValue, Is.False);
         }
 
         [TestCase(false)]

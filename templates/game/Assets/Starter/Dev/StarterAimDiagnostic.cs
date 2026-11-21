@@ -8,6 +8,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using UnityEngine.XR.Interaction.Toolkit.Locomotion.Teleportation;
 using YetiKit.Hands;
+using YetiKit.Interaction;
 
 namespace Game.Dev
 {
@@ -21,7 +22,7 @@ namespace Game.Dev
 
         internal static void Install(StarterLab lab, Transform rig)
         {
-            lab.gameObject.AddComponent<StarterAimDiagnostic>().sides = rig.GetComponentsInChildren<HandTeleport>()
+            lab.gameObject.AddComponent<StarterAimDiagnostic>().sides = rig.GetComponentsInChildren<PointPinchTeleport>()
                 .Where(aim => aim.hand && aim.line && aim.controllerRay).Select(aim => new Side(aim)).ToArray();
         }
 
@@ -30,7 +31,6 @@ namespace Game.Dev
         internal void Sample(double now)
         {
             if (sides == null || sides.Length == 0) return;
-            // Keep the last *live* hand cast even while throttled, so thumb drop reports the frozen arc.
             foreach (var side in sides) side.Observe();
             if (now < nextLog) return;
             for (var offset = 0; offset < sides.Length; offset++)
@@ -45,22 +45,20 @@ namespace Game.Dev
 
         sealed class Side
         {
-            readonly HandTeleport aim;
+            readonly PointPinchTeleport aim;
             readonly PlayerHand hand;
             readonly XRRayInteractor ray;
             readonly ControllerTracking controller;
-            readonly Vector3[] points = new Vector3[TeleportArc.Segments + 1];
             bool handActive, controllerActive;
-            string lastLine;
-            Vector3 handOrigin, handForward, handEnd;
-            RaycastHit handHit;
+            string lastLine, cancelled;
 
-            public Side(HandTeleport aim)
+            public Side(PointPinchTeleport aim)
             {
                 this.aim = aim;
                 hand = aim.hand;
                 ray = aim.controllerRay;
                 controller = hand.GetComponent<ControllerTracking>();
+                aim.Cancelled += reason => cancelled = reason;
             }
 
             public void Observe()
@@ -69,27 +67,16 @@ namespace Game.Dev
                 // The starter ray is a live aim whenever enabled, even before a trigger press.
                 controllerActive = ray.isActiveAndEnabled;
                 if (!handActive && !controllerActive) lastLine = null;
-                if (handActive && !aim.Gesture.Dropping) ObserveHandCast();
-            }
-
-            void ObserveHandCast()
-            {
-                handOrigin = aim.line.GetPosition(0);
-                handForward = (hand.Joint(PinchStrength.IndexTip) - hand.Joint(HandTeleport.IndexProximal)).normalized;
-                var end = aim.line.positionCount - 1;
-                handEnd = aim.line.GetPosition(end);
-                // Reconstruct only the final segment of the actual drawn hand arc. The kit does not expose
-                // its rejected hit. A hit beyond the drawn endpoint (e.g. behind UI) is not the arc's hit.
-                TeleportArc.Sample(handOrigin, handForward, ray.velocity, ray.acceleration, points);
-                var from = points[end - 1];
-                var step = points[end] - from;
-                if (!Physics.Raycast(from, step, out handHit, step.magnitude, ray.raycastMask, ray.raycastTriggerInteraction) ||
-                    (handHit.point - handEnd).sqrMagnitude > 0.000001f)
-                    handHit = default;
             }
 
             public bool LogChange()
             {
+                if (cancelled != null)
+                {
+                    Debug.Log($"StarterAim side={(hand.RightHand ? "right" : "left")} mode=hand gesture=cancelled reason=\"{cancelled}\"", aim);
+                    cancelled = null;
+                    return true;
+                }
                 if (!handActive && !controllerActive) return false;
                 var value = handActive ? HandLine() : ControllerLine();
                 if (value == lastLine) return false;
@@ -100,18 +87,18 @@ namespace Game.Dev
 
             string HandLine()
             {
+                var handHit = aim.Aim.ArcHit.GetValueOrDefault();
                 var collider = handHit.collider;
                 var target = collider ? collider.GetComponentInParent<BaseTeleportationInteractable>() : null;
-                var mask = InteractionLayerMask.GetMask(aim.TeleportLayerName);
-                var valid = aim.HasTarget;
-                var shortened = (handEnd - points[points.Length - 1]).sqrMagnitude > 0.000001f;
-                var reason = valid ? "none" : !collider ? (shortened ? "no-hit/arc-stopped (UI or custom blocker)" : "no-hit") :
-                    target is not TeleportationArea ? "not-a-teleport-interactable/first-collider" :
+                var mask = aim.AimMask;
+                var valid = aim.Aim.HasTarget;
+                var reason = valid ? "none" : !collider ? "no-hit/arc-stopped" :
+                    !target ? "not-a-teleport-interactable/first-collider" :
                     (target.interactionLayers & mask) == 0 ? "interaction-layer-mismatch" :
                     handHit.normal.y < TeleportAim.MinUp ? "normal-or-angle" : "landing-rejected (disabled, UI or policy)";
                 var interactable = target ? target : collider ? collider.GetComponentInParent<XRBaseInteractable>() : null;
                 int? hitMask = interactable ? (int)interactable.interactionLayers : null;
-                return Line("hand", aim.Gesture.Dropping ? "thumb-dropping" : "aiming", handOrigin, handForward,
+                return Line("hand", aim.Pinching ? "pinching" : "aiming", aim.AimRay.origin, aim.AimRay.direction,
                     handHit, hitMask, mask, valid, "n/a", reason);
             }
 

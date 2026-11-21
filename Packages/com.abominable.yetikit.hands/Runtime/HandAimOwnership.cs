@@ -13,6 +13,8 @@ namespace YetiKit.Hands
 
         public static HandAimOwnership For(Transform rig) => rigs.GetValue(rig, _ => new HandAimOwnership());
 
+        public bool IsAvailable(object claimant) => owner == null || ReferenceEquals(owner, claimant);
+
         public bool Claim(object claimant, Action cancelled, Func<object, bool> canPreempt = null)
         {
             if (claimant == null) throw new ArgumentNullException(nameof(claimant));

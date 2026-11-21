@@ -37,7 +37,7 @@ namespace YetiKit.Starter.HostTests
             var origin = ComponentOn<XROrigin>(Root(scene, "XR Origin"));
             var right = origin.GetComponentsInChildren<PlayerHand>().Single(h => h.RightHand);
             var space = right.transform.parent;
-            var ray = right.GetComponent<HandTeleport>().controllerRay;
+            var ray = right.GetComponent<PointPinchTeleport>().controllerRay;
             var direct = right.controller.GetComponent<XRDirectInteractor>();
             var prop = Root(scene, "Ball").GetComponent<GrabbableProp>();
             var pad = Root(scene, "Right Teleport Pad").GetComponent<TeleportationArea>();
@@ -131,22 +131,17 @@ namespace YetiKit.Starter.HostTests
                 SetController(rightDevice, landing, down, tracked: false);
                 fingers.Tip = space.InverseTransformPoint(Center("Reset") - canvas.transform.forward * 0.07f);
                 yield return Frames(3);
-                var aim = right.GetComponent<HandTeleport>();
+                var aim = right.GetComponent<PointPinchTeleport>();
                 Assert.That(right.HandTracked && right.FarInteraction.UiHover, Is.True);
                 var grabEntries = 0;
                 right.grabber.selectEntered.AddListener(_ => grabEntries++);
-                // Seed an active aim, then supply a thumb-down sample during the actual poke.
-                // The hand update must cancel the gesture even though it was already armed.
-                var gestureTime = Mathf.Max(1f, Time.time);
-                aim.Gesture.Tick(true, true, true, 0f, 0f, false, gestureTime - 1f);
-                aim.Gesture.Tick(true, true, true, 0f, 0f, false, gestureTime);
-                Assert.That(aim.Aiming, Is.True);
+                // A touch near the card stays UI-owned, even if the thumb moves in.
                 fingers.ThumbDown = true;
                 fingers.Tip = space.InverseTransformPoint(Center("Reset"));
                 yield return Frames(3);
                 Assert.That(lab.Angle.Get(), Is.EqualTo(45f));
                 Assert.That(right.Hammer, Is.GreaterThanOrEqualTo(HandTeleportGesture.ConfirmDrop));
-                Assert.That(aim.Aiming || aim.HasTarget || right.grabber.hasSelection, Is.False);
+                Assert.That(aim.Aiming || aim.Aim.HasTarget || right.grabber.hasSelection, Is.False);
                 fingers.ThumbDown = false;
                 fingers.Pinch = true;
                 fingers.Tip = space.InverseTransformPoint(Center("Reset") + canvas.transform.right * 0.31f);

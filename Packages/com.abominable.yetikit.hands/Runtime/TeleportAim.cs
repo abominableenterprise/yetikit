@@ -12,6 +12,8 @@ namespace YetiKit.Hands
     {
         public const float MinUp = 0.7f;
         public const float UiReach = 0.15f;
+        public const float DefaultLaunchSpeed = 10f;
+        public const float DefaultGravity = 9.8f;
 
         /// <summary>Reports the first custom obstruction on the supplied finite segment, if any.</summary>
         public delegate bool SegmentBlocker(Vector3 from, Vector3 to, out Vector3 hit);
@@ -25,34 +27,40 @@ namespace YetiKit.Hands
         BaseTeleportationInteractable landingArea;
         GameObject detachedReticle;
 
+        /// <summary>Use the hit point on any teleport interactable, including anchors, rather than only areas.</summary>
+        public bool AllowAnchorSurfaces { get; set; }
         public bool HasTarget { get; set; }
         public TeleportRequest Target { get; private set; }
+        /// <summary>First physics hit reached by the arc, independent of landing validity.</summary>
+        public RaycastHit? ArcHit { get; private set; }
+        public Vector3 ArcEnd => drawn == 0 ? default : arc[drawn - 1];
 
         public void Cast(Vector3 origin, Vector3 normalizedDir, XRRayInteractor controllerRay, string teleportLayerName,
-            float? launchSpeed = null)
+            float? launchSpeed = null, Transform ignoreRig = null)
         {
             CastWithMask(origin, normalizedDir, controllerRay,
-                string.IsNullOrEmpty(teleportLayerName) ? 0 : InteractionLayerMask.GetMask(teleportLayerName), launchSpeed);
+                string.IsNullOrEmpty(teleportLayerName) ? 0 : InteractionLayerMask.GetMask(teleportLayerName), launchSpeed, ignoreRig);
         }
 
         /// <summary>Casts using a numeric XRI interaction mask, without looking up layer names.</summary>
         public void CastWithMask(Vector3 origin, Vector3 normalizedDir, XRRayInteractor controllerRay,
-            InteractionLayerMask interactionMask, float? launchSpeed = null)
+            InteractionLayerMask interactionMask, float? launchSpeed = null, Transform ignoreRig = null)
         {
-            var speed = launchSpeed ?? (controllerRay ? controllerRay.velocity : 10f);
-            var gravity = controllerRay ? controllerRay.acceleration : 9.8f;
+            var speed = launchSpeed ?? (controllerRay ? controllerRay.velocity : DefaultLaunchSpeed);
+            var gravity = controllerRay ? controllerRay.acceleration : DefaultGravity;
             var mask = controllerRay ? (int)controllerRay.raycastMask : Physics.DefaultRaycastLayers;
             var triggers = controllerRay ? controllerRay.raycastTriggerInteraction : QueryTriggerInteraction.Ignore;
             teleportMask = interactionMask;
             TeleportArc.Sample(origin, normalizedDir, speed, gravity, arc);
             HasTarget = false;
+            ArcHit = null;
             landingArea = null;
             drawn = arc.Length;
             for (var i = 1; i < arc.Length; i++)
             {
                 var from = arc[i - 1];
                 var step = arc[i] - from;
-                var physicsHit = Physics.Raycast(from, step, out var hit, step.magnitude, mask, triggers);
+                var physicsHit = TeleportRaycast.Cast(from, step, step.magnitude, mask, triggers, ignoreRig, out var hit);
                 if (IntersectBlockers(from, physicsHit ? hit.point : arc[i], out var blockerHit))
                 {
                     arc[i] = blockerHit;
@@ -60,6 +68,7 @@ namespace YetiKit.Hands
                     break;
                 }
                 if (!physicsHit) continue;
+                ArcHit = hit;
                 arc[i] = hit.point;
                 drawn = i + 1;
                 var area = hit.collider.GetComponentInParent<BaseTeleportationInteractable>();
@@ -82,7 +91,7 @@ namespace YetiKit.Hands
         {
             var collider = hit.collider;
             // The request uses the hit point, not an anchor's independently authored pose.
-            return area is TeleportationArea && area && area.isActiveAndEnabled && (area.interactionLayers & teleportMask) != 0
+            return area && (AllowAnchorSurfaces || area is TeleportationArea) && area.isActiveAndEnabled && (area.interactionLayers & teleportMask) != 0
                 && collider && collider.enabled && collider.gameObject.activeInHierarchy && hit.normal.y >= MinUp
                 && !HandUiGuard.Near(hit.point, UiReach) && (LandingAllowed?.Invoke(hit) ?? true);
         }
@@ -95,7 +104,7 @@ namespace YetiKit.Hands
             return true;
         }
 
-        /// <summary>Checks current UI and policies without recasting physics or changing the frozen arc or request.
+        /// <summary>Checks current UI and policies without resampling the frozen arc or changing its request.
         /// A rejected target stays invalid until the next cast.</summary>
         public bool Revalidate()
         {
@@ -106,9 +115,10 @@ namespace YetiKit.Hands
             return true;
         }
 
-        public void Show(bool on, LineRenderer line, Gradient validColor, Gradient invalidColor, GameObject reticle, Transform head)
+        public void Show(bool on, LineRenderer line, Gradient validColor, Gradient invalidColor, GameObject reticle, Transform head,
+            bool highlight = true)
         {
-            ShowReticle(on && HasTarget, reticle, head);
+            ShowReticle(on && HasTarget && highlight, reticle, head);
             if (!line) return;
             if (line.enabled != on) line.enabled = on;
             if (!on) return;
