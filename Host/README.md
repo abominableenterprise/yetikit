@@ -48,6 +48,8 @@ once to the checkout's local Git exclude file (`git rev-parse --git-path info/ex
 /Host/Assets/Starter.meta
 /Host/Assets/StarterTests/
 /Host/Assets/StarterTests.meta
+/Host/Assets/Samples/
+/Host/Assets/Samples.meta
 ```
 
 From the repository root:
@@ -68,7 +70,7 @@ check the sandbox's runtime bindings, drive the kit grab/release through XRI,
 and verify one accepted hit per throw using synthetic contacts. A separate
 physics throw verifies that a real collision starts the preloaded target cue
 and checks its rolloff across the room. The integration also checks serialized
-rig wiring, controller/hand transitions, teleport landing rules and snap turn
+rig wiring, imported Starter Assets controller animation, controller/hand transitions, teleport landing rules and snap turn
 using synthetic input and the real scene’s locomotion providers. It checks that
 the saved scene has no dev references, drives the desktop Lab
 controls, and reloads the scene to verify local tuning and reset. A wrist fixture
@@ -89,7 +91,8 @@ interrupted test), close the Host editor and run this from the repository root:
 
 ```sh
 rm -rf -- Host/Assets/Starter Host/Assets/Starter.meta \
-  Host/Assets/StarterTests Host/Assets/StarterTests.meta
+  Host/Assets/StarterTests Host/Assets/StarterTests.meta \
+  Host/Assets/Samples Host/Assets/Samples.meta
 ```
 
 Staging refuses to overwrite these paths. Clean and stage again after changes to

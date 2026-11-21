@@ -8,11 +8,16 @@ namespace Game.Starter.Editor
     sealed class SandboxRigVisuals
     {
         readonly Mesh controllerMesh, jointMesh;
+        readonly GameObject leftController, rightController;
         readonly Material controllerMaterial, handMaterial;
 
-        public SandboxRigVisuals(string output, Material controllerMaterial, Material handMaterial)
+        public SandboxRigVisuals(string output, Material handMaterial, Material controllerMaterial,
+            GameObject leftController, GameObject rightController)
         {
-            controllerMesh = SavePrimitive(PrimitiveType.Capsule, output + "/Controller Mesh.asset");
+            this.leftController = leftController;
+            this.rightController = rightController;
+            if (controllerMaterial)
+                controllerMesh = SavePrimitive(PrimitiveType.Capsule, output + "/Controller Mesh.asset");
             jointMesh = SavePrimitive(PrimitiveType.Sphere, output + "/Hand Joint Mesh.asset");
             this.controllerMaterial = controllerMaterial;
             this.handMaterial = handMaterial;
@@ -20,12 +25,7 @@ namespace Game.Starter.Editor
 
         public void Build(PlayerHand hand)
         {
-            // The controller root is already gated by ControllerTracking, not by grab or ray state.
-            var controller = Child(hand.controller, "Controller Visual");
-            var grip = Model(controller, "Grip", controllerMesh, controllerMaterial);
-            grip.SetLocalPositionAndRotation(new Vector3(0f, -0.015f, -0.028f), Quaternion.Euler(55f, 0f, 0f));
-            grip.localScale = new Vector3(0.043f, 0.055f, 0.043f);
-
+            BuildController(hand);
             var model = Child(hand.transform, "Hand Visual");
             model.gameObject.SetActive(false);
             var joints = new Transform[XrHandTracking.AllJoints];
@@ -40,6 +40,24 @@ namespace Game.Starter.Editor
             using var serialized = new SerializedObject(hand);
             serialized.FindProperty("visual").objectReferenceValue = visual;
             serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        void BuildController(PlayerHand hand)
+        {
+            // The controller root is already gated by ControllerTracking, not by grab or ray state.
+            var prefab = hand.RightHand ? rightController : leftController;
+            if (prefab)
+            {
+                var visual = (GameObject)PrefabUtility.InstantiatePrefab(prefab, hand.controller);
+                visual.name = "Controller Visual";
+                PrefabUtility.RecordPrefabInstancePropertyModifications(visual);
+                return;
+            }
+
+            var controller = Child(hand.controller, "Controller Visual");
+            var grip = Model(controller, "Grip", controllerMesh, controllerMaterial);
+            grip.SetLocalPositionAndRotation(new Vector3(0f, -0.015f, -0.028f), Quaternion.Euler(55f, 0f, 0f));
+            grip.localScale = new Vector3(0.043f, 0.055f, 0.043f);
         }
 
         static Transform Child(Transform parent, string name)

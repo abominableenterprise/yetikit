@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Callbacks;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -15,23 +16,57 @@ namespace Game.Starter.Editor
         const float RoomSize = 6f, StandHeight = 0.8f, BallDiameter = 0.24f;
         static readonly Vector3 HandleCenter = new(0, 0.095f, 0);
 
+        const string ImportPending = "Game.Starter.SandboxBuilder.ImportPending";
+
         [MenuItem("Game/Build Starter Sandbox")]
-        static void BuildFromMenu()
+        static void BuildFromMenu() => BuildFromMenu(false);
+
+        [MenuItem("Game/Build Starter Sandbox (Placeholder Controllers)")]
+        static void BuildWithPlaceholders() => BuildFromMenu(true);
+
+        static void BuildFromMenu(bool usePlaceholderControllers)
         {
             var output = StarterFolder + "/Sandbox";
-            var path = AssetDatabase.IsValidFolder(output) ? output + "/Sandbox.unity" : Build(output);
+            var path = output + "/Sandbox.unity";
+            if (!AssetDatabase.IsValidFolder(output))
+            {
+                if (SessionState.GetBool(ImportPending, false)) return;
+                AssertScenesSaved();
+                if (!usePlaceholderControllers)
+                {
+                    SessionState.SetBool(ImportPending, true);
+                    try { if (StarterControllerSample.Import()) return; }
+                    catch { SessionState.EraseBool(ImportPending); throw; }
+                    SessionState.EraseBool(ImportPending);
+                }
+                path = Build(output, usePlaceholderControllers);
+            }
             if (!AssetDatabase.LoadAssetAtPath<SceneAsset>(path))
                 throw new InvalidOperationException("Remove or rename the incomplete Sandbox folder before building.");
             EditorGUIUtility.PingObject(AssetDatabase.LoadAssetAtPath<SceneAsset>(path));
         }
 
-        // Bake game-owned prefabs and scene into a fresh folder, leaving the caller's scenes open.
-        public static string Build(string output)
+        [DidReloadScripts]
+        static void ResumeAfterImport()
         {
-            var prior = SceneManager.GetActiveScene();
+            if (!SessionState.GetBool(ImportPending, false)) return;
+            SessionState.EraseBool(ImportPending);
+            EditorApplication.delayCall += BuildFromMenu;
+        }
+
+        static void AssertScenesSaved()
+        {
             for (var i = 0; i < SceneManager.sceneCount; i++)
                 if (SceneManager.GetSceneAt(i).isLoaded && string.IsNullOrEmpty(SceneManager.GetSceneAt(i).path))
                     throw new InvalidOperationException("Save or close untitled scenes before building the sandbox.");
+        }
+
+        // Scripted bakes must import and compile the sample before calling Build.
+        public static string Build(string output, bool usePlaceholderControllers = false)
+        {
+            AssertScenesSaved();
+            var prior = SceneManager.GetActiveScene();
+            var controllers = usePlaceholderControllers ? default : StarterControllerSample.Load();
             var clip = AssetDatabase.LoadAssetAtPath<AudioClip>(StarterFolder + "/Impact.wav");
             if (!clip) throw new InvalidOperationException("The generated impact clip is missing.");
             var parent = Path.GetDirectoryName(output)?.Replace('\\', '/');
@@ -76,9 +111,13 @@ namespace Game.Starter.Editor
                 var pads = Material(output, "Pads", new Color(0.12f, 0.65f, 0.72f));
                 var arc = new Material(Shader.Find("Sprites/Default"));
                 AssetDatabase.CreateAsset(arc, output + "/Aim.mat");
-                var controllerMaterial = Material(output, "Controller", new Color(0.14f, 0.46f, 0.86f));
                 var jointMaterial = Material(output, "Hand Joints", new Color(0.21f, 0.86f, 0.61f));
-                SandboxRigBuilder.Build(manager, pads, arc, new SandboxRigVisuals(output, controllerMaterial, jointMaterial));
+                var controllerMaterial = usePlaceholderControllers
+                    ? Material(output, "Controller", new Color(0.14f, 0.46f, 0.86f)) : null;
+                if (usePlaceholderControllers)
+                    Debug.LogWarning("Starter sandbox is using placeholder controllers instead of XR Interaction Toolkit Starter Assets.");
+                var visuals = new SandboxRigVisuals(output, jointMaterial, controllerMaterial, controllers.left, controllers.right);
+                SandboxRigBuilder.Build(manager, pads, arc, visuals, controllers.actions);
                 BuildLight();
                 var path = output + "/Sandbox.unity";
                 if (!EditorSceneManager.SaveScene(scene, path)) throw new IOException("Could not save sandbox scene.");

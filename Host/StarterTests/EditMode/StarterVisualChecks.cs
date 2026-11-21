@@ -23,18 +23,32 @@ namespace YetiKit.Starter.HostTests
                 Assert.That(joints.activeSelf, Is.False, "No joint poses are available in the saved scene.");
                 Assert.That(joints.transform.childCount, Is.EqualTo(XrHandTracking.AllJoints));
                 Assert.That(hand.Visual, Is.Not.Null, "The saved rig must wire the pose callbacks.");
-                foreach (var group in new[] { controller, joints })
+                const string sample = @"^Assets/Samples/XR Interaction Toolkit/[^/]+/Starter Assets/";
+                var side = hand.RightHand ? "Right" : "Left";
+                Assert.That(PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(controller),
+                    Does.Match(sample + $"Prefabs/Controllers/XR Controller {side}\\.prefab$"));
+                var meshes = controller.GetComponentsInChildren<MeshFilter>(true);
+                Assert.That(meshes, Is.Not.Empty, side);
+                foreach (var mesh in meshes)
+                    Assert.That(AssetDatabase.GetAssetPath(mesh.sharedMesh), Does.Match(sample + @"Models/UniversalController\.fbx$"));
+                var materials = controller.GetComponentsInChildren<MeshRenderer>(true)
+                    .SelectMany(renderer => renderer.sharedMaterials).Select(AssetDatabase.GetAssetPath).Distinct();
+                Assert.That(materials, Has.Some.Matches<string>(path => path.EndsWith("/Materials/Controller_White.mat")));
+                Assert.That(materials, Has.Some.Matches<string>(path => path.EndsWith("/Materials/Controller_Grey.mat")));
+                var animator = controller.GetComponentsInChildren<MonoBehaviour>(true)
+                    .SingleOrDefault(component => component && component.GetType().Name == "ControllerAnimator");
+                Assert.That(animator, Is.Not.Null, side);
+                Assert.That(animator.enabled, Is.True, side);
+                Assert.That(AssetDatabase.GetAssetPath(MonoScript.FromMonoBehaviour(animator)),
+                    Does.Match(sample + @"Scripts/ControllerAnimator\.cs$"));
+                Assert.That(controller.GetComponentsInChildren<Collider>(true), Is.Empty);
+                Assert.That(joints.GetComponentsInChildren<Collider>(true), Is.Empty);
+                foreach (var mesh in joints.GetComponentsInChildren<MeshFilter>(true))
                 {
-                    var meshes = group.GetComponentsInChildren<MeshFilter>(true);
-                    Assert.That(meshes, Is.Not.Empty);
-                    Assert.That(group.GetComponentsInChildren<Collider>(true), Is.Empty);
-                    foreach (var mesh in meshes)
-                    {
-                        Assert.That(AssetDatabase.GetAssetPath(mesh.sharedMesh), Does.StartWith(output + "/"));
-                        var renderer = ComponentOn<MeshRenderer>(mesh.gameObject);
-                        Assert.That(renderer.enabled, Is.True);
-                        Assert.That(AssetDatabase.GetAssetPath(renderer.sharedMaterial), Does.StartWith(output + "/"));
-                    }
+                    Assert.That(AssetDatabase.GetAssetPath(mesh.sharedMesh), Does.StartWith(output + "/"));
+                    var renderer = ComponentOn<MeshRenderer>(mesh.gameObject);
+                    Assert.That(renderer.enabled, Is.True);
+                    Assert.That(AssetDatabase.GetAssetPath(renderer.sharedMaterial), Does.StartWith(output + "/"));
                 }
             }
         }
@@ -60,11 +74,23 @@ namespace YetiKit.Starter.HostTests
                 AssertJointPoses(left, tracking);
 
                 tracking.Right = true;
-                SetController(leftDevice, new Vector3(-0.3f, 1.2f, 0.4f), Quaternion.identity);
+                var leftPose = new Vector3(-0.3f, 1.2f, 0.4f);
+                SetController(leftDevice, leftPose, Quaternion.identity);
                 yield return Frames(3);
                 AssertVisible(left, true, false);
                 AssertVisible(right, false, true);
                 AssertJointPoses(right, tracking);
+
+                var parts = Visual(left.controller, "Controller Visual").GetComponentsInChildren<Transform>();
+                var stick = parts.Single(part => part.name == "ThumbStick");
+                var trigger = parts.Single(part => part.name == "Trigger");
+                var grip = parts.Single(part => part.name == "Bumper");
+                var gripRest = grip.localPosition.x;
+                SetController(leftDevice, leftPose, Quaternion.identity, trigger: true, stick: Vector2.up, grip: true);
+                yield return Frames(3);
+                Assert.That(Quaternion.Angle(stick.localRotation, Quaternion.Euler(-30f, 0f, 0f)), Is.LessThan(0.1f));
+                Assert.That(Quaternion.Angle(trigger.localRotation, Quaternion.Euler(-15f, 0f, 0f)), Is.LessThan(0.1f));
+                Assert.That(Mathf.Abs(grip.localPosition.x - gripRest), Is.GreaterThan(0.001f));
 
                 tracking.Offset = 0.1f;
                 SetController(leftDevice, Vector3.zero, Quaternion.identity, tracked: false);
