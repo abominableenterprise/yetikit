@@ -1,10 +1,12 @@
 using System;
 using System.Collections;
+using System.IO;
 using System.Linq;
 using Game.Starter;
 using Game.Starter.Editor;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEditor.PackageManager.UI;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -22,6 +24,12 @@ namespace YetiKit.Starter.HostTests
         const string OutputParent = "Assets/StarterTests";
         static readonly string[] PropNames = { "Ball", "Offset Grip" };
         static readonly string[] TargetNames = { "Target 1", "Target 2", "Target 3" };
+
+        [UnitySetUp]
+        public IEnumerator ImportControllerSample()
+        {
+            if (StarterControllerSample.Import()) yield return new RecompileScripts();
+        }
 
         [UnityTest]
         public IEnumerator GeneratedSandboxPersistsAndSupportsGrabRelease()
@@ -73,11 +81,37 @@ namespace YetiKit.Starter.HostTests
         }
 
         [Test]
-        public void BakedRigHasGameOwnedVisuals()
+        public void BakedRigUsesStarterAssetsControllersAndGameOwnedHands()
         {
             var output = PrepareBake();
             var path = SandboxBuilder.Build(output);
             StarterVisualChecks.AssertSaved(EditorSceneManager.OpenScene(path, OpenSceneMode.Single), output);
+        }
+
+        [Test]
+        public void IncompleteControllerSampleFailsUnlessPlaceholdersAreRequested()
+        {
+            var output = PrepareBake();
+            var sample = Sample.FindByPackage("com.unity.xr.interaction.toolkit", null)
+                .Single(item => item.displayName == "Starter Assets");
+            var prefab = Path.Combine(sample.importPath, "Prefabs/Controllers/XR Controller Right.prefab");
+            var backup = prefab + ".backup~";
+            File.Move(prefab, backup);
+            try
+            {
+                var importError = Assert.Throws<InvalidOperationException>(() => StarterControllerSample.Import());
+                StringAssert.Contains("Game > Build Starter Sandbox", importError.Message);
+                var bakeError = Assert.Throws<InvalidOperationException>(() => SandboxBuilder.Build(output));
+                Assert.That(bakeError.Message, Is.EqualTo(importError.Message).And.Contains("Starter Assets"));
+                Assert.That(AssetDatabase.IsValidFolder(output), Is.False);
+            }
+            finally { File.Move(backup, prefab); }
+
+            LogAssert.Expect(LogType.Warning,
+                "Starter sandbox is using placeholder controllers instead of XR Interaction Toolkit Starter Assets.");
+            var path = SandboxBuilder.Build(output, usePlaceholderControllers: true);
+            Assert.That(AssetDatabase.LoadAssetAtPath<Mesh>(output + "/Controller Mesh.asset"), Is.Not.Null);
+            Assert.That(AssetDatabase.LoadAssetAtPath<SceneAsset>(path), Is.Not.Null);
         }
 
         [UnityTest]

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.IO;
 using System.Linq;
 using Game.Starter.Editor;
@@ -8,6 +9,7 @@ using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.TestTools;
 using YetiKit.Quality.Editor;
 
 namespace YetiKit.Starter.HostTests
@@ -32,13 +34,14 @@ namespace YetiKit.Starter.HostTests
             finally { BuildAuditHook.Disable(); }
         }
 
-        [Test]
-        public void DesktopPlayersKeepDevControlsOnlyInDevelopment()
+        [UnityTest]
+        public IEnumerator DesktopPlayersKeepDevControlsOnlyInDevelopment()
         {
             const BuildTarget target = BuildTarget.StandaloneLinux64;
             if (EditorUserBuildSettings.activeBuildTarget != target)
                 Assert.Ignore("Run in the Linux desktop Host.");
             Assert.That(BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Standalone, target), Is.True);
+            if (StarterControllerSample.Import()) yield return new RecompileScripts();
 
             var assetRoot = "Assets/StarterTests/PlayerBuild-" + Guid.NewGuid().ToString("N");
             var output = Path.GetFullPath(Path.Combine("build", Path.GetFileName(assetRoot)));

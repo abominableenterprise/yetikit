@@ -219,6 +219,8 @@ namespace YetiKit.Starter.HostTests
                 ""controls"": [
                     {""name"": ""gripButton"", ""layout"": ""Button"", ""usage"": ""GripButton""},
                     {""name"": ""triggerButton"", ""layout"": ""Button"", ""usage"": ""TriggerButton""},
+                    {""name"": ""grip"", ""layout"": ""Axis"", ""usage"": ""Grip""},
+                    {""name"": ""trigger"", ""layout"": ""Axis"", ""usage"": ""Trigger""},
                     {""name"": ""stick"", ""layout"": ""Vector2"", ""usage"": ""Primary2DAxis""}
                 ]
             }");
@@ -239,6 +241,10 @@ namespace YetiKit.Starter.HostTests
                 device.TryGetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("gripButton")
                     ?.WriteValueIntoEvent(grip ? 1f : 0f, state);
                 device.TryGetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("triggerButton")
+                    ?.WriteValueIntoEvent(trigger ? 1f : 0f, state);
+                device.TryGetChildControl<UnityEngine.InputSystem.Controls.AxisControl>("grip")
+                    ?.WriteValueIntoEvent(grip ? 1f : 0f, state);
+                device.TryGetChildControl<UnityEngine.InputSystem.Controls.AxisControl>("trigger")
                     ?.WriteValueIntoEvent(trigger ? 1f : 0f, state);
                 device.TryGetChildControl<UnityEngine.InputSystem.Controls.Vector2Control>("stick")
                     ?.WriteValueIntoEvent(stick, state);
