@@ -403,7 +403,9 @@ for that user.
   `Application.persistentDataPath`. The helper confirms delivery, not that
   the app saved the file. In-app enrollment is **experimental until verified
   on a real headset with a secondary user**. If it fails, switch to the
-  primary profile (user 0) and retry without `--in-app`.
+  primary profile (user 0) and retry without `--in-app`. Use this route only
+  on trusted development devices: the nonce protects the relay from other
+  clients, but does not authenticate the sender of the Android launch intent.
 
 The helper removes the private host copy on exit and never prints the upload
 key. On failure it attempts to remove any staged file or reverse mapping.

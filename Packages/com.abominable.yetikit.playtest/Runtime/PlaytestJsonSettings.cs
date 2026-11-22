@@ -17,17 +17,25 @@ namespace YetiKit.Playtest
         [Serializable] sealed class Raw { public string endpoint, uploadKey, player; }
 
         // On the main thread: external files/playtest/playtest.json, then Android app-private files/playtest.json.
-        public static PlaytestJsonSettings LoadDefault() => LoadPaths(DefaultPaths(),
-#if UNITY_EDITOR
-            Environment.GetEnvironmentVariable
-#else
-            null
+        public static PlaytestJsonSettings LoadDefault()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            PlaytestEnrollmentStartup.TryInstall();
 #endif
-        );
+            return LoadPaths(DefaultPaths(),
+#if UNITY_EDITOR
+                Environment.GetEnvironmentVariable
+#else
+                null
+#endif
+            );
+        }
+
+        internal static string ExternalPath() => Path.Combine(Application.persistentDataPath, "playtest", FileName);
 
         static IEnumerable<string> DefaultPaths()
         {
-            yield return Path.Combine(Application.persistentDataPath, "playtest", FileName);
+            yield return ExternalPath();
 #if UNITY_ANDROID && !UNITY_EDITOR
             string privateDir = null;
             try
@@ -60,6 +68,15 @@ namespace YetiKit.Playtest
             settings.SetCredentials(raw?.endpoint, raw?.uploadKey);
             settings.SetCredentials(editorEnvironment?.Invoke(EnvEndpoint), editorEnvironment?.Invoke(EnvKey));
             return settings;
+        }
+
+        internal static bool IsEnrollmentConfig(string text)
+        {
+            var raw = JsonUtility.FromJson<Raw>(text);
+            if (raw == null) return false;
+            var endpoint = UploadValidation.ParseUrl(raw.endpoint);
+            return endpoint != null && endpoint.Scheme == Uri.UriSchemeHttps && endpoint.AbsolutePath == "/" &&
+                UploadValidation.IsValidKey(raw.uploadKey) && UploadValidation.IsSegment(raw.player);
         }
 
         void SetCredentials(string endpoint, string key)
