@@ -16,6 +16,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - Secondary Android profiles now receive development playtest settings through
   the app instead of requiring adb to write to their app storage
   ([#363](https://github.com/abominableenterprise/yetikit/issues/363)).
+- Linux license activation and return now accept passwords that start with a
+  hyphen ([#365](https://github.com/abominableenterprise/yetikit/issues/365)).
 
 ## [0.3.3] - 2026-11-22
 

@@ -10,16 +10,31 @@ args=(activate); rm -f "$ULF"
 lu USERNAME=hubuser@x.io PASSWORD=hub-secret
 check "only USERNAME/PASSWORD: activate passes need_creds" '[ "$rc" = 0 ] && ! grep -q "set UNITY_USERNAME" "$tmp/log"'
 check "only USERNAME/PASSWORD: the licensing client gets those values" \
-  'grep -qx -- "--activate-ulf --username hubuser@x.io --password hub-secret" "$tmp/lc-calls"'
+  'grep -qx -- "--activate-ulf --username=hubuser@x.io --password=hub-secret" "$tmp/lc-calls"'
 check "only USERNAME/PASSWORD: neither value is printed (the client's echo is masked)" \
   '! leaks && grep -q "<email>" "$tmp/log" && grep -q "<password>" "$tmp/log"'
 args=(return)
 lu USERNAME=hubuser@x.io PASSWORD=hub-secret
 check "only USERNAME/PASSWORD: return passes and returns with them, printing neither" \
-  '[ "$rc" = 0 ] && grep -qx -- "--return-ulf --username hubuser@x.io --password hub-secret" "$tmp/lc-calls" && ! leaks'
+  '[ "$rc" = 0 ] && grep -qx -- "--return-ulf --username=hubuser@x.io --password=hub-secret" "$tmp/lc-calls" && ! leaks'
 check "successful explicit return removes the ULF" '[ ! -e "$ULF" ]'
 lu
 check "return without a ULF skips credentials and the Licensing Client" \
   '[ "$rc" = 0 ] && grep -Fq "return: licence already returned" "$tmp/log" && [ ! -s "$tmp/lc-calls" ]'
+
+for prefix in '-' '--'; do
+  password="${prefix}fake fixture=123"
+  args=(activate); rm -f "$ULF"
+  lu USERNAME=hubuser@x.io PASSWORD="$password"
+  check "activate accepts a password starting with $prefix" '[ "$rc" = 0 ] && [ -s "$ULF" ]'
+  check "activate masks the attached password starting with $prefix" \
+    '! grep -Fq -- "$password" "$tmp/log" && grep -Fq -- "--username=<email> --password=<password>" "$tmp/log"'
+
+  args=(return); good_ulf_now
+  lu USERNAME=hubuser@x.io PASSWORD="$password"
+  check "return accepts a password starting with $prefix" '[ "$rc" = 0 ] && [ ! -e "$ULF" ]'
+  check "return masks the attached password starting with $prefix" \
+    '! grep -Fq -- "$password" "$tmp/log" && grep -Fq -- "--username=<email> --password=<password>" "$tmp/log"'
+done
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

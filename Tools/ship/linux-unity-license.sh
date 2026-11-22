@@ -91,7 +91,8 @@ activate_client() {
   saved="$(trap -p TERM INT HUP)"
   # Isolate the full client tree; $! is the session/group leader (job control is off).
   # Even if the client exits on TERM, its workers remain addressable for escalation.
-  (licensing_close_locks; exec setsid "$LC" --activate-ulf --username "$UNITY_USERNAME" --password "$UNITY_PASSWORD") > "$capture" 2>&1 &
+  # Attach credential values so a leading hyphen cannot be parsed as a new option.
+  (licensing_close_locks; exec setsid "$LC" --activate-ulf --username="$UNITY_USERNAME" --password="$UNITY_PASSWORD") > "$capture" 2>&1 &
   client=$!
   trap 'activation_signal TERM 143' TERM
   trap 'activation_signal INT 130' INT
@@ -180,7 +181,7 @@ cmd_return() {
   (licensing_close_locks; exec timeout -k 5 "$limit" bash -c '
     trap "while :; do /bin/sleep 1; done" TERM
     "$@" & wait $!
-  ' _ "$LC" --return-ulf --username "$UNITY_USERNAME" --password "$UNITY_PASSWORD") > "$capture" 2>&1 || rc=$?
+  ' _ "$LC" --return-ulf --username="$UNITY_USERNAME" --password="$UNITY_PASSWORD") > "$capture" 2>&1 || rc=$?
   out="$(< "$capture")"; rm -f "$capture"
   printf '%s\n' "$out" | mask >&2
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
