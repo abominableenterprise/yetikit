@@ -5,11 +5,13 @@ on:
     paths:
       - 'Tools/ship/**'
       - 'Tools/vendor/**'
+      - 'templates/playtest-worker/**'
       - '.github/workflows/vendor.yml'
   push:
     paths:
       - 'Tools/ship/**'
       - 'Tools/vendor/**'
+      - 'templates/playtest-worker/**'
       - '.github/workflows/vendor.yml'
   workflow_dispatch:
 
@@ -17,6 +19,17 @@ permissions:
   contents: read
 
 jobs:
+  playtest-worker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run offline playtest inbox tests
+        working-directory: templates/playtest-worker
+        run: node --test
   shell-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
