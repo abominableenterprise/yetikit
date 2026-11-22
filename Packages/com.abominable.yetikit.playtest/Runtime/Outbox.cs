@@ -22,6 +22,10 @@ namespace YetiKit.Playtest
             foreach (var dir in Directories())
             {
                 var id = Path.GetFileName(dir);
+#if UNITY_EDITOR || YETIKIT_DEV
+                if (SnapDelivery.IsStaging(id) || (id.EndsWith(Delivered, StringComparison.Ordinal) &&
+                    SnapDelivery.Split(id[..^Delivered.Length], out _, out _))) { DeleteDelivered(dir); continue; }
+#endif
                 if (id.EndsWith(Delivered, StringComparison.Ordinal) && SessionRules.IsId(id[..^Delivered.Length]))
                     DeleteDelivered(dir);
                 else if (SessionRules.IsId(id)) RecoverMarker(dir, id);
@@ -34,6 +38,9 @@ namespace YetiKit.Playtest
             foreach (var dir in Directories().OrderBy(path => path, StringComparer.Ordinal))
             {
                 var id = Path.GetFileName(dir);
+#if UNITY_EDITOR || YETIKIT_DEV
+                if (!File.Exists(Path.Combine(dir, Rejected)) && SnapDelivery.Read(dir) is { } snap) return (dir, snap);
+#endif
                 var markerPath = Path.Combine(dir, DoneMarker.FileName);
                 if (!SessionRules.IsId(id) || !File.Exists(markerPath) || IsLink(markerPath)) continue;
                 var marker = DoneMarker.Parse(File.ReadAllText(markerPath));

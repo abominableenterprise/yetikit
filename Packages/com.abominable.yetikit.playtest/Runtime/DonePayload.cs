@@ -18,6 +18,9 @@ namespace YetiKit.Playtest
             files = names.Select(name => marker.session + "/" + name).ToArray(), context = marker.context ?? new DoneContext()
         };
 
+#if UNITY_EDITOR || YETIKIT_DEV
+        internal string snapJson;
+#endif
         internal string ToJson() => JsonUtility.ToJson(this);
     }
 }

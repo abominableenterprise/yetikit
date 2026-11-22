@@ -19,6 +19,10 @@ namespace YetiKit.Playtest
         bool busy;
         string dir, destination;
         DonePayload manifest;
+#if UNITY_EDITOR || YETIKIT_DEV
+        public SnapOutcome SnapOutcomes { get; set; }
+        void ReportSnap(SnapStatus status) { if (manifest.kind == "snap") SnapOutcomes?.Post((manifest.session, Path.GetExtension(dir)[1..], status)); }
+#endif
 
         internal Uploader(Outbox outbox, IUploadSettings settings, IHttpSender sender, double spacing, Func<double> clock) =>
             (this.outbox, this.settings, this.sender, this.spacing, this.clock) = (outbox, settings, sender, spacing, clock);
@@ -47,13 +51,17 @@ namespace YetiKit.Playtest
                 if (done)
                 {
                     request.Body = manifest.ToJson();
+#if UNITY_EDITOR || YETIKIT_DEV
+                    request.Body = manifest.snapJson ?? request.Body;
+#endif
                     request.Headers["Idempotency-Key"] = manifest.id;
                 }
                 else
                 {
                     var file = Path.GetFileName(manifest.files[index]);
                     request.FilePath = Path.Combine(dir, file);
-                    if (file != FileChunkStore.MetaFile) request.Headers["Content-Type"] = "application/gzip";
+                    request.Headers["Content-Type"] = Path.GetExtension(file) switch
+                    { ".jpg" => "image/jpeg", ".wav" => "audio/wav", ".gz" => "application/gzip", _ => "application/json" };
                 }
                 HttpResponse response;
                 try { response = await sender.SendAsync(request, cancellationToken); }
@@ -63,12 +71,22 @@ namespace YetiKit.Playtest
                 if (response?.StatusCode is 400 or 413 or 415 or 422)
                 {
                     outbox.Reject(dir);
+#if UNITY_EDITOR || YETIKIT_DEV
+                    ReportSnap(SnapStatus.Failed);
+#endif
                     manifest = null;
                     failures = 0;
                     return;
                 }
                 if (response?.Success != true) { Retry(); return; }
-                if (done) { outbox.Complete(dir); manifest = null; }
+                if (done)
+                {
+                    outbox.Complete(dir);
+#if UNITY_EDITOR || YETIKIT_DEV
+                    ReportSnap(SnapStatus.Sent);
+#endif
+                    manifest = null;
+                }
                 else index++;
                 failures = 0;
             }
