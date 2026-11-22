@@ -1,0 +1,10 @@
+{
+  "name": "YetiKit.Playtest.XR",
+  "rootNamespace": "YetiKit.Playtest.XR",
+  "references": ["YetiKit.Playtest", "YetiKit.Hands", "YetiKit.Interaction", "Unity.XR.Hands", "Unity.XR.Interaction.Toolkit"],
+  "defineConstraints": ["UNITY_EDITOR || DEVELOPMENT_BUILD", "UNITY_EDITOR || YETIKIT_DEV", "YETIKIT_XR_HANDS"],
+  "versionDefines": [
+    { "name": "com.unity.xr.hands", "expression": "", "define": "YETIKIT_XR_HANDS" }
+  ],
+  "autoReferenced": false
+}

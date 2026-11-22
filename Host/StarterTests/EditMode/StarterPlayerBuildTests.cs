@@ -18,6 +18,21 @@ namespace YetiKit.Starter.HostTests
     public sealed class StarterPlayerBuildTests
     {
         [Test]
+        public void ReleaseAuditRejectsPlaytestXR()
+        {
+            var hook = new BuildAuditHook();
+            BuildAuditHook.Enable(new BuildAuditRules());
+            try
+            {
+                var assembly = new[] { "Library/PlayerScriptAssemblies/YetiKit.Playtest.XR.dll" };
+                Assert.That(hook.OnFilterAssemblies(BuildOptions.Development, assembly), Is.SameAs(assembly));
+                var error = Assert.Throws<BuildFailedException>(() => hook.OnFilterAssemblies(BuildOptions.None, assembly));
+                Assert.That(error.Message, Is.EqualTo("Forbidden assembly: YetiKit.Playtest.XR"));
+            }
+            finally { BuildAuditHook.Disable(); }
+        }
+
+        [Test]
         public void ReleaseAuditRejectsSyntheticDevControl()
         {
             // Model a release input that leaked the assembly containing the photo and other Lab controls.
@@ -81,7 +96,7 @@ namespace YetiKit.Starter.HostTests
                         var rules = new BuildAuditRules();
                         Assert.That(BuildAudit.Check(report, rules), Is.Empty);
                         Assert.That(BuildAudit.Check(assemblies, Array.Empty<string>(), rules), Is.Empty);
-                        Assert.That(assemblies, Does.Not.Contain("YetiKit.Playtest"));
+                        Assert.That(assemblies.Any(name => name.StartsWith("YetiKit.Playtest", StringComparison.Ordinal)), Is.False);
                     }
                     else
                     {
