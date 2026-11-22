@@ -44,14 +44,19 @@ namespace YetiKit.Hands
 
         /// <summary>Casts using a numeric XRI interaction mask, without looking up layer names.</summary>
         public void CastWithMask(Vector3 origin, Vector3 normalizedDir, XRRayInteractor controllerRay,
-            InteractionLayerMask interactionMask, float? launchSpeed = null, Transform ignoreRig = null)
+            InteractionLayerMask interactionMask, float? launchSpeed = null, Transform ignoreRig = null) =>
+            CastWithMask(origin, normalizedDir, controllerRay, interactionMask, launchSpeed, ignoreRig, null);
+
+        /// <summary>Allows the hand projectile to override gravity while still using the controller's physics filters.</summary>
+        public void CastWithMask(Vector3 origin, Vector3 normalizedDir, XRRayInteractor controllerRay,
+            InteractionLayerMask interactionMask, float? launchSpeed, Transform ignoreRig, float? gravity)
         {
             var speed = launchSpeed ?? (controllerRay ? controllerRay.velocity : DefaultLaunchSpeed);
-            var gravity = controllerRay ? controllerRay.acceleration : DefaultGravity;
+            var acceleration = gravity ?? (controllerRay ? controllerRay.acceleration : DefaultGravity);
             var mask = controllerRay ? (int)controllerRay.raycastMask : Physics.DefaultRaycastLayers;
             var triggers = controllerRay ? controllerRay.raycastTriggerInteraction : QueryTriggerInteraction.Ignore;
             teleportMask = interactionMask;
-            TeleportArc.Sample(origin, normalizedDir, speed, gravity, arc);
+            TeleportArc.Sample(origin, normalizedDir, speed, acceleration, arc);
             HasTarget = false;
             ArcHit = null;
             landingArea = null;

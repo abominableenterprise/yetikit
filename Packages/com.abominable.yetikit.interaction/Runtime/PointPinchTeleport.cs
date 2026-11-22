@@ -17,6 +17,10 @@ namespace YetiKit.Interaction
         public Transform head, rig;
         public TeleportationProvider provider;
         public XRRayInteractor controllerRay;
+        [Tooltip("Inherit launch speed and gravity from the controller ray rather than the hand settings below.")]
+        public bool useControllerArcSettings = true;
+        public float launchSpeed = 5f;
+        public float gravity = TeleportAim.DefaultGravity;
         public LineRenderer line;
         public Gradient validColor, invalidColor;
         public GameObject reticle;
@@ -91,7 +95,8 @@ namespace YetiKit.Interaction
             var origin = (tip + thumb) * 0.5f;
             var direction = Smooth(PointPinchPalm.Direction(head.position, fwd, hand.RightHand, origin), now);
             AimRay = new Ray(origin, direction);
-            Aim.CastWithMask(origin, direction, controllerRay, AimMask, ignoreRig: Rig);
+            Aim.CastWithMask(origin, direction, controllerRay, AimMask,
+                useControllerArcSettings ? null : launchSpeed, Rig, useControllerArcSettings ? null : gravity);
             Aim.HasTarget = Aim.HasTarget && TeleportGround.Matches(Aim.ArcHit.GetValueOrDefault(), Rig);
             var wasPinching = Pinching;
             var result = gesture.Tick(true, false, true, false, gap, Aim.HasTarget, true);
