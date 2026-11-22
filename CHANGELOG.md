@@ -12,13 +12,53 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- Make the generated starter’s target-hit cue easier to hear across the room.
+- None.
 
 ### Behaviour changes
 - None.
 
 ### Adapter changes
 - None.
+
+## [0.2.0] - 2026-11-22
+
+Hands and interaction are now released alongside the development-only playtest
+and lab modules. The new-game starter template generates a game-owned XR sandbox
+with locomotion, local playtest tools and a release build audit.
+
+### Added
+- Release hands, interaction, playtest and lab at the same version as core and
+  quality. Ship the starter with tracked hand and animated controller visuals,
+  Point & Pinch hand teleport, and development-only aim diagnostics.
+- Verify starter package sources before and after import. Document optional
+  headset setup and permission review, and audit generated release players.
+- Ship setup can install a pinned, verified crane binary on Linux x86-64
+  without Go.
+
+### Fixed
+- Restore hand teleport independently of editor-generated layer settings,
+  align controller visuals with the stock rig, and aim controller teleport from
+  the pointer pose. Make the starter's target-hit cue easier to hear, recover
+  interrupted photo pairs, and prevent a deep wrist poke from making two edits.
+- Accept SCP-style SSH package URLs and host-only registry URLs in the starter
+  verifier. Retain nested namespace fixtures in Ship PR test selection, and
+  distinguish changed-test basename filters from Git refs.
+- Preserve release worktrees with symlinked indexes or concurrent index edits,
+  distinguish equal-time release results, and keep headset locks until isolated
+  ADB workers exit.
+- Keep retried performance stops from extending capture windows, and require a
+  fresh capture if the stop guard is inaccessible or the stop reservation cannot
+  be saved.
+
+### Behaviour changes
+- The generated starter uses a separate hand arc trajectory while retaining the
+  controller ray's physics filters. Lab controls stay out of release players.
+
+### Adapter changes
+- Pin each selected kit package and its kit dependency closure to `v0.2.0`.
+  Enable `YETIKIT_DEV` only for development use of playtest and lab. Existing
+  baked starter scenes are not upgraded in place; generate a fresh sandbox to
+  inspect or adopt the updated rig.
 
 ## [0.1.13] - 2026-11-19
 

@@ -14,8 +14,8 @@ import wave
 TEMPLATE = Path(__file__).resolve().parent
 HOST = TEMPLATE.parents[1] / "Host"
 KIT_URL = "https://github.com/abominableenterprise/yetikit.git"
-# Keep all kit modules at one published commit that includes the hand arc overrides.
-KIT_REVISION = "906bd2add9a36fb2ee2d8cad1ffb87b158b15519"
+# Keep all kit modules pinned to the same release tag.
+KIT_REVISION = "v0.2.0"
 PLACEHOLDERS = {"changeme", "default", "placeholder", "replace", "template", "todo", "yourcompany", "yourgame"}
 
 
