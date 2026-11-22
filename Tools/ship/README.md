@@ -386,13 +386,17 @@ Use the HTTPS origin of the [playtest inbox Worker](../../templates/playtest-wor
 The code file must be readable only by its owner (`chmod 600`); put the code on
 its first line. `--player` defaults to `test-device`; give each headset its own
 tag if you use per-player tuning. Keep the code file out of the checkout.
-Enrollment supports only the primary Android user (user 0). Switch to that
-user before running the helper. Before exchanging the code, the helper checks
-that user 0 is active and that the configured app is installed for that user.
-It stages the configuration in the app's external `files/playtest` directory,
-then replaces `playtest.json` only after the transfer succeeds. On failure it
-attempts to remove the staged file. The upload key is not printed, and the
-private host copy is removed after installation or on failure.
+Enrollment defaults to the foreground Android user. Use `--user N` to require
+that a specific user is in the foreground. Secondary-user support is
+**experimental (mock-tested; not yet verified on a headset)**. If enrollment
+fails on a secondary profile, switch to the primary profile (user 0) and retry.
+Before exchanging the code, the helper checks that the configured app is
+installed for the selected user. Keep that profile unlocked and in the
+foreground so its app storage is mounted. The helper stages the configuration
+in the app's external `files/playtest` directory, then replaces `playtest.json`
+only after the transfer succeeds and it re-checks the foreground user. On
+failure it attempts to remove the staged file. The upload key is not printed,
+and the private host copy is removed after installation or on failure.
 
 Omit `--launch` to install the file without launching the app. For launch
 verification, start with the app stopped. The development app must log

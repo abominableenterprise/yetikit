@@ -8,6 +8,11 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+### Added
+- Let `playtest-enroll.sh` target the foreground Android user, with an optional
+  `--user N` check. Secondary-user enrollment is experimental (mock-tested;
+  not yet verified on a headset) ([#360](https://github.com/abominableenterprise/yetikit/issues/360)).
+
 ## [0.3.2] - 2026-11-22
 
 Playtest snaps can capture the frame before recording a voice note. This patch

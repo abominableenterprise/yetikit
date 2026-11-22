@@ -5,18 +5,22 @@ set -euo pipefail
 
 fail() { printf '[playtest-enroll] %s\n' "$1" >&2; exit 1; }
 usage() {
-  printf 'Usage: playtest-enroll.sh --endpoint <Worker HTTPS origin> --code <private file> [--player <tag>] [--launch]\n'
+  printf 'Usage: playtest-enroll.sh --endpoint <Worker HTTPS origin> --code <private file> [--player <tag>] [--user N] [--launch]\n'
+  printf '%s\n' 'Targets the foreground Android user. Secondary profiles are experimental; switch to the primary profile (user 0) if enrollment fails.'
 }
 
-endpoint='' code_file='' player=test-device launch=0
+endpoint='' code_file='' player=test-device launch=0 requested_user=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --endpoint|--code|--player)
+    --endpoint|--code|--player|--user)
       [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 requires a value"
       case "$1" in
         --endpoint) endpoint="$2" ;;
         --code) code_file="$2" ;;
         --player) player="$2" ;;
+        --user)
+          [[ "$2" =~ ^0*([0-9]+)$ ]] || fail '--user must be a numeric Android user ID'
+          requested_user="${BASH_REMATCH[1]}" ;;
       esac
       shift ;;
     --launch) launch=1 ;;
@@ -51,11 +55,17 @@ fi
 serial_pattern='^[][A-Za-z0-9_.:-]+$'
 [[ "$serial" =~ $serial_pattern && "$serial" != unknown ]] || fail 'expected one adb device serial'
 device=(adb -s "$serial")
-user="$("${device[@]}" shell am get-current-user 2>/dev/null)" || fail 'could not determine the current Android user'
-user="${user%$'\r'}"
-[[ "$user" =~ ^[0-9]+$ ]] || fail 'could not determine the current Android user'
-[[ "$user" == 0 ]] || fail 'enrollment only supports the primary Android user (0); switch to it and retry'
-installed="$("${device[@]}" shell cmd package path --user 0 "$package" 2>/dev/null)" \
+foreground_user() {
+  local current
+  current="$("${device[@]}" shell am get-current-user 2>/dev/null)" || return 1
+  current="${current%$'\r'}"
+  [[ "$current" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$current"
+}
+user="$(foreground_user)" || fail 'could not determine the current Android user'
+[[ -z "$requested_user" || "$requested_user" == "$user" ]] \
+  || fail '--user must be the foreground Android user so its app storage is mounted; switch to that profile and unlock it, then retry'
+installed="$("${device[@]}" shell cmd package path --user "$user" "$package" 2>/dev/null)" \
   || fail 'could not verify that the configured applicationId (quest.package) is installed on the selected device'
 [[ "$installed" == package:/* ]] || fail 'configured applicationId (quest.package) is not installed on the selected device'
 
@@ -104,11 +114,14 @@ if ! jq -es --arg player "$player" --arg origin "\A$origin\z" '
 fi
 rm -f -- "$tmp/response"
 
-# Pin storage to user 0 too, even if the foreground user changes after preflight.
-remote="/storage/emulated/0/Android/data/$package/files/playtest"
-"${device[@]}" shell mkdir -p "$remote" >/dev/null 2>&1 || fail 'adb could not create the playtest directory'
+# Pin storage to the preflight user and verify it is still active before publishing.
+remote="/storage/emulated/$user/Android/data/$package/files/playtest"
+storage_hint='make sure the selected profile is unlocked and in the foreground, or switch to the primary profile (user 0) and retry'
+"${device[@]}" shell mkdir -p "$remote" >/dev/null 2>&1 || fail "adb could not create the playtest directory; $storage_hint"
 remote_stage="$remote/.${tmp##*/}"
-"${device[@]}" push "$tmp/playtest.json" "$remote_stage" >/dev/null 2>&1 || fail 'adb push failed; check device connectivity and app storage access'
+"${device[@]}" push "$tmp/playtest.json" "$remote_stage" >/dev/null 2>&1 || fail "adb push failed; check device connectivity and $storage_hint"
+current="$(foreground_user)" || fail 'could not re-check the foreground Android user; retry with the intended profile active'
+[[ "$current" == "$user" ]] || fail 'the foreground Android user changed during enrollment; switch back to the intended profile and retry'
 "${device[@]}" shell mv -fT "$remote_stage" "$remote/playtest.json" >/dev/null 2>&1 || fail 'adb could not replace the playtest configuration'
 remote_stage=''
 rm -f -- "$tmp/playtest.json"
@@ -119,11 +132,15 @@ if [[ "$launch" == 1 ]]; then
   since="$("${device[@]}" shell date +%s.%N 2>/dev/null)" || fail 'could not read the device clock'
   [[ "$since" =~ ^([0-9]+\.[0-9]{3})[0-9]*$ ]] || fail 'unexpected device clock format'
   since="${BASH_REMATCH[1]}"
-  started="$("${device[@]}" shell am start --user 0 -W -a android.intent.action.MAIN \
+  started="$("${device[@]}" shell am start --user "$user" -W -a android.intent.action.MAIN \
     -c android.intent.category.LAUNCHER -p "$package" 2>/dev/null)" || fail 'could not launch the configured app'
   [[ "$started" == *'Status: ok'* ]] || fail 'Android did not confirm launch of the configured app'
   for ((attempt = 0; attempt < 10; attempt++)); do
-    if pid="$("${device[@]}" shell pidof -s "$package" 2>/dev/null)" && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    # Android encodes the user in the UID (PER_USER_RANGE = 100000).
+    # pidof has no user filter and could find the same app in another profile.
+    if pid="$("${device[@]}" shell ps -A -o UID,PID,NAME 2>/dev/null | awk -v user="$user" -v package="$package" '
+      !found && $1 ~ /^[0-9]+$/ && int($1 / 100000) == user && $3 == package { print $2; found = 1 }
+    ')" && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
       # Drain the snapshot rather than closing the pipe early under pipefail.
       if "${device[@]}" logcat -d -T "$since" "--pid=$pid" -v raw -s Unity:V 2>/dev/null \
         | grep -E '^Playtest recorder on([[:space:][:punct:]]|$)' >/dev/null; then
