@@ -1,0 +1,76 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using UnityEngine;
+
+namespace YetiKit.Playtest
+{
+    public sealed class PlaytestJsonSettings : IUploadSettings
+    {
+        public const string FileName = "playtest.json";
+        public const string EnvEndpoint = "YETIKIT_PLAYTEST_ENDPOINT", EnvKey = "YETIKIT_PLAYTEST_KEY", EnvPlayer = "YETIKIT_PLAYTEST_PLAYER";
+        public const string DefaultPlayer = "unknown";
+
+        public string Endpoint { get; private set; }
+        public string UploadKey { get; private set; }
+        public string PlayerTag { get; private set; } = DefaultPlayer;
+        public bool Enabled => Endpoint != null && UploadKey != null;
+
+        [Serializable] sealed class Raw { public string endpoint, uploadKey, player; }
+
+        // On the main thread: external files/playtest/playtest.json, then Android app-private files/playtest.json.
+        public static PlaytestJsonSettings LoadDefault() => LoadPaths(DefaultPaths(),
+#if UNITY_EDITOR
+            Environment.GetEnvironmentVariable
+#else
+            null
+#endif
+        );
+
+        static IEnumerable<string> DefaultPaths()
+        {
+            yield return Path.Combine(Application.persistentDataPath, "playtest", FileName);
+#if UNITY_ANDROID && !UNITY_EDITOR
+            string privateDir = null;
+            try
+            {
+                using var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                using var activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+                using var files = activity?.Call<AndroidJavaObject>("getFilesDir");
+                privateDir = files?.Call<string>("getAbsolutePath");
+            }
+            catch (AndroidJavaException) { }
+            if (!string.IsNullOrEmpty(privateDir)) yield return Path.Combine(privateDir, FileName);
+#endif
+        }
+
+        internal static PlaytestJsonSettings LoadPaths(IEnumerable<string> paths, Func<string, string> editorEnvironment = null)
+        {
+            Raw raw = null;
+            foreach (var path in paths)
+            {
+                string text;
+                try { text = File.ReadAllText(path); }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { continue; }
+                try { raw = JsonUtility.FromJson<Raw>(text); }
+                catch (ArgumentException) { }
+                break; // Readable wins, even if empty or invalid.
+            }
+            var player = editorEnvironment?.Invoke(EnvPlayer)?.Trim();
+            if (string.IsNullOrEmpty(player)) player = raw?.player?.Trim();
+            var settings = new PlaytestJsonSettings { PlayerTag = string.IsNullOrEmpty(player) ? DefaultPlayer : player };
+            settings.SetCredentials(raw?.endpoint, raw?.uploadKey);
+            settings.SetCredentials(editorEnvironment?.Invoke(EnvEndpoint), editorEnvironment?.Invoke(EnvKey));
+            return settings;
+        }
+
+        void SetCredentials(string endpoint, string key)
+        {
+            endpoint = UploadValidation.NormalizeEndpoint(endpoint);
+            key = key?.Trim();
+            if (endpoint == null || !UploadValidation.IsValidKey(key)) return;
+            Endpoint = endpoint;
+            UploadKey = key;
+        }
+    }
+}

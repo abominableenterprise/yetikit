@@ -51,7 +51,8 @@
       "source": "local",
       "dependencies": {
         "com.abominable.yetikit.core": "0.2.0",
-        "com.unity.modules.jsonserialize": "1.0.0"
+        "com.unity.modules.jsonserialize": "1.0.0",
+        "com.unity.modules.unitywebrequest": "1.0.0"
       }
     },
     "com.abominable.yetikit.quality": {
@@ -285,6 +286,12 @@
         "com.unity.modules.physics": "1.0.0",
         "com.unity.modules.animation": "1.0.0"
       }
+    },
+    "com.unity.modules.unitywebrequest": {
+      "version": "1.0.0",
+      "depth": 1,
+      "source": "builtin",
+      "dependencies": {}
     },
     "com.unity.modules.xr": {
       "version": "1.0.0",

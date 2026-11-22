@@ -160,10 +160,11 @@ namespace YetiKit.Playtest
         /// <summary>At startup, publish whole gzip temps and remove torn or redundant gzip temps, even in finished sessions.</summary>
         public void RecoverChunks()
         {
-            if (!Directory.Exists(Outbox)) return;
+            if (!Directory.Exists(Outbox) || IsLink(Outbox)) return;
             foreach (var dir in Directory.GetDirectories(Outbox))
             {
-                if (!SessionRules.IsId(Path.GetFileName(dir)) || !ReconcileMetadata(dir)) continue;
+                if (!SessionRules.IsId(Path.GetFileName(dir)) || IsLink(dir) ||
+                    Array.Exists(Directory.GetFileSystemEntries(dir), IsLink) || !ReconcileMetadata(dir)) continue;
                 if (!RecoverRollbacks(dir)) continue;
                 var journals = Directory.GetFiles(dir, "*" + ChunkJournal.Suffix);
                 Array.Sort(journals, (a, b) => JournalIndex(a).CompareTo(JournalIndex(b)));
@@ -206,6 +207,8 @@ namespace YetiKit.Playtest
             }
             return true;
         }
+
+        internal static bool IsLink(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
 
         static int JournalIndex(string path) => ChunkIndex(Path.GetFileName(path).Substring(0,
             Path.GetFileName(path).Length - ChunkJournal.Suffix.Length));
