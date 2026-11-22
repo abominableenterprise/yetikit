@@ -37,6 +37,27 @@ Results and logs are in ignored `Host/build/`. Use `-testFilter` for focused
 iterations; run the full command once at the end. The normal EditMode runner
 executes pure tests without graphics and a second Gfx-category pass.
 
+## Compile packages in isolation (opt-in)
+
+After setup and activation as above, run the [isolation probe](../Tools/ci/package-isolation.py)
+from the repository root. Omit the module arguments to compile all seven:
+
+```sh
+python3 -B Tools/ci/package-isolation.py playtest playtest.xr
+```
+
+Each fresh project has only local references to the target kit package and its
+kit dependencies. Unity resolves the declared non-kit dependencies without the
+Host manifest or Library cache. The probe checks that the applicable Runtime
+and Editor assemblies were built; optional integrations whose providers are not
+installed are skipped. It prints the temporary directory containing the projects
+and logs; delete it when finished. Return the license once after all Unity work.
+
+For the fast offline check, run `python3 -B Tools/ci/check-package-closure.py`.
+It follows only dependencies reachable from each kit manifest, using the Host
+lockfile for external dependency edges. The API map is intentionally not an
+exhaustive C# type checker. The vendor test suite and CI both run it.
+
 ## Generated starter integration (opt-in)
 
 The [starter fixture](StarterTests/) lives outside `Assets` so the ordinary Host

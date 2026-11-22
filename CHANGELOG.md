@@ -20,6 +20,23 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ### Adapter changes
 - None.
 
+## [0.3.1] - 2026-11-22
+
+### Added
+- Lint kit packages for known Unity built-in module API uses that are missing
+  from the package's own dependency closure.
+
+### Fixed
+- Declare `com.unity.modules.audio` and `com.unity.modules.imageconversion` in
+  `com.abominable.yetikit.playtest` so snap capture and audio feedback compile
+  without relying on unrelated consumer packages.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
+
 ## [0.3.0] - 2026-11-22
 
 Development builds can capture snaps and opt-in voice notes and deliver them
