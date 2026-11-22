@@ -76,13 +76,14 @@ namespace YetiKit.Starter.HostTests
                 AssertJointPoses(left, tracking);
 
                 tracking.Right = true;
-                var leftGrip = new Pose(new Vector3(-0.3f, 1.2f, 0.4f), Quaternion.Euler(10f, 30f, 5f));
-                var leftAim = new Pose(new Vector3(-0.29f, 1.19f, 0.43f), Quaternion.Euler(-35f, 24f, 8f));
+                var leftGrip = new Pose(new Vector3(-0.3f, 1.2f, 0.4f), Quaternion.Euler(-50f, 24f, 0f));
+                var leftAim = new Pose(new Vector3(-0.29f, 1.19f, 0.43f), Quaternion.Euler(0f, 24f, 0f));
                 SetController(leftDevice, leftGrip.position, leftGrip.rotation, pointer: leftAim);
                 yield return Frames(3);
                 AssertVisible(left, true, false);
                 AssertVisible(right, false, true);
                 AssertJointPoses(right, tracking);
+                AssertLevelProjectile(ComponentOn<PointPinchTeleport>(left.gameObject).controllerRay);
                 AssertControllerPoses(left, leftGrip, leftAim);
 
                 var parts = ControllerVisual(left).GetComponentsInChildren<Transform>();
@@ -148,10 +149,28 @@ namespace YetiKit.Starter.HostTests
                 grip.position, grip.rotation);
             var ray = ComponentOn<PointPinchTeleport>(hand.gameObject).controllerRay;
             AssertWorldPose(ray.transform, grip.position, grip.rotation);
-            AssertWorldPose(ray.rayOriginTransform, grip.position, grip.rotation);
+            AssertWorldPose(ray.rayOriginTransform, aim.position, aim.rotation);
             // The stock XR Origin nests each model 5 cm behind the pose and rotates it 180° about Y.
             AssertWorldPose(ControllerVisual(hand).transform,
                 aim.position + aim.rotation * (Vector3.back * 0.05f), aim.rotation * Quaternion.Euler(0f, 180f, 0f));
+        }
+
+        static void AssertLevelProjectile(XRRayInteractor ray)
+        {
+            Vector3[] points = null;
+            if (!ray.GetLinePoints(ref points, out var count) || count < 2)
+            {
+                Assert.Fail("Expected sampled XRI projectile points.");
+                return;
+            }
+            const float stockSpeed = 10f, stockGravity = 9.8f;
+            // A level pointer has zero upward launch speed, so its stock apex is at the origin.
+            var upwardSpeed = stockSpeed * Mathf.Sin(0f);
+            var stockApex = upwardSpeed * upwardSpeed / (2f * stockGravity);
+            var actualApex = points.Take(count).Max(point => point.y) - points[0].y;
+            Assert.That(actualApex, Is.EqualTo(stockApex).Within(0.001f), "Level pointer projectile apex");
+            Assert.That(Vector3.Distance(points[0], ray.rayOriginTransform.position), Is.LessThan(0.001f));
+            Assert.That(count, Is.EqualTo(50));
         }
 
         static GameObject ControllerVisual(PlayerHand hand) => hand.controller.GetComponentsInChildren<Transform>(true)

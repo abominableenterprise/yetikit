@@ -56,6 +56,14 @@ namespace YetiKit.Starter.HostTests
                 Assert.That(aim.provider, Is.SameAs(teleport));
                 Assert.That(aim.controllerRay.transform.IsChildOf(hand.controller), Is.True);
                 Assert.That((int)aim.controllerRay.interactionLayers, Is.EqualTo(padLayers));
+                var ray = aim.controllerRay;
+                Assert.That(ray.lineType, Is.EqualTo(XRRayInteractor.LineType.ProjectileCurve));
+                Assert.That(ray.velocity, Is.EqualTo(10f));
+                Assert.That(ray.acceleration, Is.EqualTo(9.8f));
+                Assert.That(ray.additionalGroundHeight, Is.EqualTo(0.1f));
+                Assert.That(ray.additionalFlightTime, Is.EqualTo(0.5f));
+                Assert.That(ray.sampleFrequency, Is.EqualTo(50));
+                Assert.That(ray.coneCastAngle, Is.EqualTo(6f));
                 Assert.That(AssetDatabase.GetAssetPath(aim.line.sharedMaterial), Is.EqualTo(output + "/Aim.mat"));
                 var handTurn = ComponentOn<HandSnapTurn>(hand.gameObject);
                 Assert.That(handTurn.provider, Is.SameAs(turn));

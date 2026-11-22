@@ -43,14 +43,14 @@ namespace Game.Starter
         XRInputValueReader<Vector2> TurnInput => hand.RightHand ? turn.rightHandTurnInput : turn.leftHandTurnInput;
 
         public void Configure(PlayerHand playerHand, XRDirectInteractor grab, XRRayInteractor ray,
-            HandSnapTurn trackedTurn, SnapTurnProvider snapTurn, string device, Transform visualAim)
+            HandSnapTurn trackedTurn, SnapTurnProvider snapTurn, string device, Transform aim)
         {
             hand = playerHand;
             direct = grab;
             teleport = ray;
             handTurn = trackedTurn;
             turn = snapTurn;
-            controllerAim = visualAim;
+            controllerAim = aim;
             tracked = new InputAction("Tracked", InputActionType.PassThrough, device + "/isTracked");
         }
 
