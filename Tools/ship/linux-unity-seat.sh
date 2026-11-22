@@ -29,18 +29,17 @@ seat_on() {
 seat_held() { [ -f "$SEAT_STATE" ] && [ "$(cut -d' ' -f1 "$SEAT_STATE")" = "$THEROBOTS_TASK_ID" ]; }
 
 # POST {"action":"$1"} to the task's seat endpoint. Sets SEAT_CODE (HTTP code, 000 when curl failed), SEAT_BODY,
-# SEAT_RETRY (Retry-After seconds, empty when absent) and SEAT_ERR (curl's error, token masked). The token reaches
-# curl on stdin (-H @-), never on a command line.
+# and SEAT_RETRY (Retry-After seconds, empty when absent). Curl diagnostics may contain sensitive data,
+# so discard them. The token reaches curl on stdin (-H @-), never on a command line.
+# $2 optionally caps the request time in seconds.
 seat_post() {
   local d; d="$(mktemp -d)"
-  SEAT_CODE="$(printf 'Authorization: Bearer %s\n' "$THEROBOTS_TASK_TOKEN" | curl -sS -X POST --max-time 30 -H @- \
+  SEAT_CODE="$(printf 'Authorization: Bearer %s\n' "$THEROBOTS_TASK_TOKEN" | curl -s -X POST --max-time "${2:-30}" -H @- \
     -H 'Content-Type: application/json' -d "{\"action\":\"$1\"}" -D "$d/h" -o "$d/b" -w '%{http_code}' \
-    "$THEROBOTS_HUB_URL/tasks/$THEROBOTS_TASK_ID/seat" 2>"$d/e")" || SEAT_CODE=000
+    "$THEROBOTS_HUB_URL/tasks/$THEROBOTS_TASK_ID/seat" 2>/dev/null)" || SEAT_CODE=000
   [[ "$SEAT_CODE" =~ ^[0-9]{3}$ ]] || SEAT_CODE=000
   SEAT_BODY="$(cat "$d/b" 2>/dev/null || true)"
   SEAT_RETRY="$(tr -d '\r' < "$d/h" 2>/dev/null | sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]: *\([0-9]\{1,4\}\) *$/\1/p' | tail -n1)" || true
-  SEAT_ERR="$(head -c 300 "$d/e" 2>/dev/null | tr '\n' ' ')" || true
-  SEAT_ERR="${SEAT_ERR//"$THEROBOTS_TASK_TOKEN"/<token>}"
   rm -rf "$d"
 }
 
@@ -54,8 +53,8 @@ seat_body_snippet() {
 
 # Wait for the hub's Unity seat: 202 or 409 naming a race = still queued (poll after Retry-After, default 2 s,
 # at most 10 s; one progress line per minute), 200 + "acquired" = Unity may start. 200 + "not_leased" and legacy
-# 409s go on without a lease (no state file, no release); a 409 naming a cancelled/done task and any other code
-# fail. Gives up after UNITY_SEAT_WAIT_MINUTES.
+# 409s go on without a lease (no state file, no release); other 4xx responses fail. Network errors and
+# unexpected HTTP statuses back off exponentially (2–10 s). Gives up after UNITY_SEAT_WAIT_MINUTES.
 seat_acquire() {
   SEAT_REQUIRED=0  # no-lease compatibility paths do not require a marker
   seat_on || return 0
@@ -69,12 +68,20 @@ seat_acquire() {
   [ "$unlock" = 0 ] || activation_unlock
   if [ "$held" = 1 ]; then log "seat: this task already holds a Unity seat"; return 0; fi
   [[ "$UNITY_SEAT_WAIT_MINUTES" =~ ^[0-9]+$ ]] || die "seat: UNITY_SEAT_WAIT_MINUTES must be a whole number of minutes"
-  local waited=0 start limit=$((10#$UNITY_SEAT_WAIT_MINUTES * 60)) shown=-1 delay marker
-  start="$(seat_now)"
+  local limit=$((10#$UNITY_SEAT_WAIT_MINUTES * 60)) deadline remaining request_timeout
+  local shown=-1 waited delay backoff=2 transient marker
+  local timeout_msg="seat: no Unity seat after $UNITY_SEAT_WAIT_MINUTES min (UNITY_SEAT_WAIT_MINUTES); try again later"
+  deadline=$(($(seat_now) + limit))
   SEAT_PENDING=1   # even a lost response may have granted a seat on the hub
   log "seat: acquiring a Unity seat from the hub"
   while :; do
-    seat_post acquire
+    remaining=$((deadline - $(seat_now)))
+    if [ "$remaining" -le 0 ] && [ "$limit" -ne 0 ]; then die "$timeout_msg"; fi
+    # A zero-minute wait still allows one immediate attempt, but never a retry.
+    request_timeout=30
+    if [ "$remaining" -gt 0 ] && [ "$remaining" -lt "$request_timeout" ]; then request_timeout=$remaining; fi
+    seat_post acquire "$request_timeout"
+    transient=''
     case "$SEAT_CODE" in
       200) grep -q '"status" *: *"acquired"' <<< "$SEAT_BODY" && break
         if grep -q '"status" *: *"not_leased"' <<< "$SEAT_BODY"; then
@@ -90,21 +97,30 @@ seat_acquire() {
           SEAT_PENDING=0; SEAT_REQUIRED=0
           log "warning: seat: hub answered 409 ($(seat_body_snippet)); continuing without a lease"; return 0
         fi ;;
-      *) die "seat: acquire failed (HTTP $SEAT_CODE)${SEAT_ERR:+: $SEAT_ERR}; not activating Unity" ;;
+      4??) die "seat: acquire failed (HTTP $SEAT_CODE); not activating Unity" ;;
+      000) transient='network error' ;;
+      *) transient="HTTP $SEAT_CODE" ;;
     esac
-    waited=$(($(seat_now) - start))
-    if [ "$waited" -ge "$limit" ]; then
-      die "seat: no Unity seat after $UNITY_SEAT_WAIT_MINUTES min (UNITY_SEAT_WAIT_MINUTES); try again later"
+    remaining=$((deadline - $(seat_now)))
+    [ "$remaining" -gt 0 ] || die "$timeout_msg"
+    if [ -n "$transient" ]; then
+      delay=$backoff
+      backoff=$((backoff * 2))
+      [ "$backoff" -le 10 ] || backoff=10
+    else
+      backoff=2
+      waited=$(((limit - remaining) / 60))
+      if [ "$waited" != "$shown" ]; then shown=$waited; log "seat: waiting for a Unity seat ($shown min)"; fi
+      delay="${SEAT_RETRY:-2}"; delay=$((10#$delay))
+      [ "$delay" -ge 1 ] || delay=1
+      [ "$delay" -le 10 ] || delay=10
     fi
-    if [ $((waited / 60)) != "$shown" ]; then shown=$((waited / 60)); log "seat: waiting for a Unity seat ($shown min)"; fi
-    delay="${SEAT_RETRY:-2}"; delay=$((10#$delay))
-    [ "$delay" -ge 1 ] || delay=1
-    [ "$delay" -le 10 ] || delay=10
-    [ "$delay" -le "$((limit - waited))" ] || delay=$((limit - waited))
+    if [ "$delay" -ge "$remaining" ]; then
+      delay=$remaining  # no retry after this sleep
+    elif [ -n "$transient" ]; then
+      log "seat: acquire $transient; retrying in $delay s"
+    fi
     sleep "$delay"
-    if [ "$(($(seat_now) - start))" -ge "$limit" ]; then
-      die "seat: no Unity seat after $UNITY_SEAT_WAIT_MINUTES min (UNITY_SEAT_WAIT_MINUTES); try again later"
-    fi
   done
   SEAT_OWNED=1; SEAT_PENDING=0  # before ANY fallible filesystem operation
   if ! mkdir -p "$(dirname "$SEAT_STATE")" || ! marker="$(mktemp "$SEAT_STATE.XXXXXX")"; then

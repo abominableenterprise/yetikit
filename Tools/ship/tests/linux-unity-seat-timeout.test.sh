@@ -22,8 +22,8 @@ lu "${hub[@]}" UNITY_SEAT_WAIT_MINUTES=1 FAKE_HTTP_SECONDS=30 -- activate
 check "slow 202 replies consume the elapsed-time budget" \
   '[ "$rc" != 0 ] && [ "$(calls acquire)" = 2 ] && [ "$(calls release)" = 1 ] && [ ! -s "$tmp/lc-calls" ] && grep -q "no Unity seat after 1 min" "$tmp/log"'
 
-reset 000; rm -f "$ULF" "$state"
-lu "${hub[@]}" -- activate
+reset network-error; rm -f "$ULF" "$state"
+lu "${hub[@]}" UNITY_SEAT_WAIT_MINUTES=0 -- activate
 check "ambiguous acquire response releases the possible hub grant" \
   '[ "$rc" != 0 ] && [ "$(calls acquire)" = 1 ] && [ "$(calls release)" = 1 ] && [ ! -s "$tmp/lc-calls" ] && [ ! -f "$state" ]'
 
@@ -48,8 +48,8 @@ check "a seat an earlier invocation acquired is not released by a later failed a
 rm -f "$state"
 
 # The APK path calls unity/activation inside a subshell; ownership stays local.
-reset 000; rm -f "$ULF" "$state"
-rc=0; env UNITY_USERNAME=u UNITY_PASSWORD=p "${hub[@]}" bash -c '. "$1"; (cmd_activate)' _ "$script" > "$tmp/log" 2>&1 || rc=$?
+reset network-error; rm -f "$ULF" "$state"
+rc=0; env UNITY_USERNAME=u UNITY_PASSWORD=p UNITY_SEAT_WAIT_MINUTES=0 "${hub[@]}" bash -c '. "$1"; (cmd_activate)' _ "$script" > "$tmp/log" 2>&1 || rc=$?
 check "subshell activation owns its own failed-acquire cleanup" \
   '[ "$rc" != 0 ] && [ "$(calls acquire)" = 1 ] && [ "$(calls release)" = 1 ] && [ ! -s "$tmp/lc-calls" ]'
 
