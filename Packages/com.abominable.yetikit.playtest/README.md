@@ -4,6 +4,50 @@ Local recording for the Editor, development builds, or builds defining
 `YETIKIT_DEV`. Reference `YetiKit.Playtest` from an assembly with the same
 constraint. The package doesn't start recording by itself.
 
+## Voice notes (opt-in)
+
+- Provide `IPhraseGrammar` with stable lists of start and send phrases, or use
+  `DefaultPhraseGrammar` (`start`, `send it`). Commands are whole phrases,
+  compared without case or extra whitespace. Use one `PhraseRules` per stream
+  and pass monotonic seconds; a partial and its final can only trigger once.
+- Implement `IMicrophonePermission` and `IMicrophoneCapture` in the host. Call
+  `MicrophoneArming.Arm` after explicit opt-in, `Poll` on the main thread, and
+  `Stop` on teardown. The host owns the captured samples and file lifecycle.
+- Feed consecutive 16 kHz mono signed PCM16 blocks to `RecognitionWorker`.
+  `TryEnqueue` copies each accepted block. If its two-second queue is full,
+  retry the same block before later samples or restart the recognition stream.
+  `Phrase` runs on the worker: hand off results to the main thread before
+  driving rules, notes or Unity objects. Check `Failure` if recognition stops.
+  For Editor input, bind a key to `KeyboardPhraseSpotter.TryFire` and enqueue a
+  nonempty synthetic PCM block; no permission or native plugin is needed.
+- `VoiceNote` tracks time by samples (not by frames or wall clock): it ends on
+  send, three seconds of quiet after a known phrase, eight seconds of quiet
+  otherwise, or 90 seconds total. Pass each block to `Process`; the increase in
+  `SamplesConsumed` tells you how much of that block to retain. Use `WaveEncoder`
+  on the retained PCM. `AudioFeedback` generates start and confirmation clips;
+  create, play and destroy them on the main thread.
+
+### Optional Android recognizer
+
+For an Android development build, supply a [Vosk Android AAR](https://alphacephei.com/vosk/install)
+under the host's `Assets/Plugins/Android` (or via its Gradle dependencies).
+Include its native `libvosk.so` and dependencies for the player ABI (e.g.
+`arm64-v8a`); the adapter calls the C API directly. Use a small
+[grammar-capable model](https://alphacephei.com/vosk/models) for the language of
+the command phrases. Extract it into an ordinary readable directory (for
+example, under `Application.persistentDataPath`); an APK or StreamingAssets
+URI is not a model directory. Pass that absolute directory and the same
+`IPhraseGrammar` used by `PhraseRules` to `VoskPhraseSpotter`, then transfer
+ownership to `RecognitionWorker`.
+
+Set `YETIKIT_VOSK` alongside `YETIKIT_DEV` for the Android dev build. The
+adapter isn't compiled without the Android and Vosk defines. Guard host code
+that constructs it with `YETIKIT_VOSK && UNITY_ANDROID && !UNITY_EDITOR`.
+The host must keep the AAR, model and any microphone permission out of
+non-dev builds; scripting defines alone do not exclude Android assets.
+
+## Local recording
+
 Create a `FileChunkStore` for your recording root and share it between a
 `ChunkPump` and a `RecordingSession`. Call `RecoverChunks` at startup before
 recording. Use `SessionRules.NewId` for each new session and supply optional

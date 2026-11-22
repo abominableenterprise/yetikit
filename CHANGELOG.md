@@ -10,6 +10,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ### Added
 - Set up a private playtest inbox for session uploads, webhook notifications, and live tuning.
+- Add opt-in voice notes and configurable spoken commands for development builds.
 
 ### Fixed
 - None.
