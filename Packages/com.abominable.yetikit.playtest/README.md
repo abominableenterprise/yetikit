@@ -2,7 +2,9 @@
 
 Local recording for the Editor, development builds, or builds defining
 `YETIKIT_DEV`. Reference `YetiKit.Playtest` from an assembly with the same
-constraint. The package doesn't start recording by itself.
+constraint. The package doesn't start recording by itself. For the optional
+hand/controller recorder and interaction adapter, see
+[Playtest XR](../com.abominable.yetikit.playtest.xr/README.md).
 
 ## Voice notes (opt-in)
 

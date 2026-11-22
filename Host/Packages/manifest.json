@@ -5,6 +5,7 @@
     "com.abominable.yetikit.interaction": "file:../../Packages/com.abominable.yetikit.interaction",
     "com.abominable.yetikit.lab": "file:../../Packages/com.abominable.yetikit.lab",
     "com.abominable.yetikit.playtest": "file:../../Packages/com.abominable.yetikit.playtest",
+    "com.abominable.yetikit.playtest.xr": "file:../../Packages/com.abominable.yetikit.playtest.xr",
     "com.abominable.yetikit.quality": "file:../../Packages/com.abominable.yetikit.quality",
     "com.unity.inputsystem": "1.20.0",
     "com.unity.test-framework": "1.8.0",
@@ -20,6 +21,7 @@
     "com.abominable.yetikit.interaction",
     "com.abominable.yetikit.lab",
     "com.abominable.yetikit.playtest",
+    "com.abominable.yetikit.playtest.xr",
     "com.abominable.yetikit.quality"
   ]
 }

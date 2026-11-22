@@ -9,6 +9,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
+- Add opt-in local recording of XR hand and controller poses and prop interactions in development builds.
 - Set up a private playtest inbox for session uploads, webhook notifications, and live tuning.
 - Add opt-in voice notes and configurable spoken commands for development builds.
 
