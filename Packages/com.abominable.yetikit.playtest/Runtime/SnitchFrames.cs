@@ -21,17 +21,34 @@ namespace YetiKit.Playtest
         public void Tick(Camera head, double now, IFrameSource source = null)
         {
             if (!head || !(now - last >= 0.25) || double.IsInfinity(now) || history.WouldEvict(hold)) return;
+            var slot = history.NextFrame ?? new RenderTexture(Size, Size, 16, RenderTextureFormat.ARGB32);
+            try { Render(head, slot, source); }
+            catch { if (slot != history.NextFrame) Kill(slot); throw; }
+            history.Add(now, slot); last = now;
+        }
+        internal byte[] CaptureNow(Camera head, Action<Texture> preview)
+        {
+            if (double.IsPositiveInfinity(last)) return null;
+            var frame = RenderTexture.GetTemporary(Size, Size, 16, RenderTextureFormat.ARGB32);
+            try
+            {
+                Render(head, frame, null);
+                var jpeg = ReadJpeg(frame, 85);
+                if (jpeg != null) preview?.Invoke(frame);
+                return jpeg;
+            }
+            finally { RenderTexture.ReleaseTemporary(frame); }
+        }
+        void Render(Camera head, RenderTexture slot, IFrameSource source)
+        {
             if (!copy) copy = new GameObject("Playtest capture camera") { hideFlags = HideFlags.HideAndDontSave }.AddComponent<Camera>();
             copy.CopyFrom(head); copy.enabled = false; copy.cullingMask &= ~excludedLayers.value;
             copy.transform.SetPositionAndRotation(head.transform.position, head.transform.rotation);
             copy.stereoTargetEye = StereoTargetEyeMask.None;
-            var slot = history.NextFrame ?? new RenderTexture(Size, Size, 16, RenderTextureFormat.ARGB32);
             var active = RenderTexture.active;
             var start = Time.realtimeSinceStartupAsDouble;
             try { if (!FrameSourceSelection.TryCopy(source, slot)) { copy.targetTexture = slot; copy.Render(); } }
-            catch { if (slot != history.NextFrame) Kill(slot); throw; }
             finally { copy.targetTexture = null; RenderTexture.active = active; }
-            history.Add(now, slot); last = now;
             metrics?.NoteFrameRender((Time.realtimeSinceStartupAsDouble - start) * 1000);
         }
         public byte[] Capture(double at, out double time, Action<Texture> preview = null)

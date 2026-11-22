@@ -18,6 +18,7 @@ namespace YetiKit.Playtest
         (string snap, double since, PolaroidState next) pending;
         public void Start(string id, double now) { pending = (id, now, PolaroidState.Hovering); State = PolaroidState.Capturing; }
         internal void Hide() => State = PolaroidState.Gone;
+        internal void Cancel(string id) { if (id == pending.snap) Hide(); }
         public bool SetStatus(string id, SnapStatus status, double now)
         {
             if (id != pending.snap || Tick(now).Alpha <= 0 || pending.next is PolaroidState.Local or PolaroidState.Sent or PolaroidState.Failed) return false;

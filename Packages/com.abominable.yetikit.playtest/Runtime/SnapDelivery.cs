@@ -13,7 +13,8 @@ namespace YetiKit.Playtest
     /// <summary>Each snap is a separate immutable outbox batch, even if its session has been delivered.</summary>
     public sealed class SnapDelivery : ISnapPublicationStore
     {
-        const string Marker = "snap.done";
+        internal const string Marker = "snap.done";
+        internal const int MaxFileBytes = 50 * 1024 * 1024;
         static readonly Regex Stem = new(@"\Asnap-[a-f0-9]{32}\z"), Suffix = new(@"\A(?:-s[0-9]{2}\.jpg|\.(?:jpg|wav|json))\z");
         readonly FileChunkStore store;
         readonly IUploadSettings upload;
@@ -22,12 +23,16 @@ namespace YetiKit.Playtest
             names.All(n => n.StartsWith(stem, StringComparison.Ordinal) && Suffix.IsMatch(n.Substring(stem.Length)));
         static string[] Paths(string session, IEnumerable<string> names) => names.OrderBy(n => n, StringComparer.Ordinal).Select(n => session + "/" + n).ToArray();
         internal static bool IsStaging(string name) => name.EndsWith(TmpSuffix, StringComparison.Ordinal) && Split(name[..^4], out _, out _);
+        string Player => UploadValidation.TryGetEndpoint(upload, out _) ? upload.PlayerTag : null;
+        internal DeferredSnapBatch Stage(SnapContext context, byte[] photo) => DeferredSnapBatch.Stage(store, context, Player, photo);
+        internal static bool ValidContext(SnapContext context) => SessionRules.IsId(context.session) && Stem.IsMatch(context.snap ?? "");
+        internal static bool ValidBytes(byte[] bytes) => bytes?.Length is > 0 and <= MaxFileBytes;
         public SnapStatus Publish(SnapContext context, IReadOnlyDictionary<string, byte[]> files)
         {
             var stem = context.snap;
-            if (!SessionRules.IsId(context.session) || !Stem.IsMatch(stem ?? "") || files == null || !Valid(stem, files.Keys) ||
-                files.Values.Any(b => b == null || b.Length is 0 or > 50 * 1024 * 1024)) return SnapStatus.Failed;
-            var player = UploadValidation.TryGetEndpoint(upload, out _) ? upload.PlayerTag : null;
+            if (!ValidContext(context) || files == null || !Valid(stem, files.Keys) ||
+                files.Values.Any(b => !ValidBytes(b))) return SnapStatus.Failed;
+            var player = Player;
             var queued = UploadValidation.IsSegment(player);
             var dir = Path.Combine(store.Outbox, context.session + "." + stem + (queued ? "" : ".local"));
             var stage = Path.Combine(store.Outbox, context.session + "." + stem + TmpSuffix);
@@ -37,9 +42,7 @@ namespace YetiKit.Playtest
                 if (IsLink(store.Outbox) || Directory.Exists(dir) || Directory.Exists(stage)) return SnapStatus.Failed;
                 Directory.CreateDirectory(stage);
                 foreach (var file in files) store.PublishFinalFile(Path.Combine(stage, file.Key), file.Value);
-                var marker = new Manifest { id = stem + "-" + context.session, session = context.session, build = context.build,
-                    player = player, files = Paths(context.session, files.Keys), context = context };
-                store.PublishFinalFile(Path.Combine(stage, Marker), Encoding.UTF8.GetBytes(JsonUtility.ToJson(marker)));
+                WriteMarker(store, stage, context, player, files.Keys);
                 Directory.Move(stage, dir);
                 DirectoryDurability.Sync(Path.GetFullPath(store.Outbox));
                 return queued ? SnapStatus.Queued : SnapStatus.Local;
@@ -47,7 +50,13 @@ namespace YetiKit.Playtest
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { return SnapStatus.Failed; }
             // A failed stage remains invisible to uploads and is reclaimed at the next startup.
         }
-        [Serializable] sealed class Manifest { public string id, kind = "snap", session, player, build; public string[] files; public SnapContext context; }
+        internal static void WriteMarker(FileChunkStore store, string dir, SnapContext context, string player, IEnumerable<string> names)
+        {
+            var marker = new Manifest { id = context.snap + "-" + context.session, session = context.session, build = context.build,
+                player = player, files = Paths(context.session, names), context = context };
+            store.PublishFinalFile(Path.Combine(dir, Marker), Encoding.UTF8.GetBytes(JsonUtility.ToJson(marker)));
+        }
+        [Serializable] internal sealed class Manifest { public string id, kind = "snap", session, player, build; public string[] files; public SnapContext context; }
         internal static bool Split(string name, out string session, out string stem)
         {
             (session, stem) = (Path.GetFileNameWithoutExtension(name), Path.GetExtension(name).TrimStart('.'));
