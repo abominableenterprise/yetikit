@@ -4,7 +4,8 @@ Local recording for the Editor, development builds, or builds defining
 `YETIKIT_DEV`. Reference `YetiKit.Playtest` from an assembly with the same
 constraint. The package doesn't start recording by itself. For the optional
 hand/controller recorder and interaction adapter, see
-[Playtest XR](../com.abominable.yetikit.playtest.xr/README.md).
+[Playtest XR](../com.abominable.yetikit.playtest.xr/README.md). See also the
+[playtest code map](../../docs/codemap/playtest.md).
 
 ## Voice notes (opt-in)
 
@@ -100,7 +101,35 @@ Run recovery and recording exclusively for a recording root.
 Drive `SnitchCam` on the main thread with a camera, a monotonic clock, and
 host-owned input and consent. Pass `SnapDelivery` as the publication store
 for local capture or to queue a separate snap batch in the outbox. Acceptance
-by `TrySnap` is not a disk acknowledgment.
+by `TrySnap` is not a disk acknowledgment. Keep using it for a history-based
+snap with a frame strip and, optionally, a WAV already encoded by the host.
+
+For hold-to-talk, `BeginSnap` renders a fresh still and stages its JPEG and
+context on disk before returning. It shows the same Polaroid at capture time
+and does not collect a strip. Call it with a `SnapDelivery` store. A null handle
+means the snap wasn't accepted (for example, the camera is busy or staging
+failed). Only one snap per `SnitchCam` can wait for a note, encode a strip, or
+publish at a time. Continue calling `Tick` with the same monotonic clock.
+
+```csharp
+// At press; only start recording on hold, after microphone opt-in.
+var pending = cam.BeginSnap(head, now);
+// At release; wave is an encoded WAV, or null for a tap.
+if (pending != null)
+{
+    if (wave != null) pending.AttachNote(wave);
+    pending.Publish();
+}
+```
+
+`AttachNote` copies the WAV into memory. `Publish` submits it and starts local
+publication; observe `SnapOutcome` for the result. A successful `Cancel`
+discards the snap. Unsubmitted notes are dropped on timeout (30 seconds by
+default, configurable via `noteTimeoutSeconds`), shutdown, or restart. Those
+paths publish the JPEG and JSON without a WAV. On startup, call `RecoverChunks`
+(or use `PlaytestUpload.Attach` with uploads enabled), before starting capture
+on that root, to finish orphaned snaps. Recovery keeps the local/queued routing
+chosen at capture time.
 
 Before allowing a controlled quit, call `TryShutdown(timeoutMs)` on the main
 thread **before** disposing the frame history. It stops new captures, finishes

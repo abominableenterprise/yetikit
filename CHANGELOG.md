@@ -9,7 +9,10 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
-- None.
+- Dev playtest snaps can capture a still on press and add a voice note on
+  release: `var snap = cam.BeginSnap(head, now);` then
+  `snap?.AttachNote(wav); snap?.Publish();`. Unfinished snaps publish without
+  audio on timeout or restart.
 
 ### Fixed
 - None.

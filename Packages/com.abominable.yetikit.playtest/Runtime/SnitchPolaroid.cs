@@ -32,6 +32,7 @@ namespace YetiKit.Playtest
             if (audioSource) audioSource.Stop();
             card.Start(snap, Time.unscaledTimeAsDouble);
         }
+        internal void Cancel(string snap) => card.Cancel(snap);
         public void SetStatus(string snap, SnapStatus status)
         {
             if (card.SetStatus(snap, status, Time.unscaledTimeAsDouble) && status == SnapStatus.Sent && audioSource) audioSource.Play();

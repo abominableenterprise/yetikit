@@ -163,8 +163,14 @@ namespace YetiKit.Playtest
             if (!Directory.Exists(Outbox) || IsLink(Outbox)) return;
             foreach (var dir in Directory.GetDirectories(Outbox))
             {
-                if (!SessionRules.IsId(Path.GetFileName(dir)) || IsLink(dir) ||
-                    Array.Exists(Directory.GetFileSystemEntries(dir), IsLink) || !ReconcileMetadata(dir)) continue;
+                if (!SessionRules.IsId(Path.GetFileName(dir)))
+                {
+#if UNITY_EDITOR || YETIKIT_DEV
+                    DeferredSnapBatch.Recover(this, dir);
+#endif
+                    continue;
+                }
+                if (IsLink(dir) || Array.Exists(Directory.GetFileSystemEntries(dir), IsLink) || !ReconcileMetadata(dir)) continue;
                 if (!RecoverRollbacks(dir)) continue;
                 var journals = Directory.GetFiles(dir, "*" + ChunkJournal.Suffix);
                 Array.Sort(journals, (a, b) => JournalIndex(a).CompareTo(JournalIndex(b)));
