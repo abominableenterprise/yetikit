@@ -8,16 +8,28 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-22
+
+Development builds can now enroll secondary Android profiles from inside the app.
+
 ### Added
 - `playtest-enroll.sh --in-app` opts into experimental in-app delivery on the
-  primary Android profile ([#363](https://github.com/abominableenterprise/yetikit/issues/363)).
+  primary Android profile ([#364](https://github.com/abominableenterprise/yetikit/pull/364)).
 
 ### Fixed
-- Secondary Android profiles now receive development playtest settings through
-  the app instead of requiring adb to write to their app storage
+- Secondary Android profiles no longer require adb to write to app storage.
+  The development app receives the settings through a one-time localhost relay
+  protected by a nonce and saves them atomically
   ([#363](https://github.com/abominableenterprise/yetikit/issues/363)).
 - Linux license activation and return now accept passwords that start with a
   hyphen ([#365](https://github.com/abominableenterprise/yetikit/issues/365)).
+
+### Behaviour changes
+- User 0 still uses the adb push route by default. In-app enrollment remains
+  experimental until verified on a real headset.
+
+### Adapter changes
+- None.
 
 ## [0.3.3] - 2026-11-22
 

@@ -1,12 +1,12 @@
 {
   "name": "com.abominable.yetikit.interaction",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "unity": "6000.6",
   "displayName": "YetiKit Interaction",
   "description": "Throw and release math, carry and hand-off rules, and held-collision and respawn helpers.",
   "license": "MIT",
   "dependencies": {
-    "com.abominable.yetikit.hands": "0.3.3",
+    "com.abominable.yetikit.hands": "0.3.4",
     "com.unity.inputsystem": "1.20.0",
     "com.unity.modules.physics": "1.0.0",
     "com.unity.xr.interaction.toolkit": "3.6.1"
