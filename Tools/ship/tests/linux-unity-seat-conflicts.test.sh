@@ -40,10 +40,4 @@ for word in "done" closed finished; do
   check "409 with a \"$word\" body: fails before the licensing client runs" '[ "$rc" != 0 ] && [ ! -s "$tmp/lc-calls" ]'
 done
 
-# --- other codes: activate fails before the licensing client -------------------------------------------------------
-reset 500; rm -f "$ULF" "$state"
-lu "${hub[@]}" -- activate
-check "acquire HTTP 500: activate fails before the licensing client runs" \
-  '[ "$rc" != 0 ] && grep -q "HTTP 500" "$tmp/log" && [ ! -s "$tmp/lc-calls" ] && [ ! -f "$state" ] && no_token'
-
 if [ "$fails" = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

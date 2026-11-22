@@ -38,15 +38,16 @@ case "\$1" in
 esac
 EOF
 # Fake curl: logs "<action> <url>" (and its arguments and stdin, for the token check) and answers with the next line
-# of $tmp/answers ("<code> [retry-after]"; the last line repeats). 200 bodies say {"status":"acquired"}; an acquire
+# of $tmp/answers ("<code> [retry-after]" or "network-error"; the last line repeats). 200 bodies say
+# {"status":"acquired"}; an acquire
 # answers with the body in $FAKE_ACQUIRE_BODY instead when that is set ("" for an empty body).
 # FAKE_CONFLICT_BODY overrides only 409 bodies; FAKE_RELEASE_BODY overrides release bodies.
 cat > "$tmp/bin/curl" <<'EOF'
 #!/usr/bin/env bash
-hdr="" body="" data="" url=""
+hdr="" body="" data="" url="" max_time=""
 echo "args: $*" >> "$FAKE_TMP/curl-argv"; cat >> "$FAKE_TMP/curl-argv"
 while [ $# -gt 0 ]; do
-  case "$1" in -D) hdr="$2"; shift ;; -o) body="$2"; shift ;; -d) data="$2"; shift ;; -H|-X|-w|--max-time) shift ;;
+  case "$1" in -D) hdr="$2"; shift ;; -o) body="$2"; shift ;; -d) data="$2"; shift ;; --max-time) max_time="$2"; shift ;; -H|-X|-w) shift ;;
     -*) ;; *) url="$1" ;; esac; shift
 done
 action="$(sed 's/.*"action":"\([a-z]*\)".*/\1/' <<< "$data")"
@@ -56,12 +57,20 @@ if [ "$action" = release ] && [ "${FAKE_RELEASE_BLOCK:-0}" = 1 ]; then
   while [ ! -f "$FAKE_TMP/release-unblock" ]; do /bin/sleep 0.02; done
 fi
 if [ "$action" = acquire ] && [ -n "${FAKE_HTTP_SECONDS:-}" ]; then
-  echo "$(($(cat "$FAKE_TMP/clock") + FAKE_HTTP_SECONDS))" > "$FAKE_TMP/clock"
+  elapsed=$FAKE_HTTP_SECONDS
+  if [ "$elapsed" -gt "$max_time" ]; then elapsed=$max_time; fi
+  echo "$(($(cat "$FAKE_TMP/clock") + elapsed))" > "$FAKE_TMP/clock"
+  if [ "$elapsed" -lt "$FAKE_HTTP_SECONDS" ]; then printf 000; exit 28; fi
 fi
 n="$(grep -c "^acquire " "$FAKE_TMP/curl-calls")"
 if [ "$action" = acquire ]; then line="$(sed -n "${n}p" "$FAKE_TMP/answers")"; [ -n "$line" ] || line="$(tail -n1 "$FAKE_TMP/answers")"
 else line="${FAKE_RELEASE_CODE:-200}"; fi
 read -r code retry <<< "$line"
+if [ "$code" = network-error ]; then
+  echo "curl: (7) Failed to connect ($THEROBOTS_TASK_TOKEN)" >&2
+  printf 000
+  exit 7
+fi
 { printf 'HTTP/1.1 %s X\r\n' "$code"; [ -z "${retry:-}" ] || printf 'Retry-After: %s\r\n' "$retry"; } > "$hdr"
 if [ "$action" = release ] && [ -n "${FAKE_RELEASE_BODY+x}" ]; then printf '%s' "$FAKE_RELEASE_BODY"
 elif [ "$action" = acquire ] && [ -n "${FAKE_ACQUIRE_BODY+x}" ]; then printf '%s' "$FAKE_ACQUIRE_BODY"
