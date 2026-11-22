@@ -1,14 +1,14 @@
 {
   "name": "com.abominable.yetikit.playtest.xr",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "unity": "6000.6",
   "displayName": "YetiKit Playtest XR",
   "description": "Optional development-only XR recorder for kit hands and interaction.",
   "license": "MIT",
   "dependencies": {
-    "com.abominable.yetikit.playtest": "0.2.0",
-    "com.abominable.yetikit.hands": "0.2.0",
-    "com.abominable.yetikit.interaction": "0.2.0",
+    "com.abominable.yetikit.playtest": "0.3.0",
+    "com.abominable.yetikit.hands": "0.3.0",
+    "com.abominable.yetikit.interaction": "0.3.0",
     "com.unity.xr.hands": "1.9.0",
     "com.unity.xr.interaction.toolkit": "3.6.1"
   }

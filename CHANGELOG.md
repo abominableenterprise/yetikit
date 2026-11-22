@@ -9,9 +9,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
-- Add opt-in local recording of XR hand and controller poses and prop interactions in development builds.
-- Set up a private playtest inbox for session uploads, webhook notifications, and live tuning.
-- Add opt-in voice notes and configurable spoken commands for development builds.
+- None.
 
 ### Fixed
 - None.
@@ -21,6 +19,45 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ### Adapter changes
 - None.
+
+## [0.3.0] - 2026-11-22
+
+Development builds can capture snaps and opt-in voice notes and deliver them
+through the playtest outbox. An optional XR recorder samples hands, controllers
+and props; a Worker/R2 template provides a private inbox and live tuning.
+
+### Added
+- Capture snap strips with in-game photo-card feedback and publish them without
+  waiting for the session to end ([#345](https://github.com/abominableenterprise/yetikit/pull/345)).
+- Add opt-in voice notes and configurable spoken commands for development builds
+  ([#335](https://github.com/abominableenterprise/yetikit/pull/335)).
+- Add `com.abominable.yetikit.playtest.xr` for opt-in recording of hand and
+  controller poses and prop interactions ([#340](https://github.com/abominableenterprise/yetikit/pull/340)).
+- Provide a Worker/R2 inbox template with webhook notifications, plus opt-in
+  upload transport and live tuning ([#327](https://github.com/abominableenterprise/yetikit/pull/327),
+  [#330](https://github.com/abominableenterprise/yetikit/pull/330)).
+- Add a Ship helper to enroll an Android playtest device with an access token
+  ([#338](https://github.com/abominableenterprise/yetikit/pull/338)).
+
+### Fixed
+- Refuse webhook redirects and add regression coverage for Worker write paths
+  with trailing line terminators ([#327](https://github.com/abominableenterprise/yetikit/pull/327),
+  [#339](https://github.com/abominableenterprise/yetikit/pull/339)).
+- Check that the app is installed for the active primary Android user before
+  exchanging an enrollment code, and preserve the previous configuration if
+  transfer fails ([#344](https://github.com/abominableenterprise/yetikit/pull/344)).
+- Retry transient Unity seat-client errors ([#343](https://github.com/abominableenterprise/yetikit/pull/343)).
+
+### Behaviour changes
+- The adoption guide documents the automatic, checksum-verified `crane`
+  installation for default Linux x86-64 setup ([#328](https://github.com/abominableenterprise/yetikit/pull/328)).
+
+### Adapter changes
+- Pin selected kit packages and their kit dependency closure to `v0.3.0`.
+  Add `playtest.xr` only if using the XR recorder; playtest, playtest.xr and lab
+  remain development-only (`YETIKIT_DEV`).
+- Uploads, voice and XR recording are opt-in. Configure the inbox and enroll
+  devices before enabling network delivery; local recording does not require it.
 
 ## [0.2.0] - 2026-11-22
 

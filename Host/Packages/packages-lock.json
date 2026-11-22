@@ -13,7 +13,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.abominable.yetikit.core": "0.2.0",
+        "com.abominable.yetikit.core": "0.3.0",
         "com.unity.inputsystem": "1.20.0",
         "com.unity.xr.interaction.toolkit": "3.6.1",
         "com.unity.xr.hands": "1.9.0"
@@ -24,7 +24,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.abominable.yetikit.hands": "0.2.0",
+        "com.abominable.yetikit.hands": "0.3.0",
         "com.unity.inputsystem": "1.20.0",
         "com.unity.modules.physics": "1.0.0",
         "com.unity.xr.interaction.toolkit": "3.6.1"
@@ -35,9 +35,9 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.abominable.yetikit.hands": "0.2.0",
-        "com.abominable.yetikit.interaction": "0.2.0",
-        "com.abominable.yetikit.playtest": "0.2.0",
+        "com.abominable.yetikit.hands": "0.3.0",
+        "com.abominable.yetikit.interaction": "0.3.0",
+        "com.abominable.yetikit.playtest": "0.3.0",
         "com.unity.ugui": "2.6.0",
         "com.unity.modules.jsonserialize": "1.0.0",
         "com.unity.modules.physics": "1.0.0",
@@ -50,7 +50,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.abominable.yetikit.core": "0.2.0",
+        "com.abominable.yetikit.core": "0.3.0",
         "com.unity.modules.androidjni": "1.0.0",
         "com.unity.modules.jsonserialize": "1.0.0",
         "com.unity.modules.unitywebrequest": "1.0.0"
@@ -61,9 +61,9 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.abominable.yetikit.playtest": "0.2.0",
-        "com.abominable.yetikit.hands": "0.2.0",
-        "com.abominable.yetikit.interaction": "0.2.0",
+        "com.abominable.yetikit.playtest": "0.3.0",
+        "com.abominable.yetikit.hands": "0.3.0",
+        "com.abominable.yetikit.interaction": "0.3.0",
         "com.unity.xr.hands": "1.9.0",
         "com.unity.xr.interaction.toolkit": "3.6.1"
       }
