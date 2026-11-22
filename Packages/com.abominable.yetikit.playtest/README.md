@@ -91,5 +91,35 @@ Set `pendingDiskBudgetBytes` on the store to opt into pruning. The pump checks
 at session start, rotation and completion; only completed sessions with no
 pending files are eligible, oldest session ID first. Protected sessions still
 count toward the budget, so it may be exceeded until they finish or are removed.
-Run recovery and recording exclusively for a recording root. There is no
-network transport or built-in event producer.
+Run recovery and recording exclusively for a recording root.
+
+## Optional delivery (`YETIKIT_DEV`)
+
+`PlaytestJsonSettings.LoadDefault()` reads the first readable `playtest.json`:
+`Application.persistentDataPath/playtest/playtest.json`, then `files/playtest.json`
+in the Android app-private directory. Supply `endpoint`, `uploadKey`, and `player`
+(an ASCII path segment). In the Editor, `YETIKIT_PLAYTEST_ENDPOINT` and
+`YETIKIT_PLAYTEST_KEY` override credentials as a pair; `YETIKIT_PLAYTEST_PLAYER`
+overrides the player separately. Keep these credentials out of version control.
+No config means no network. Use HTTPS except for local loopback testing.
+
+Call `PlaytestUpload.Attach(session, settings)` on the main thread **before**
+`Begin`, once per `FileChunkStore`. It does startup recovery without network
+access, including publishing recoverable abandoned sessions. Reuse the returned
+`Uploader` for subsequent sessions on that store and call `TickAsync` from the
+main-thread update; pass a lifetime cancellation token. Only completed batches
+are sent: the uploader PUTs metadata and chunks serially, then posts the
+manifest with a stable idempotency key. Unacknowledged batches persist and are
+replayed after restart. A batch rejected with HTTP 400, 413, 415, or 422 is
+skipped across restarts while later batches continue. Its files stay on disk
+subject to the outbox budget; remove its `.rejected` marker to retry after
+correcting the cause. Successful batches are removed locally. Snap delivery is
+not included.
+`NetWarmup.PingAsync` optionally checks the endpoint without the upload key.
+
+A consumer can pass `ILiveTuningSource` to its lab integration without linking
+this package to lab. Read `CurrentJson` for the initial override, subscribe to
+`Changed` to parse and apply validated overrides, and treat `null` as clearing
+remote overrides. Start `LiveTuningClient.PollAsync` on the main thread with a
+lifetime token, or call `RefreshAsync` from your own scheduler; unsubscribe and
+cancel when the consumer stops.

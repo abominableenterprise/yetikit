@@ -40,6 +40,8 @@ namespace YetiKit.Playtest
 
         public string Id => Meta.Session;
         public string Dir => paths.SessionOutbox(Meta.Session);
+        internal FileChunkStore UploadStore => paths as FileChunkStore ??
+            throw new InvalidOperationException("Upload requires a FileChunkStore.");
         public bool Begun { get; private set; }
         public bool Ended { get; private set; }
         public bool Paused { get; private set; }
