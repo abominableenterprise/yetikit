@@ -94,8 +94,14 @@ Configure lifecycle rules on the bucket, not in the Worker configuration.
    ```
 
    The helper exchanges the code over HTTPS and pushes the returned settings
-   to `/sdcard/Android/data/<applicationId>/files/playtest/playtest.json`.
-   Add `--launch` to verify the development app's recorder startup in logcat.
+   to `/storage/emulated/N/Android/data/<applicationId>/files/playtest/playtest.json`,
+   where `N` is the foreground Android user. Pass `--user N` to require a
+   specific foreground user. Keep the selected profile unlocked and in the
+   foreground. Secondary-user support is **experimental (mock-tested; not yet
+   verified on a headset)**.
+   If enrolment fails on a secondary profile, switch to the primary profile
+   (user 0) and retry. Add `--launch` to verify the development app's recorder
+   startup in logcat.
 4. Run `wrangler secret delete ENROLL_CODE` manually and remove the private code
    file, even if enrolment failed. The code is reusable until removed, not single-use.
 
