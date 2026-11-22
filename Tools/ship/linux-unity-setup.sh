@@ -46,7 +46,47 @@ setup_write() {
   worker="$(< "$SHIP_TOOL_DIR/lib/linux-unity-setup-worker.py")" || return
   as_root /usr/bin/python3 -I -c "$worker" "$control" "$protect_int" "$@"
 }
-extract_editor() { "$1" export "$UNITY_IMAGE" - | setup_write tar -x -C "$2" opt/unity; }
+# GNU tar reports a fatal exit even when only its directory metadata pass
+# failed. Accept only those diagnostics and the final failure summary, not
+# mixed failures. C-style quoting keeps embedded newlines out of member names.
+only_directory_status_error() {
+  local renamed='^tar: "opt(/unity(/([^"\\]|\\.)*)?)?": Directory renamed before its status could be extracted$'
+  local summary='tar: Exiting with failure status due to previous errors'
+  local line seen=0 finished=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$finished" = 0 ] || return 1
+    if [[ "$line" =~ $renamed ]]; then
+      seen=1
+    elif [ "$seen" = 1 ] && [ "$line" = "$summary" ]; then
+      finished=1
+    else
+      return 1
+    fi
+  done < "$1"
+  [ "$finished" = 1 ]
+}
+
+extract_android_tar() {
+  local diagnostics="${control%/*}/tar.stderr" rc=0 tar_fatal=2
+  # Set locale inside the elevated command, not on sudo. Still stream the
+  # archive on stdin and let the setup supervisor own the extraction process.
+  setup_write env LC_ALL=C tar -x --quoting-style=c -C "$1" opt/unity 2> "$diagnostics" || rc=$?
+  if [ "$rc" = "$tar_fatal" ] && only_directory_status_error "$diagnostics"; then
+    log 'tar could not restore directory metadata; checking the staged Android editor'
+    rc=0
+  fi
+  cat "$diagnostics" >&2
+  rm -f -- "$diagnostics"
+  return "$rc"
+}
+
+extract_editor() {
+  if [ "${UNITY_MODULES:-}" = android ]; then
+    "$1" export "$UNITY_IMAGE" - | extract_android_tar "$2"
+  else
+    "$1" export "$UNITY_IMAGE" - | setup_write tar -x -C "$2" opt/unity
+  fi
+}
 
 # The image config records the build step that writes /opt/unity/version. Inspect
 # that metadata without downloading layers or trusting a version in a mutable tag.
@@ -122,6 +162,9 @@ install_editor() {
   [ -x "$stage/opt/unity/$BIN_REL" ] && [ -x "$stage/opt/unity/$LC_REL" ] \
     || die "extract incomplete: editor or licensing client missing in $stage"
   editor_version_ok "$stage/opt/unity/$BIN_REL" || die "editor from $UNITY_IMAGE is not Unity $UNITY_VERSION"
+  if [ "${UNITY_MODULES:-}" = android ]; then
+    has_android "$stage/opt/unity" || die "extract incomplete: $UNITY_IMAGE gave no Android SDK/NDK under $stage/opt/unity/$ANDROID_REL"
+  fi
   [ -d "$UNITY_ROOT" ] || as_root mkdir "$UNITY_ROOT"
   as_root touch "$partial"
   # Move the contents, not the directory: `mv dir existing-dir` would make $UNITY_ROOT/unity.
@@ -167,7 +210,10 @@ pick_image() {
   esac
 }
 
-has_android() { [ -d "$UNITY_ROOT/$ANDROID_REL/SDK" ] && [ -d "$UNITY_ROOT/$ANDROID_REL/NDK" ]; }
+has_android() {
+  local root="${1:-$UNITY_ROOT}"
+  [ -d "$root/$ANDROID_REL/SDK" ] && [ -d "$root/$ANDROID_REL/NDK" ]
+}
 
 # Setup checks process visibility with the privileges used to replace the editor.
 # Ordinary cleanup can retry a read-only scan without prompting for credentials.
