@@ -51,13 +51,21 @@ fi
 serial_pattern='^[][A-Za-z0-9_.:-]+$'
 [[ "$serial" =~ $serial_pattern && "$serial" != unknown ]] || fail 'expected one adb device serial'
 device=(adb -s "$serial")
-installed="$("${device[@]}" shell cmd package path --user current "$package" 2>/dev/null)" \
+user="$("${device[@]}" shell am get-current-user 2>/dev/null)" || fail 'could not determine the current Android user'
+user="${user%$'\r'}"
+[[ "$user" =~ ^[0-9]+$ ]] || fail 'could not determine the current Android user'
+[[ "$user" == 0 ]] || fail 'enrollment only supports the primary Android user (0); switch to it and retry'
+installed="$("${device[@]}" shell cmd package path --user 0 "$package" 2>/dev/null)" \
   || fail 'could not verify that the configured applicationId (quest.package) is installed on the selected device'
 [[ "$installed" == package:/* ]] || fail 'configured applicationId (quest.package) is not installed on the selected device'
 
 umask 077
-tmp=''
+tmp='' remote_stage=''
 cleanup() {
+  if [[ -n "$remote_stage" ]]; then
+    "${device[@]}" shell rm -f "$remote_stage" >/dev/null 2>&1 \
+      || printf '[playtest-enroll] could not remove the staged device file; reconnect the device and check the playtest directory\n' >&2
+  fi
   if [[ -n "$tmp" ]]; then
     rm -rf -- "$tmp" || fail 'could not remove private enrollment files'
   fi
@@ -96,9 +104,13 @@ if ! jq -es --arg player "$player" --arg origin "\A$origin\z" '
 fi
 rm -f -- "$tmp/response"
 
-remote="/sdcard/Android/data/$package/files/playtest"
+# Pin storage to user 0 too, even if the foreground user changes after preflight.
+remote="/storage/emulated/0/Android/data/$package/files/playtest"
 "${device[@]}" shell mkdir -p "$remote" >/dev/null 2>&1 || fail 'adb could not create the playtest directory'
-"${device[@]}" push "$tmp/playtest.json" "$remote/playtest.json" >/dev/null 2>&1 || fail 'adb push failed; check device connectivity and app storage access'
+remote_stage="$remote/.${tmp##*/}"
+"${device[@]}" push "$tmp/playtest.json" "$remote_stage" >/dev/null 2>&1 || fail 'adb push failed; check device connectivity and app storage access'
+"${device[@]}" shell mv -fT "$remote_stage" "$remote/playtest.json" >/dev/null 2>&1 || fail 'adb could not replace the playtest configuration'
+remote_stage=''
 rm -f -- "$tmp/playtest.json"
 printf 'Playtest configuration installed on the selected device.\n'
 
@@ -107,7 +119,7 @@ if [[ "$launch" == 1 ]]; then
   since="$("${device[@]}" shell date +%s.%N 2>/dev/null)" || fail 'could not read the device clock'
   [[ "$since" =~ ^([0-9]+\.[0-9]{3})[0-9]*$ ]] || fail 'unexpected device clock format'
   since="${BASH_REMATCH[1]}"
-  started="$("${device[@]}" shell am start -W -a android.intent.action.MAIN \
+  started="$("${device[@]}" shell am start --user 0 -W -a android.intent.action.MAIN \
     -c android.intent.category.LAUNCHER -p "$package" 2>/dev/null)" || fail 'could not launch the configured app'
   [[ "$started" == *'Status: ok'* ]] || fail 'Android did not confirm launch of the configured app'
   for ((attempt = 0; attempt < 10; attempt++)); do
