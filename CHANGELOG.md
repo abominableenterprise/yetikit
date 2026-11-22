@@ -8,6 +8,15 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+### Added
+- `playtest-enroll.sh --in-app` opts into experimental in-app delivery on the
+  primary Android profile ([#363](https://github.com/abominableenterprise/yetikit/issues/363)).
+
+### Fixed
+- Secondary Android profiles now receive development playtest settings through
+  the app instead of requiring adb to write to their app storage
+  ([#363](https://github.com/abominableenterprise/yetikit/issues/363)).
+
 ## [0.3.3] - 2026-11-22
 
 Playtest enrollment now targets the foreground Android profile.

@@ -93,15 +93,16 @@ Configure lifecycle rules on the bucket, not in the Worker configuration.
    Tools/yetikit/playtest-enroll.sh --endpoint https://worker.example.invalid --code "$HOME/private/enroll-code" --player test-headset
    ```
 
-   The helper exchanges the code over HTTPS and pushes the returned settings
-   to `/storage/emulated/N/Android/data/<applicationId>/files/playtest/playtest.json`,
-   where `N` is the foreground Android user. Pass `--user N` to require a
-   specific foreground user. Keep the selected profile unlocked and in the
-   foreground. Secondary-user support is **experimental (mock-tested; not yet
-   verified on a headset)**.
-   If enrolment fails on a secondary profile, switch to the primary profile
-   (user 0) and retry. Add `--launch` to verify the development app's recorder
-   startup in logcat.
+   The helper exchanges the code over HTTPS and targets the foreground Android
+   user. Pass `--user N` to require a specific foreground user, and keep that
+   profile unlocked. On user 0 it normally pushes the settings without starting
+   the app. For secondary users (or with `--in-app` on user 0), it uses `python3`
+   and `adb reverse` to deliver the settings once and cold-starts the development
+   app so it can save them in its own storage. Use a development build that
+   includes in-app enrolment and has Android network access. This route is
+   **experimental until verified on a real headset with a secondary user**.
+   If it fails, switch to user 0 and retry without `--in-app`. Add `--launch`
+   on either route to verify the recorder startup in logcat.
 4. Run `wrangler secret delete ENROLL_CODE` manually and remove the private code
    file, even if enrolment failed. The code is reusable until removed, not single-use.
 

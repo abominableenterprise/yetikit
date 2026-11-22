@@ -5,11 +5,11 @@ set -euo pipefail
 
 fail() { printf '[playtest-enroll] %s\n' "$1" >&2; exit 1; }
 usage() {
-  printf 'Usage: playtest-enroll.sh --endpoint <Worker HTTPS origin> --code <private file> [--player <tag>] [--user N] [--launch]\n'
+  printf 'Usage: playtest-enroll.sh --endpoint <Worker HTTPS origin> --code <private file> [--player <tag>] [--user N] [--in-app] [--launch]\n'
   printf '%s\n' 'Targets the foreground Android user. Secondary profiles are experimental; switch to the primary profile (user 0) if enrollment fails.'
 }
 
-endpoint='' code_file='' player=test-device launch=0 requested_user=''
+endpoint='' code_file='' player=test-device launch=0 requested_user='' in_app=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --endpoint|--code|--player|--user)
@@ -23,6 +23,7 @@ while [[ $# -gt 0 ]]; do
           requested_user="${BASH_REMATCH[1]}" ;;
       esac
       shift ;;
+    --in-app) in_app=1 ;;
     --launch) launch=1 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; fail 'unknown argument' ;;
@@ -65,13 +66,25 @@ foreground_user() {
 user="$(foreground_user)" || fail 'could not determine the current Android user'
 [[ -z "$requested_user" || "$requested_user" == "$user" ]] \
   || fail '--user must be the foreground Android user so its app storage is mounted; switch to that profile and unlock it, then retry'
+if [[ "$user" != 0 ]]; then in_app=1; fi
+if [[ "$in_app" == 1 ]]; then
+  command -v python3 >/dev/null || fail 'python3 is required for in-app enrollment'
+fi
 installed="$("${device[@]}" shell cmd package path --user "$user" "$package" 2>/dev/null)" \
   || fail 'could not verify that the configured applicationId (quest.package) is installed on the selected device'
 [[ "$installed" == package:/* ]] || fail 'configured applicationId (quest.package) is not installed on the selected device'
 
 umask 077
-tmp='' remote_stage=''
+tmp='' remote_stage='' relay_pid='' reverse_port=''
 cleanup() {
+  if [[ -n "$relay_pid" ]]; then
+    kill "$relay_pid" 2>/dev/null || true
+    wait "$relay_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$reverse_port" ]]; then
+    "${device[@]}" reverse --remove "tcp:$reverse_port" >/dev/null 2>&1 \
+      || printf '[playtest-enroll] could not remove the adb reverse mapping; reconnect the device and clear the mapping\n' >&2
+  fi
   if [[ -n "$remote_stage" ]]; then
     "${device[@]}" shell rm -f "$remote_stage" >/dev/null 2>&1 \
       || printf '[playtest-enroll] could not remove the staged device file; reconnect the device and check the playtest directory\n' >&2
@@ -114,27 +127,81 @@ if ! jq -es --arg player "$player" --arg origin "\A$origin\z" '
 fi
 rm -f -- "$tmp/response"
 
-# Pin storage to the preflight user and verify it is still active before publishing.
-remote="/storage/emulated/$user/Android/data/$package/files/playtest"
-storage_hint='make sure the selected profile is unlocked and in the foreground, or switch to the primary profile (user 0) and retry'
-"${device[@]}" shell mkdir -p "$remote" >/dev/null 2>&1 || fail "adb could not create the playtest directory; $storage_hint"
-remote_stage="$remote/.${tmp##*/}"
-"${device[@]}" push "$tmp/playtest.json" "$remote_stage" >/dev/null 2>&1 || fail "adb push failed; check device connectivity and $storage_hint"
-current="$(foreground_user)" || fail 'could not re-check the foreground Android user; retry with the intended profile active'
-[[ "$current" == "$user" ]] || fail 'the foreground Android user changed during enrollment; switch back to the intended profile and retry'
-"${device[@]}" shell mv -fT "$remote_stage" "$remote/playtest.json" >/dev/null 2>&1 || fail 'adb could not replace the playtest configuration'
-remote_stage=''
-rm -f -- "$tmp/playtest.json"
-printf 'Playtest configuration installed on the selected device.\n'
+recheck_user() {
+  local current
+  current="$(foreground_user)" || fail 'could not re-check the foreground Android user; retry with the intended profile active'
+  [[ "$current" == "$user" ]] || fail 'the foreground Android user changed during enrollment; switch back to the intended profile and retry'
+}
 
-if [[ "$launch" == 1 ]]; then
-  # Use the device clock and the selected app PID; do not clear or print logcat.
+read_device_clock() {
   since="$("${device[@]}" shell date +%s.%N 2>/dev/null)" || fail 'could not read the device clock'
   [[ "$since" =~ ^([0-9]+\.[0-9]{3})[0-9]*$ ]] || fail 'unexpected device clock format'
   since="${BASH_REMATCH[1]}"
-  started="$("${device[@]}" shell am start --user "$user" -W -a android.intent.action.MAIN \
-    -c android.intent.category.LAUNCHER -p "$package" 2>/dev/null)" || fail 'could not launch the configured app'
+}
+
+install_in_app() {
+  local -r ENROLL_TIMEOUT_SECONDS=60 RELAY_START_ATTEMPTS=50
+  local attempt port nonce resolved activity started component_pattern
+  python3 "$ship_dir/playtest-enroll-relay.py" "$tmp" "$ENROLL_TIMEOUT_SECONDS" >/dev/null 2>&1 &
+  relay_pid=$!
+  for ((attempt = 0; attempt < RELAY_START_ATTEMPTS; attempt++)); do
+    [[ ! -f "$tmp/relay-ready" ]] || break
+    kill -0 "$relay_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  [[ -f "$tmp/relay-ready" ]] && read -r port nonce < "$tmp/relay-ready" \
+    && [[ "$port" =~ ^[0-9]{1,5}$ && "$nonce" =~ ^[0-9a-f]{32}$ ]] \
+    || fail 'could not initialize the local enrollment relay (configuration must fit in 16 KiB)'
+  # Do not replace a reverse mapping that belongs to another adb client.
+  "${device[@]}" reverse --no-rebind "tcp:$port" "tcp:$port" >/dev/null 2>&1 || fail 'could not set up adb reverse; check device connectivity and retry'
+  reverse_port="$port"
+  resolved="$("${device[@]}" shell cmd package resolve-activity --brief --user "$user" "$package" 2>/dev/null)" \
+    || fail 'could not resolve the configured app launcher activity'
+  activity="${resolved##*$'\n'}"
+  activity="${activity%$'\r'}"
+  component_pattern='^[A-Za-z0-9_.$]+$'
+  [[ "$activity" == "$package/"* && "${activity#*/}" =~ $component_pattern ]] \
+    || fail 'could not resolve the configured app launcher activity'
+  # adb shell joins argv into a remote command; quote the validated component
+  # so a nested Java class name containing $ reaches the device unchanged.
+  [[ "$launch" != 1 ]] || read_device_clock
+  recheck_user
+  started="$("${device[@]}" shell am start --user "$user" -S -W -n "'$activity'" \
+    --ei yetikit_enroll_port "$port" --es yetikit_enroll_nonce "$nonce" 2>/dev/null)" || fail 'could not launch the configured app'
   [[ "$started" == *'Status: ok'* ]] || fail 'Android did not confirm launch of the configured app'
+  # The relay exits successfully only after it has served the config once.
+  local served=0
+  wait "$relay_pid" && served=1
+  relay_pid=''
+  [[ "$served" == 1 ]] || fail 'the app did not receive the configuration from the enrollment relay; check the development build and retry'
+  rm -f -- "$tmp/playtest.json"
+  printf 'Playtest configuration delivered to the app.\n'
+}
+
+install_by_push() {
+  # Pin storage to the preflight user and verify it is still active before publishing.
+  local remote="/storage/emulated/$user/Android/data/$package/files/playtest"
+  local storage_hint='make sure the selected profile is unlocked and in the foreground, or switch to the primary profile (user 0) and retry'
+  "${device[@]}" shell mkdir -p "$remote" >/dev/null 2>&1 || fail "adb could not create the playtest directory; $storage_hint"
+  remote_stage="$remote/.${tmp##*/}"
+  "${device[@]}" push "$tmp/playtest.json" "$remote_stage" >/dev/null 2>&1 || fail "adb push failed; check device connectivity and $storage_hint"
+  recheck_user
+  "${device[@]}" shell mv -fT "$remote_stage" "$remote/playtest.json" >/dev/null 2>&1 || fail 'adb could not replace the playtest configuration'
+  remote_stage=''
+  rm -f -- "$tmp/playtest.json"
+  printf 'Playtest configuration installed on the selected device.\n'
+}
+
+if [[ "$in_app" == 1 ]]; then install_in_app; else install_by_push; fi
+
+if [[ "$launch" == 1 ]]; then
+  # Use the device clock and the selected app PID; do not clear or print logcat.
+  if [[ "$in_app" == 0 ]]; then
+    read_device_clock
+    started="$("${device[@]}" shell am start --user "$user" -W -a android.intent.action.MAIN \
+      -c android.intent.category.LAUNCHER -p "$package" 2>/dev/null)" || fail 'could not launch the configured app'
+    [[ "$started" == *'Status: ok'* ]] || fail 'Android did not confirm launch of the configured app'
+  fi
   for ((attempt = 0; attempt < 10; attempt++)); do
     # Android encodes the user in the UID (PER_USER_RANGE = 100000).
     # pidof has no user filter and could find the same app in another profile.
