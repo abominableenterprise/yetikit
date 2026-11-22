@@ -43,6 +43,9 @@ with tarfile.open(path, 'w', format=tarfile.GNU_FORMAT) as archive:
     # The filesystem sees the same path, but tar tracks the directory entry
     # by its spelling and fails to discard its old inode when replacing it.
     member(android + '/SDK', tarfile.REGTYPE, b'temporary')
+    # Keep the replacement file's inode live across SDK's re-creation. ext4
+    # can otherwise cycle the same inode through directory, file, directory.
+    member(android + '/temporary-link', tarfile.LNKTYPE, link='opt/unity/' + android + '/SDK')
     member(android + '//SDK')
     member(android + '/SDK/tool', tarfile.REGTYPE, b'restored SDK payload\n')
     if layout == 'mixed-error':
