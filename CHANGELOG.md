@@ -12,7 +12,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 - None.
 
 ### Fixed
-- None.
+- Document R2 lifecycle prefixes that expire playtest session uploads and
+  notification copies without expiring live tuning.
 
 ### Behaviour changes
 - None.

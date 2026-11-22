@@ -57,16 +57,29 @@ forwarding error, the Worker returns 502 and keeps the copy in R2.
 tuning/<player>.json       live tuning (top-level prefix)
 ```
 
-For example, use `session-` as the prefix of every session name. To expire old
-sessions, configure this example R2 lifecycle rule in the bucket settings:
+The client generates UTC session IDs such as `20261029-070503-abcd`
+(`yyyyMMdd-HHmmss` plus four hex digits). Snapshots reuse the same session ID.
+The Worker stores both under `<session>/`, with no `session-` prefix. To expire
+playtest data, configure an R2 lifecycle rule using the first four digits of
+these IDs, for example:
 
 | Rule name | Object key prefix | Action |
 | --- | --- | --- |
-| `expire-old-sessions` | `session-` | Delete objects 30 days after upload |
+| `expire-old-sessions` | `2026` | Delete objects 30 days after upload |
 
-This expires session files and `/done` copies without expiring `tuning/`.
-Choose the retention period to suit your playtest data policy. Bucket lifecycle
-rules are configured on the bucket, not in the Worker configuration.
+Use the year alone, without a trailing slash or dash. This example matches
+sessions created in 2026 only: add a rule for each year present in the bucket
+and add the next year's rule before the UTC year rolls over. Keep the older
+rules until their matching objects have expired. Expiry is based on object age,
+not the date in the session ID. If you use custom session IDs, set rules for
+their actual key prefixes separately.
+
+The same rule expires the `done-*.json` copies: those objects are stored at
+`<session>/done-<id>.json`, so a top-level `done-` rule would not match. Year
+prefixes cannot match `tuning/`; do not use an empty prefix (all objects) to
+expire playtest data. Replace any existing `session-` rule intended for these
+client uploads. Choose the retention period to suit your playtest data policy.
+Configure lifecycle rules on the bucket, not in the Worker configuration.
 
 ## Enrol a device
 
