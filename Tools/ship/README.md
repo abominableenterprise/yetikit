@@ -386,16 +386,19 @@ Use the HTTPS origin of the [playtest inbox Worker](../../templates/playtest-wor
 The code file must be readable only by its owner (`chmod 600`); put the code on
 its first line. `--player` defaults to `test-device`; give each headset its own
 tag if you use per-player tuning. Keep the code file out of the checkout.
-The helper checks that the configured app is installed for the current Android
-user, then writes or replaces `playtest.json` under the app's external
-`files/playtest` directory. The upload key is not printed, and the private
-host copy is removed after the push or on failure.
+Enrollment supports only the primary Android user (user 0). Switch to that
+user before running the helper. Before exchanging the code, the helper checks
+that user 0 is active and that the configured app is installed for that user.
+It stages the configuration in the app's external `files/playtest` directory,
+then replaces `playtest.json` only after the transfer succeeds. On failure it
+attempts to remove the staged file. The upload key is not printed, and the
+private host copy is removed after installation or on failure.
 
 Omit `--launch` to install the file without launching the app. For launch
 verification, start with the app stopped. The development app must log
 `Playtest recorder on` to the `Unity` logcat tag when recording is enabled.
 Only a fresh line from the app process counts, and the helper never prints
-raw logcat. A failed launch check does not undo the push.
+raw logcat. A failed launch check does not undo the configuration replacement.
 
 Delete the Worker `ENROLL_CODE` secret manually when finished, including if
 enrollment fails, and remove the local code file. The helper does not run
