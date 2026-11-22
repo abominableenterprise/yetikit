@@ -1,14 +1,14 @@
 {
   "name": "com.abominable.yetikit.lab",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "unity": "6000.6",
   "displayName": "YetiKit Lab",
   "description": "Development-only experiments, grip lab stations, and local tuning for headset labs.",
   "license": "MIT",
   "dependencies": {
-    "com.abominable.yetikit.hands": "0.0.1",
-    "com.abominable.yetikit.interaction": "0.0.1",
-    "com.abominable.yetikit.playtest": "0.0.1",
+    "com.abominable.yetikit.hands": "0.2.0",
+    "com.abominable.yetikit.interaction": "0.2.0",
+    "com.abominable.yetikit.playtest": "0.2.0",
     "com.unity.ugui": "2.6.0",
     "com.unity.modules.jsonserialize": "1.0.0",
     "com.unity.modules.physics": "1.0.0",

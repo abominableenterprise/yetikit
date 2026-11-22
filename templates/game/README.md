@@ -105,7 +105,7 @@ as Git packages at their manifest pins. Both modes reject local paths and
 embedded packages; even the pre-import check validates an existing lock. This
 is a package-source check, not an editor, device or signing doctor.
 
-The generator pins all kit modules to one public commit with the Point & Pinch APIs.
+The generator pins all six kit modules to the public `v0.2.0` tag.
 The starter scripts themselves are copied into `Assets`, not fetched as a package.
 For a cold import, start with a new project (no lock or `Library`), an empty
 `UPM_CACHE_ROOT`, and no per-cache overrides (`UPM_CACHE_PATH`,
@@ -149,9 +149,9 @@ for wrapper setup and the consumer config schema.
 - **Tools:** the generator does not vendor Ship. When adopting a compatible
   tag, use [`kit-bump.sh`](https://github.com/abominableenterprise/yetikit/blob/main/Tools/vendor/README.md)
   to switch all kit pins together and vendor `Tools/yetikit/` with its `VERSION`
-  receipt. Do not run it just for a smoke check of the generated SHA pins;
-  [`kit-check.sh`](https://github.com/abominableenterprise/yetikit/blob/main/Tools/vendor/kit-check.sh)
-  expects a tagged receipt and is not the starter verifier.
+  receipt. Before vendoring Ship, use `verify-packages.py` to check the
+  generated package pins; [`kit-check.sh`](https://github.com/abominableenterprise/yetikit/blob/main/Tools/vendor/kit-check.sh)
+  expects a tagged receipt.
 - **CI:** the kit's [Ship shell suite](https://github.com/abominableenterprise/yetikit/blob/main/.github/workflows/ship.yml)
   exercises the generated verifier with synthetic inputs, not a remote Unity
   import. No consumer workflow is generated. On the consumer's CI, run the

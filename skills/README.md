@@ -19,12 +19,12 @@ the game's pinned kit capabilities: a skill is guidance, not an API upgrade.
 Copy [templates/game](../templates/game/) for game-owned agent rules, CODEMAP,
 task-brief tail, review checklist and playtest-inbox routine. Replace
 `{{GAME_NAME}}` and `{{GAME_ID}}`, fill area paths/commands, and configure private
-sources and permissions outside the public kit. No stamping script ships yet.
+sources and permissions outside the public kit. For a fresh project, use the
+[new-game starter generator](../templates/game/README.md).
 
-Version 0.1.13 provides core runtime/editor APIs, quality validators, Ship,
-vendoring and mesh checks; see the [release status](../README.md#modules).
-Hands, interaction, playtest and lab are previews; analyzer integrations remain
-planned. See [the design](../docs/design.md). Skills must not be read as proof
+Version 0.2.0 releases core, quality, hands, interaction, development-only
+playtest and lab, plus Ship, vendoring and mesh checks; see the
+[release status](../README.md#modules). Analyzer integrations remain planned. See [the design](../docs/design.md). Skills must not be read as proof
 an unavailable command ran successfully; verify capabilities against the
 consumer's pinned tag.
 
