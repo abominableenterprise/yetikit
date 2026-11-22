@@ -1,12 +1,12 @@
 {
   "name": "com.abominable.yetikit.playtest",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "unity": "6000.6",
   "displayName": "YetiKit Playtest",
   "description": "Dev-only durable playtest recording and optional delivery.",
   "license": "MIT",
   "dependencies": {
-    "com.abominable.yetikit.core": "0.3.2",
+    "com.abominable.yetikit.core": "0.3.3",
     "com.unity.modules.androidjni": "1.0.0",
     "com.unity.modules.audio": "1.0.0",
     "com.unity.modules.imageconversion": "1.0.0",
