@@ -1,0 +1,22 @@
+{
+  "androidjni": ["AndroidJNI", "AndroidJNIHelper", "AndroidJavaClass", "AndroidJavaObject", "AndroidJavaProxy", "AndroidJavaRunnable", "AndroidJavaException", "AndroidApplication", "Android.Permission"],
+  "animation": ["Animation", "AnimationClip", "Animator", "AnimatorOverrideController", "RuntimeAnimatorController"],
+  "audio": ["AudioClip", "AudioSource", "AudioListener", "AudioSettings", "AudioMixer", "AudioMixerGroup", "Microphone"],
+  "imageconversion": ["ImageConversion", "EncodeToJPG", "EncodeToPNG", "EncodeToEXR", "EncodeToTGA", "LoadImage", "EncodeArrayToJPG", "EncodeArrayToPNG", "EncodeNativeArrayToJPG", "EncodeNativeArrayToPNG"],
+  "imgui": ["GUI", "GUILayout", "GUIStyle", "GUIContent", "GUISkin", "GUIUtility", "EventType"],
+  "jsonserialize": ["JsonUtility"],
+  "particlesystem": ["ParticleSystem", "ParticleSystemRenderer"],
+  "physics": ["Physics", "PhysicsScene", "Rigidbody", "Collider", "BoxCollider", "CapsuleCollider", "SphereCollider", "MeshCollider", "CharacterController", "RaycastHit", "QueryTriggerInteraction", "Collision", "CollisionDetectionMode", "ConfigurableJoint", "FixedJoint"],
+  "physics2d": ["Physics2D", "Rigidbody2D", "Collider2D", "BoxCollider2D", "CapsuleCollider2D", "CircleCollider2D", "RaycastHit2D", "Collision2D"],
+  "screencapture": ["ScreenCapture"],
+  "terrain": ["Terrain", "TerrainData", "TerrainLayer"],
+  "subsystems": ["SubsystemManager", "IntegratedSubsystem", "IntegratedSubsystemDescriptor"],
+  "uielements": ["UnityEngine.UIElements"],
+  "ui": ["Canvas", "CanvasRenderer", "RectTransformUtility"],
+  "unitywebrequest": ["UnityWebRequest", "DownloadHandler", "DownloadHandlerBuffer", "DownloadHandlerFile", "UploadHandler", "UploadHandlerRaw", "UploadHandlerFile"],
+  "unitywebrequestassetbundle": ["UnityWebRequestAssetBundle", "DownloadHandlerAssetBundle"],
+  "unitywebrequestaudio": ["UnityWebRequestMultimedia", "DownloadHandlerAudioClip"],
+  "unitywebrequesttexture": ["UnityWebRequestTexture", "DownloadHandlerTexture"],
+  "video": ["UnityEngine.Video", "VideoPlayer", "VideoClip"],
+  "xr": ["InputDevices", "XRNode", "XRSettings", "XRDisplaySubsystem", "XRInputSubsystem", "XRDevice", "XRStats"]
+}

@@ -2,7 +2,9 @@
 # Offline integration tests: all repositories, identities and consumer data are synthetic.
 set -euo pipefail
 vendor=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-for tool in git jq sha256sum tar flock; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
+for tool in git jq sha256sum tar flock python3; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
+python3 -B "$vendor/../ci/test-package-closure.py"
+python3 -B "$vendor/../ci/check-package-closure.py"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/yetikit vendor tests.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 source_repo="$tmp/source repo"
