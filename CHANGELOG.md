@@ -9,7 +9,7 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
-- None.
+- Set up a private playtest inbox for session uploads, webhook notifications, and live tuning.
 
 ### Fixed
 - None.
