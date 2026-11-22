@@ -64,7 +64,7 @@ namespace YetiKit.Playtest.XR.Tests
             var prop = propObject.AddComponent<PropGrabInteractable>();
             prop.interactionManager = manager;
             prop.movementType = XRBaseInteractable.MovementType.VelocityTracking;
-            prop.AddComponent<GrabbableProp>();
+            propObject.AddComponent<GrabbableProp>();
             var controller = Child("Controller");
             var motion = controller.AddComponent<ControllerMotion>();
             controller.AddComponent<SphereCollider>().isTrigger = true;
