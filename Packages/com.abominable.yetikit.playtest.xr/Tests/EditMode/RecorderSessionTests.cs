@@ -1,8 +1,11 @@
 using System;
+using System.Collections;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace YetiKit.Playtest.XR.Tests
 {
@@ -91,6 +94,40 @@ namespace YetiKit.Playtest.XR.Tests
                 Assert.That(records, Does.Not.Contain("ignored"));
             }
             finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [UnityTest]
+        public IEnumerator DisablingTheRecorderPausesAndReenablingResumesRecording()
+        {
+            yield return new EnterPlayMode();
+            var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            var host = new GameObject("Synthetic recorder");
+            try
+            {
+                var source = new Source();
+                using var recorder = new RecorderSession(new FileChunkStore(path), () => 0, () => DateTime.UtcNow,
+                    () => "{}", null, null, new[] { source });
+                host.AddComponent<FlightRecorder>().Recording = recorder;
+                recorder.Tick(Time.frameCount, 0, false);
+                var session = recorder.Session;
+                Assert.That(source.Subscribers, Is.EqualTo(1));
+
+                host.SetActive(false);
+                Assert.That(session.Paused, Is.True);
+                Assert.That(source.Subscribers, Is.Zero);
+
+                host.SetActive(true);
+                yield return null; // Let FlightRecorder.LateUpdate resume the session.
+                Assert.That(recorder.Session, Is.SameAs(session));
+                Assert.That(session.Paused, Is.False);
+                Assert.That(source.Subscribers, Is.EqualTo(1));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
+                if (Directory.Exists(path)) Directory.Delete(path, true);
+            }
+            yield return new ExitPlayMode();
         }
 
         static string ReadChunk(string path)

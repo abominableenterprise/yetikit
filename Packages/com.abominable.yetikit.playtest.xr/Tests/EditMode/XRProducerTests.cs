@@ -64,7 +64,7 @@ namespace YetiKit.Playtest.XR.Tests
             var prop = propObject.AddComponent<PropGrabInteractable>();
             prop.interactionManager = manager;
             prop.movementType = XRBaseInteractable.MovementType.VelocityTracking;
-            propObject.AddComponent<GrabbableProp>();
+            var grabbable = propObject.AddComponent<GrabbableProp>();
             var controller = Child("Controller");
             var motion = controller.AddComponent<ControllerMotion>();
             controller.AddComponent<SphereCollider>().isTrigger = true;
@@ -94,12 +94,15 @@ namespace YetiKit.Playtest.XR.Tests
 
             void Release(float speed)
             {
-                manager.SelectEnter(interactor, prop);
+                // Treat each attempt as a fresh prop reset, not an immediate regrab.
+                grabbable.ClearThrow();
+                manager.SelectEnter((IXRSelectInteractor)interactor, prop);
+                Assert.That(prop.isSelected, Is.True);
                 motion.SampleThisFrame();
                 motion.History.Clear();
                 motion.History.Add(new ThrowSample(Time.time - 0.01f, Vector3.right * speed, Vector3.zero, ControllerMotion.FrameDelta));
                 motion.History.Add(new ThrowSample(Time.time, Vector3.right * speed, Vector3.zero, ControllerMotion.FrameDelta));
-                manager.SelectExit(interactor, prop);
+                manager.SelectExit((IXRSelectInteractor)interactor, prop);
                 prop.FinishLateRelease();
                 prop.ProcessInteractable(XRInteractionUpdateOrder.UpdatePhase.Late);
             }

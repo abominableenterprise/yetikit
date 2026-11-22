@@ -24,8 +24,8 @@ Use nonpersonal player and prop IDs. The first successful attachment owns the
 configuration for the lifetime of the app; repeated calls do not add producers.
 No recording starts in batch mode. Recordings are local, under
 `Application.persistentDataPath/playtest/outbox`. The host flushes and stops on
-quit, or pauses while Unity suspends or the headset reports that it is not worn.
-A brief pause resumes the same session; a pause over five minutes starts a new
+quit, or pauses while the recorder is disabled, Unity suspends, or the headset
+reports that it is not worn. A brief pause resumes the same session; a pause over five minutes starts a new
 session and rereads the supplied identities. If the headset does not expose
 wear detection, Unity's application pause signal still applies.
 

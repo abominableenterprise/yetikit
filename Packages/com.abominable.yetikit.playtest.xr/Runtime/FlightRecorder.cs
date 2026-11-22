@@ -59,12 +59,15 @@ namespace YetiKit.Playtest.XR
         {
             appPaused = paused;
             // Flush even if Unity suspends before another LateUpdate.
-            if (paused) Recording?.Tick(Time.frameCount, 0, true);
+            if (paused) Pause();
         }
+
+        // Keep the coordinator alive so LateUpdate can resume it on re-enable.
+        void OnDisable() => Pause();
+        void Pause() => Recording?.Tick(Time.frameCount, 0, true);
 
         void OnApplicationQuit() => Stop();
         void OnDestroy() => Stop();
-        void OnDisable() => Stop();
 
         void Stop()
         {
