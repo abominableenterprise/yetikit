@@ -5,13 +5,6 @@ namespace YetiKit.Playtest
     public static class PolaroidWhoosh
     {
         public const int Rate = 22050;
-        public static AudioClip Create()
-        {
-            var samples = Samples();
-            var clip = AudioClip.Create("Polaroid whoosh", samples.Length, 1, Rate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
         public static float[] Samples()
         {
             var data = new float[(int)(Rate * PolaroidCard.FlySeconds)];

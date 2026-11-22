@@ -99,8 +99,8 @@ namespace YetiKit.Playtest.Tests
             var outcomes = new SnapOutcome();
             await Task.Run(() =>
             {
-                outcomes.Post(new(Session, Snap, SnapStatus.Queued));
-                outcomes.Post(new(Session, Snap, SnapStatus.Sent));
+                outcomes.Post((Session, Snap, SnapStatus.Queued));
+                outcomes.Post((Session, Snap, SnapStatus.Sent));
             });
             Assert.That(outcomes.TryTake(out var queued));
             Assert.That(queued.Status, Is.EqualTo(SnapStatus.Queued));

@@ -41,7 +41,6 @@ namespace YetiKit.Playtest.Tests
                 Assert.That(jpeg, Is.Not.Null);
                 Assert.That(time, Is.EqualTo(1d));
                 Assert.That(previews, Is.EqualTo(1));
-                Assert.That(frames.LastCaptureSource, Is.EqualTo("virtual-head"));
                 Assert.That(RenderTexture.active, Is.SameAs(original));
                 Assert.That(jpeg[0], Is.EqualTo(0xff));
                 Assert.That(jpeg[1], Is.EqualTo(0xd8));

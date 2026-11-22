@@ -21,11 +21,7 @@ namespace YetiKit.Playtest
         DonePayload manifest;
 #if UNITY_EDITOR || YETIKIT_DEV
         public SnapOutcome SnapOutcomes { get; set; }
-
-        void ReportSnap(SnapStatus status)
-        {
-            if (SnapDelivery.Split(dir, out var session, out var stem)) SnapOutcomes?.Post(new(session, stem, status));
-        }
+        void ReportSnap(SnapStatus status) { if (manifest.kind == "snap") SnapOutcomes?.Post((manifest.session, Path.GetExtension(dir)[1..], status)); }
 #endif
 
         internal Uploader(Outbox outbox, IUploadSettings settings, IHttpSender sender, double spacing, Func<double> clock) =>
@@ -55,6 +51,9 @@ namespace YetiKit.Playtest
                 if (done)
                 {
                     request.Body = manifest.ToJson();
+#if UNITY_EDITOR || YETIKIT_DEV
+                    request.Body = manifest.snapJson ?? request.Body;
+#endif
                     request.Headers["Idempotency-Key"] = manifest.id;
                 }
                 else
@@ -62,9 +61,7 @@ namespace YetiKit.Playtest
                     var file = Path.GetFileName(manifest.files[index]);
                     request.FilePath = Path.Combine(dir, file);
                     request.Headers["Content-Type"] = Path.GetExtension(file) switch
-                    {
-                        ".jpg" => "image/jpeg", ".wav" => "audio/wav", ".gz" => "application/gzip", _ => "application/json"
-                    };
+                    { ".jpg" => "image/jpeg", ".wav" => "audio/wav", ".gz" => "application/gzip", _ => "application/json" };
                 }
                 HttpResponse response;
                 try { response = await sender.SendAsync(request, cancellationToken); }

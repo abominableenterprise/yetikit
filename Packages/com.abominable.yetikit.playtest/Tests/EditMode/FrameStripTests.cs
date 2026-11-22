@@ -30,16 +30,13 @@ namespace YetiKit.Playtest.Tests
             Assert.That(ring.TryClosest(3, out _, out _), Is.False);
         }
 
-        [TestCase(false, false, "virtual-head")]
-        [TestCase(false, true, "virtual-head")]
-        [TestCase(true, false, "optional")]
-        public void SourceFallsBackWhenUnavailableOrFaulted(bool available, bool faulted, string expected)
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SourceFallsBackWhenUnavailable(bool available)
         {
-            using var source = new Source { Available = available, Faulted = faulted };
-            Assert.That(FrameSourceSelection.TryCopy(source, null, out var name), Is.EqualTo(available));
-            Assert.That(name, Is.EqualTo(expected));
-            Assert.That(FrameSourceSelection.TryCopy(null, null, out name), Is.False);
-            Assert.That(name, Is.EqualTo("virtual-head"));
+            var source = new Source { Available = available };
+            Assert.That(FrameSourceSelection.TryCopy(source, null), Is.EqualTo(available));
+            Assert.That(FrameSourceSelection.TryCopy(null, null), Is.False);
         }
 
         [Test]
@@ -47,7 +44,7 @@ namespace YetiKit.Playtest.Tests
         {
             var frames = new Frames();
             foreach (var time in new[] { 6d, 7d, 10d, 12d }) frames.Ring.Add(time, time);
-            var strip = new StripCapture(frames, "snap-token", 10, 10, recorderOffset: -8);
+            var strip = new StripCapture(frames, "snap-token", 10, 10);
             Assert.That(frames.Held, Is.EqualTo(7));
             strip.Tick();
             Assert.That(frames.Attempts, Is.Empty);
@@ -64,8 +61,8 @@ namespace YetiKit.Playtest.Tests
             Assert.That(strip.Files["snap-token-s01.jpg"], Is.EqualTo(new byte[] { 10 }));
             Assert.That(strip.MainIndex, Is.Zero);
             Assert.That(strip.Entries.Count, Is.EqualTo(2));
-            Assert.That((strip.Entries[0].file, strip.Entries[0].t, strip.Entries[0].dt), Is.EqualTo(("snap-token-s01.jpg", 2d, 0d)));
-            Assert.That((strip.Entries[1].file, strip.Entries[1].t, strip.Entries[1].dt), Is.EqualTo(("snap-token-s02.jpg", 4d, 2d)));
+            Assert.That((strip.Entries[0].file, strip.Entries[0].t, strip.Entries[0].dt), Is.EqualTo(("snap-token-s01.jpg", 10d, 0d)));
+            Assert.That((strip.Entries[1].file, strip.Entries[1].t, strip.Entries[1].dt), Is.EqualTo(("snap-token-s02.jpg", 12d, 2d)));
             Assert.That(JsonUtility.ToJson(strip.Entries[0]), Does.Contain("\"file\":\"snap-token-s01.jpg\""));
         }
 
@@ -75,7 +72,7 @@ namespace YetiKit.Playtest.Tests
             var frames = new Frames();
             frames.Ring.Add(8, 8);
             frames.Ring.Add(9, 9);
-            var strip = new StripCapture(frames, "snap-token", 10, double.NaN, recorderOffset: -9);
+            var strip = new StripCapture(frames, "snap-token", 10, double.NaN);
             strip.Tick(closing: true);
             strip.Cut();
             strip.Tick(closing: true);
@@ -84,7 +81,7 @@ namespace YetiKit.Playtest.Tests
             Assert.That(frames.Attempts, Is.EqualTo(new[] { 8d }));
             Assert.That(strip.Files.Keys, Is.EqualTo(new[] { "snap-token-s00.jpg" }));
             Assert.That(strip.MainIndex, Is.EqualTo(-1));
-            Assert.That(strip.Entries[0].t, Is.Zero);
+            Assert.That(strip.Entries[0].t, Is.EqualTo(8));
             Assert.That(strip.Entries[0].dt, Is.EqualTo(-2d));
         }
 
@@ -106,10 +103,8 @@ namespace YetiKit.Playtest.Tests
 
         sealed class Source : IFrameSource
         {
-            public bool Available, Faulted;
-            public string Name => "optional";
-            public bool TryCopy(RenderTexture destination) => Faulted ? throw new InvalidOperationException() : Available;
-            public void Dispose() { }
+            public bool Available;
+            public bool TryCopy(RenderTexture destination) => Available;
         }
     }
 }

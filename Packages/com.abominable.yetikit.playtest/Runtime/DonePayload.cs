@@ -21,10 +21,6 @@ namespace YetiKit.Playtest
 #if UNITY_EDITOR || YETIKIT_DEV
         internal string snapJson;
 #endif
-        internal string ToJson() =>
-#if UNITY_EDITOR || YETIKIT_DEV
-            snapJson ??
-#endif
-            JsonUtility.ToJson(this);
+        internal string ToJson() => JsonUtility.ToJson(this);
     }
 }

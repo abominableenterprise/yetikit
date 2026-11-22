@@ -22,11 +22,12 @@ namespace YetiKit.Playtest
             foreach (var dir in Directories())
             {
                 var id = Path.GetFileName(dir);
-                if (id.EndsWith(Delivered, StringComparison.Ordinal) && (SessionRules.IsId(id[..^Delivered.Length])
 #if UNITY_EDITOR || YETIKIT_DEV
-                    || SnapDelivery.Split(id[..^Delivered.Length], out _, out _)
+                if (SnapDelivery.IsStaging(id) || (id.EndsWith(Delivered, StringComparison.Ordinal) &&
+                    SnapDelivery.Split(id[..^Delivered.Length], out _, out _))) { DeleteDelivered(dir); continue; }
 #endif
-                    )) DeleteDelivered(dir);
+                if (id.EndsWith(Delivered, StringComparison.Ordinal) && SessionRules.IsId(id[..^Delivered.Length]))
+                    DeleteDelivered(dir);
                 else if (SessionRules.IsId(id)) RecoverMarker(dir, id);
             }
             store.PrunePending();
@@ -38,11 +39,7 @@ namespace YetiKit.Playtest
             {
                 var id = Path.GetFileName(dir);
 #if UNITY_EDITOR || YETIKIT_DEV
-                if (SnapDelivery.Split(dir, out var session, out var stem) && !File.Exists(Path.Combine(dir, Rejected)))
-                {
-                    var snap = SnapDelivery.Read(dir, session, stem);
-                    if (snap != null) return (dir, snap);
-                }
+                if (!File.Exists(Path.Combine(dir, Rejected)) && SnapDelivery.Read(dir) is { } snap) return (dir, snap);
 #endif
                 var markerPath = Path.Combine(dir, DoneMarker.FileName);
                 if (!SessionRules.IsId(id) || !File.Exists(markerPath) || IsLink(markerPath)) continue;
