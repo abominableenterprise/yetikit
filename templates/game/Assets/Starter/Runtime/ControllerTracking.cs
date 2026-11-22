@@ -19,6 +19,7 @@ namespace Game.Starter
         [SerializeField] HandSnapTurn handTurn;
         [SerializeField] SnapTurnProvider turn;
         [SerializeField] InputAction tracked;
+        [SerializeField] Transform controllerAim;
         const int FullPose = (int)(UnityEngine.XR.InputTrackingState.Position | UnityEngine.XR.InputTrackingState.Rotation);
 
         bool uiCapture, pointerOverUi, gripPressed;
@@ -42,13 +43,14 @@ namespace Game.Starter
         XRInputValueReader<Vector2> TurnInput => hand.RightHand ? turn.rightHandTurnInput : turn.leftHandTurnInput;
 
         public void Configure(PlayerHand playerHand, XRDirectInteractor grab, XRRayInteractor ray,
-            HandSnapTurn trackedTurn, SnapTurnProvider snapTurn, string device)
+            HandSnapTurn trackedTurn, SnapTurnProvider snapTurn, string device, Transform visualAim)
         {
             hand = playerHand;
             direct = grab;
             teleport = ray;
             handTurn = trackedTurn;
             turn = snapTurn;
+            controllerAim = visualAim;
             tracked = new InputAction("Tracked", InputActionType.PassThrough, device + "/isTracked");
         }
 
@@ -74,7 +76,17 @@ namespace Game.Starter
                     InputControlPath.TryFindChild<Vector2Control>(device, "{Primary2DAxis}") is not { } stick)
                     continue;
 
-                direct.transform.SetLocalPositionAndRotation(device.devicePosition.ReadValue(), device.deviceRotation.ReadValue());
+                var gripPosition = device.devicePosition.ReadValue();
+                var gripRotation = device.deviceRotation.ReadValue();
+                direct.transform.SetLocalPositionAndRotation(gripPosition, gripRotation);
+                if (controllerAim)
+                {
+                    // Match the sample's pointer-first, device-second bindings on the same tracked controller.
+                    var aimPosition = device.TryGetChildControl<Vector3Control>("pointerPosition")?.ReadValue() ?? gripPosition;
+                    var aimRotation = device.TryGetChildControl<QuaternionControl>("pointerRotation")?.ReadValue() ?? gripRotation;
+                    var inverseGrip = Quaternion.Inverse(gripRotation);
+                    controllerAim.SetLocalPositionAndRotation(inverseGrip * (aimPosition - gripPosition), inverseGrip * aimRotation);
+                }
                 gripPressed = grip.isPressed;
                 TriggerPressed = trigger.isPressed;
                 if (!pointerOverUi && !gripPressed && !TriggerPressed) uiCapture = false;
