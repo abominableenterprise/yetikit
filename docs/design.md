@@ -35,7 +35,8 @@ CI compares its digest and manifest tag. Game configuration belongs in
 `yetikit.json` (scenes, build method, bundle ID and signer fingerprint).
 Every Git UPM dependency in the closure is pinned at one repository tag;
 `kit-bump.sh` updates those pins and re-vendors Ship together. Before tagging,
-resolve core-only, playtest-only and full-XR manifests from an empty cache.
+follow the [release checklist](release.md), including the minimal Android
+consumer build.
 
 ## Four game seams (proposed signatures)
 
