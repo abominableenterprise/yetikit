@@ -71,17 +71,20 @@ rules are configured on the bucket, not in the Worker configuration.
 ## Enrol a device
 
 1. Set a high-entropy temporary code using `wrangler secret put ENROLL_CODE`.
-2. On the host attached to the test device, make a private HTTPS request to
-   `GET /enroll?code=…`. Write the returned `endpoint` and `uploadKey`, plus
-   the test device's `player` tag, to a private local `playtest.json`.
-3. Replace `<applicationId>` with the development app ID and run:
+2. Save the same code in a private file outside the checkout on the host
+   attached to the headset (`chmod 600`). Set `quest.package` in the consumer's
+   `yetikit.json` to the installed development app's Android application ID.
+3. From the consumer project, run the [Ship enrolment helper](../../Tools/ship/README.md#enroll-a-headset-for-playtesting):
 
    ```sh
-   adb push playtest.json /sdcard/Android/data/<applicationId>/files/playtest/playtest.json
+   Tools/yetikit/playtest-enroll.sh --endpoint https://worker.example.invalid --code "$HOME/private/enroll-code" --player test-headset
    ```
 
-4. Run `wrangler secret delete ENROLL_CODE` and remove the temporary host files,
-   even if enrolment failed. The code is reusable until removed, not single-use.
+   The helper exchanges the code over HTTPS and pushes the returned settings
+   to `/sdcard/Android/data/<applicationId>/files/playtest/playtest.json`.
+   Add `--launch` to verify the development app's recorder startup in logcat.
+4. Run `wrangler secret delete ENROLL_CODE` manually and remove the private code
+   file, even if enrolment failed. The code is reusable until removed, not single-use.
 
 Never put an upload key in an APK or repository. Do not print the key or code;
 keep the enrolment URL and response out of shell history and request logs.

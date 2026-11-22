@@ -370,6 +370,37 @@ network, activation or seat is needed. Generated-scene and no-scene fixtures
 cover both project shapes. Installation, licensing, curl, cache and editor
 processes are substituted with local fakes.
 
+## Enroll a headset for playtesting
+
+Use [playtest-enroll.sh](playtest-enroll.sh) on a host with Bash, `curl`, `jq`,
+`adb`, and a headset running an installed development build. Set
+`quest.package` in the consumer's `yetikit.json` to the build's Android
+application ID. The usual `PROJECT` and `YETIKIT_CONFIG` overrides apply.
+Connect one adb device, or select one with `QUEST_SERIAL` (or `ANDROID_SERIAL`).
+
+```sh
+Tools/yetikit/playtest-enroll.sh --endpoint https://worker.example.invalid --code "$HOME/private/enroll-code" --player test-headset --launch
+```
+
+Use the HTTPS origin of the [playtest inbox Worker](../../templates/playtest-worker/README.md).
+The code file must be readable only by its owner (`chmod 600`); put the code on
+its first line. `--player` defaults to `test-device`; give each headset its own
+tag if you use per-player tuning. Keep the code file out of the checkout.
+The helper checks that the configured app is installed for the current Android
+user, then writes or replaces `playtest.json` under the app's external
+`files/playtest` directory. The upload key is not printed, and the private
+host copy is removed after the push or on failure.
+
+Omit `--launch` to install the file without launching the app. For launch
+verification, start with the app stopped. The development app must log
+`Playtest recorder on` to the `Unity` logcat tag when recording is enabled.
+Only a fresh line from the app process counts, and the helper never prints
+raw logcat. A failed launch check does not undo the push.
+
+Delete the Worker `ENROLL_CODE` secret manually when finished, including if
+enrollment fails, and remove the local code file. The helper does not run
+`wrangler`.
+
 ## Quest release (macOS)
 
 The [Quest runner](quest-release.sh) consumes the same schema 1 configuration.
