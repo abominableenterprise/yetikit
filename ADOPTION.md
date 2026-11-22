@@ -2,9 +2,9 @@
 
 **Day 0:** install the [YetiKit skills](skills/README.md); copy [templates/game](templates/game/).
 
-Version 0.2.0 provides core, quality, hands, interaction, playtest and lab,
-plus Ship, consumer vendoring, mesh checks and the new-game starter. Playtest
-and lab are development-only; app modules remain planned.
+Version 0.3.0 provides core, quality, hands, interaction, playtest, playtest.xr
+and lab, plus Ship, consumer vendoring, mesh checks and the new-game starter.
+Playtest, playtest.xr and lab are development-only; app modules remain planned.
 Adopt in order: **Ship → core → quality → hands → interaction → playtest → lab → app.***.
 Within app.*, start with analytics, telemetry and menus; add paid services only
 when needed. A non-XR consumer skips hands, interaction and XR tooling.
@@ -20,12 +20,13 @@ build. See [migration safety and day-0 evidence](docs/design.md).
 Use a kit checkout to update a consumer before Unity resolves packages:
 
 ```sh
-/path/to/yetikit/Tools/vendor/kit-bump.sh v0.2.0 --project /path/to/consumer --modules core,quality
+/path/to/yetikit/Tools/vendor/kit-bump.sh v0.3.0 --project /path/to/consumer --modules core,quality
 /path/to/yetikit/Tools/vendor/kit-check.sh --project /path/to/consumer
 ```
 
 Set `--modules` to a comma-separated selection of `core`, `quality`, `hands`,
-`interaction`, `playtest` and `lab`. Bump replaces the vendored Ship tree and
+`interaction`, `playtest`, `playtest.xr` and `lab`. Select `playtest.xr` only
+for the optional XR recorder. Bump replaces the vendored Ship tree and
 pins all selected packages plus their dependency closure at one tag. Commit the
 Ship copy, VERSION receipt and consumer manifest together. See
 [vendoring usage and rules](Tools/vendor/README.md) for offline sources, CI checks
