@@ -1,0 +1,11 @@
+name = "replace-worker-name"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+[vars]
+HUB_URL = "https://example.invalid/replace-hook"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "replace-bucket-name"
