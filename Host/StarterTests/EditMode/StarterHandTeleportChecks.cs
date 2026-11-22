@@ -28,16 +28,21 @@ namespace YetiKit.Starter.HostTests
             Assert.That(hand.Visual, Is.Not.Null, "Use the visual wired by the starter bake.");
             Assert.That(model, Is.Not.Null);
             Assert.That(teleport.controllerRay.isActiveAndEnabled, Is.False);
+            // The hand must keep its original trajectory even if controller gravity is customized.
+            teleport.controllerRay.acceleration = 18f;
 
             // Solve the shoulder ray and projectile together for an unobstructed hit near pad center.
-            const float flight = 0.42f;
+            const float flight = 0.42f, handSpeed = 5f, handGravity = 9.8f, handTime = 2.5f;
+            const int handSegments = 24;
+            Assert.That(TeleportArc.MaxTime, Is.EqualTo(handTime));
+            Assert.That(TeleportArc.Segments, Is.EqualTo(handSegments));
             var landing = pad.bounds.center + Vector3.up * pad.bounds.extents.y;
             var space = hand.transform.parent;
             var shoulder = teleport.head.position + Vector3.down * 0.20f + Vector3.right * 0.17f;
-            var displaced = landing - shoulder + Vector3.up * (0.5f * teleport.controllerRay.acceleration * flight * flight);
+            var displaced = landing - shoulder + Vector3.up * (0.5f * handGravity * flight * flight);
             var direction = displaced.normalized;
-            var midpoint = landing + Vector3.up * (0.5f * teleport.controllerRay.acceleration * flight * flight) -
-                direction * (teleport.controllerRay.velocity * flight);
+            var midpoint = landing + Vector3.up * (0.5f * handGravity * flight * flight) -
+                direction * (handSpeed * flight);
             var tracking = new PointingHand(space.InverseTransformPoint(midpoint), Quaternion.identity);
             var tip = midpoint + Vector3.right * 0.025f;
             hand.Tracking = tracking;
@@ -62,6 +67,13 @@ namespace YetiKit.Starter.HostTests
             Assert.That(teleport.Aiming && teleport.line.enabled, Is.True);
             Assert.That(teleport.Aim.HasTarget, Is.True, "The arc must hit the pad with the baked hand visual active.");
             Assert.That(Vector3.Distance(teleport.AimRay.origin, midpoint), Is.LessThan(0.001f));
+            // Check the rendered samples before the floor hit can truncate the arc.
+            for (var i = 1; i <= 2; i++)
+            {
+                var t = i * handTime / handSegments;
+                var expected = teleport.AimRay.GetPoint(handSpeed * t) + Vector3.down * (0.5f * handGravity * t * t);
+                Assert.That(Vector3.Distance(teleport.line.GetPosition(i), expected), Is.LessThan(0.001f));
+            }
             var destination = teleport.Aim.Target.destinationPosition;
             Assert.That(Vector3.Distance(destination, landing), Is.LessThan(0.04f));
             Assert.That(teleport.line.colorGradient.Evaluate(0f), Is.EqualTo(teleport.validColor.Evaluate(0f)));

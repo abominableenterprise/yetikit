@@ -14,8 +14,8 @@ import wave
 TEMPLATE = Path(__file__).resolve().parent
 HOST = TEMPLATE.parents[1] / "Host"
 KIT_URL = "https://github.com/abominableenterprise/yetikit.git"
-# Keep all kit modules at one published commit that includes PointPinchTeleport.
-KIT_REVISION = "8e1c7a0cfa682ab543e71815eb2e910049fb675c"
+# Keep all kit modules at one published commit that includes the hand arc overrides.
+KIT_REVISION = "906bd2add9a36fb2ee2d8cad1ffb87b158b15519"
 PLACEHOLDERS = {"changeme", "default", "placeholder", "replace", "template", "todo", "yourcompany", "yourgame"}
 
 

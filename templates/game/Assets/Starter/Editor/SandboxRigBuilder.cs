@@ -77,10 +77,15 @@ namespace Game.Starter.Editor
             ray.useForceGrab = false;
             ray.hitClosestOnly = true;
             ray.raycastTriggerInteraction = QueryTriggerInteraction.Ignore;
+            // XRI 3.6.1 Starter Assets / Prefabs / Interactors / Teleport Interactor.prefab.
             ray.lineType = XRRayInteractor.LineType.ProjectileCurve;
             ray.referenceFrame = space;
-            ray.velocity = 5f;
+            ray.velocity = 10f;
             ray.acceleration = 9.8f;
+            ray.additionalGroundHeight = 0.1f;
+            ray.additionalFlightTime = 0.5f;
+            ray.sampleFrequency = 50;
+            ray.coneCastAngle = 6f; // Stock value; teleport uses a raycast, not a cone cast.
             ray.selectInput = Button(device, "{TriggerButton}", "{Trigger}");
             Line(rayRoot, lineMaterial);
             var visual = rayRoot.AddComponent<XRInteractorLineVisual>();
@@ -103,6 +108,9 @@ namespace Game.Starter.Editor
             aim.head = head;
             aim.provider = teleport;
             aim.controllerRay = ray;
+            aim.useControllerArcSettings = false;
+            aim.launchSpeed = 5f;
+            aim.gravity = 9.8f;
             // Match the starter pads even in projects without a named Teleport interaction layer.
             aim.teleportInteractionMask = PadsMask;
             aim.line = Line(handRoot, lineMaterial);
@@ -127,6 +135,9 @@ namespace Game.Starter.Editor
             handTurn.provider = turn;
 
             var controllerAim = visuals.Build(hand);
+            // The placeholder model stays on grip, but its ray still needs the pointer pose.
+            if (!controllerAim) controllerAim = Child(controller.transform, "Controller Aim").transform;
+            ray.rayOriginTransform = controllerAim;
             handRoot.AddComponent<ControllerTracking>().Configure(hand, direct, ray, handTurn, turn, device, controllerAim);
         }
 
