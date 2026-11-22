@@ -21,8 +21,10 @@ Development builds can now enroll secondary Android profiles from inside the app
   The development app receives the settings through a one-time localhost relay
   protected by a nonce and saves them atomically
   ([#363](https://github.com/abominableenterprise/yetikit/issues/363)).
-- Linux license activation and return now accept passwords that start with a
-  hyphen ([#365](https://github.com/abominableenterprise/yetikit/issues/365)).
+- Linux licensing passes credentials as `--username=` and `--password=` so a
+  password starting with `-` is no longer parsed as an option
+  ([#365](https://github.com/abominableenterprise/yetikit/issues/365),
+  [#367](https://github.com/abominableenterprise/yetikit/pull/367)).
 
 ### Behaviour changes
 - User 0 still uses the adb push route by default. In-app enrollment remains
