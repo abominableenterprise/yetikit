@@ -23,9 +23,9 @@ namespace Game.Starter.Editor
             this.handMaterial = handMaterial;
         }
 
-        public void Build(PlayerHand hand)
+        public Transform Build(PlayerHand hand)
         {
-            BuildController(hand);
+            var controllerAim = BuildController(hand);
             var model = Child(hand.transform, "Hand Visual");
             model.gameObject.SetActive(false);
             var joints = new Transform[XrHandTracking.AllJoints];
@@ -40,24 +40,30 @@ namespace Game.Starter.Editor
             using var serialized = new SerializedObject(hand);
             serialized.FindProperty("visual").objectReferenceValue = visual;
             serialized.ApplyModifiedPropertiesWithoutUndo();
+            return controllerAim;
         }
 
-        void BuildController(PlayerHand hand)
+        Transform BuildController(PlayerHand hand)
         {
             // The controller root is already gated by ControllerTracking, not by grab or ray state.
             var prefab = hand.RightHand ? rightController : leftController;
             if (prefab)
             {
-                var visual = (GameObject)PrefabUtility.InstantiatePrefab(prefab, hand.controller);
+                var aim = Child(hand.controller, "Controller Visual Aim");
+                var visual = (GameObject)PrefabUtility.InstantiatePrefab(prefab, aim);
                 visual.name = "Controller Visual";
+                // Match the nested controller visual overrides in Starter Assets' XR Origin (XR Rig).prefab.
+                visual.transform.SetLocalPositionAndRotation(new Vector3(0f, 0f, -0.05f), Quaternion.Euler(0f, 180f, 0f));
                 PrefabUtility.RecordPrefabInstancePropertyModifications(visual);
-                return;
+                PrefabUtility.RecordPrefabInstancePropertyModifications(visual.transform);
+                return aim;
             }
 
             var controller = Child(hand.controller, "Controller Visual");
             var grip = Model(controller, "Grip", controllerMesh, controllerMaterial);
             grip.SetLocalPositionAndRotation(new Vector3(0f, -0.015f, -0.028f), Quaternion.Euler(55f, 0f, 0f));
             grip.localScale = new Vector3(0.043f, 0.055f, 0.043f);
+            return null; // The placeholder is authored for the grip pose.
         }
 
         static Transform Child(Transform parent, string name)

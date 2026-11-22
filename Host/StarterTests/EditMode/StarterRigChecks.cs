@@ -213,7 +213,7 @@ namespace YetiKit.Starter.HostTests
             Assert.That(head.y - destination.y, Is.EqualTo(1.6f).Within(0.001f));
         }
 
-        internal static XRController AddController(string layout, string usage)
+        internal static XRController AddController(string layout, string usage, bool hasPointerPose = false)
         {
             InputSystem.RegisterLayout(@"{
                 ""name"": """ + layout + @""",
@@ -223,7 +223,9 @@ namespace YetiKit.Starter.HostTests
                     {""name"": ""triggerButton"", ""layout"": ""Button"", ""usage"": ""TriggerButton""},
                     {""name"": ""grip"", ""layout"": ""Axis"", ""usage"": ""Grip""},
                     {""name"": ""trigger"", ""layout"": ""Axis"", ""usage"": ""Trigger""},
-                    {""name"": ""stick"", ""layout"": ""Vector2"", ""usage"": ""Primary2DAxis""}
+                    {""name"": ""stick"", ""layout"": ""Vector2"", ""usage"": ""Primary2DAxis""}" + (hasPointerPose ? @",
+                    {""name"": ""pointerPosition"", ""layout"": ""Vector3""},
+                    {""name"": ""pointerRotation"", ""layout"": ""Quaternion""}" : "") + @"
                 ]
             }");
             var device = (XRController)InputSystem.AddDevice(layout);
@@ -232,12 +234,19 @@ namespace YetiKit.Starter.HostTests
         }
 
         internal static void SetController(XRController device, Vector3 position, Quaternion rotation,
-            bool trigger = false, Vector2 stick = default, bool grip = false, bool tracked = true)
+            bool trigger = false, Vector2 stick = default, bool grip = false, bool tracked = true, Pose? pointer = null)
         {
             using (StateEvent.From(device, out var state))
             {
                 device.devicePosition.WriteValueIntoEvent(position, state);
                 device.deviceRotation.WriteValueIntoEvent(rotation, state);
+                if (pointer is { } aim)
+                {
+                    device.GetChildControl<UnityEngine.InputSystem.Controls.Vector3Control>("pointerPosition")
+                        .WriteValueIntoEvent(aim.position, state);
+                    device.GetChildControl<UnityEngine.InputSystem.Controls.QuaternionControl>("pointerRotation")
+                        .WriteValueIntoEvent(aim.rotation, state);
+                }
                 device.trackingState.WriteValueIntoEvent(3, state);
                 device.isTracked.WriteValueIntoEvent(tracked ? 1f : 0f, state);
                 device.TryGetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("gripButton")

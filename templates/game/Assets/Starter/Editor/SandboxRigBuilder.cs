@@ -126,8 +126,8 @@ namespace Game.Starter.Editor
             handTurn.head = head;
             handTurn.provider = turn;
 
-            handRoot.AddComponent<ControllerTracking>().Configure(hand, direct, ray, handTurn, turn, device);
-            visuals.Build(hand);
+            var controllerAim = visuals.Build(hand);
+            handRoot.AddComponent<ControllerTracking>().Configure(hand, direct, ray, handTurn, turn, device, controllerAim);
         }
 
         static T Direct<T>(GameObject root, XRInteractionManager manager) where T : XRDirectInteractor
