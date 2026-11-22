@@ -10,19 +10,19 @@ export PATH="$tmp/bin:$tmp/process-view:$PATH" HOME="$tmp/home" LC_ALL=C
 unset TAR_OPTIONS UNITY_IMAGE UNITY_MODULES UNITY_USERNAME UNITY_PASSWORD USERNAME PASSWORD
 unset THEROBOTS_HUB_URL THEROBOTS_TASK_ID THEROBOTS_TASK_TOKEN UNITY_RETURN_ON_EXIT
 mkdir -p "$HOME" "$tmp/bin" "$tmp/legacy"
-export FIXTURE_ARCHIVE="$tmp/image.tar"
+export FIXTURE_ARCHIVE="$tmp/complete.tar"
 
 editor='Editor/Unity'
 client='Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client'
 android='Editor/Data/PlaybackEngines/AndroidPlayer'
-python3 - "$editor" "$client" "$android" <<'PY'
+for layout in complete missing-editor missing-client missing-ndk mixed-error; do
+  python3 - "$tmp/$layout.tar" "$layout" "$editor" "$client" "$android" <<'PY'
 import io
-import os
 import sys
 import tarfile
 
-editor, client, android = sys.argv[1:]
-with tarfile.open(os.environ['FIXTURE_ARCHIVE'], 'w', format=tarfile.GNU_FORMAT) as archive:
+path, layout, editor, client, android = sys.argv[1:]
+with tarfile.open(path, 'w', format=tarfile.GNU_FORMAT) as archive:
     def member(path, kind=tarfile.DIRTYPE, data=b'', link=''):
         info = tarfile.TarInfo('opt/unity' + ('/' + path if path else ''))
         info.type, info.mode, info.size, info.linkname = kind, 0o755, len(data), link
@@ -32,22 +32,30 @@ with tarfile.open(os.environ['FIXTURE_ARCHIVE'], 'w', format=tarfile.GNU_FORMAT)
     # late symlink makes tar record the SDK inode for its post-link status pass.
     gnu_dumpdir = b'D'
     member('', gnu_dumpdir, b'\0')
-    member(editor, tarfile.REGTYPE, b'#!/bin/sh\n# Unity 6000.6.6f1\n')
-    member(client, tarfile.REGTYPE, b'#!/bin/sh\n')
+    if layout != 'missing-editor':
+        member(editor, tarfile.REGTYPE, b'#!/bin/sh\n# Unity 6000.6.6f1\n')
+    if layout != 'missing-client':
+        member(client, tarfile.REGTYPE, b'#!/bin/sh\n')
     member(android + '//SDK')
-    member(android + '/NDK')
-    member(android + '/NDK/sdk-tool', tarfile.SYMTYPE, link='../SDK//tool')
+    link_dir = 'link-trigger' if layout == 'missing-ndk' else 'NDK'
+    member(android + '/' + link_dir)
+    member(android + '/' + link_dir + '/sdk-tool', tarfile.SYMTYPE, link='../SDK//tool')
     # The filesystem sees the same path, but tar tracks the directory entry
     # by its spelling and fails to discard its old inode when replacing it.
     member(android + '/SDK', tarfile.REGTYPE, b'temporary')
     member(android + '//SDK')
     member(android + '/SDK/tool', tarfile.REGTYPE, b'restored SDK payload\n')
+    if layout == 'mixed-error':
+        member(android + '/blocked', tarfile.REGTYPE, b'not a directory')
+        member(android + '/blocked/child', tarfile.REGTYPE, b'cannot extract')
 PY
+done
 
 cat > "$tmp/bin/crane" <<'EOF'
 #!/bin/sh
 [ "$#" = 3 ] && [ "$1" = export ] && [ "$3" = - ] || exit 99
-exec cat "$FIXTURE_ARCHIVE"
+cat "$FIXTURE_ARCHIVE" || exit
+exit "${FAKE_EXPORT_STATUS:-0}"
 EOF
 printf '#!/bin/sh\necho "install ok installed"\n' > "$tmp/bin/dpkg-query"
 printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/ldd"
@@ -69,9 +77,29 @@ if ! bash "$script" setup --no-creds --android > "$tmp/setup.log" 2>&1; then
   exit 1
 fi
 [ -x "$UNITY_ROOT/$editor" ] && [ -x "$UNITY_ROOT/$client" ] || exit 1
+grep -Fq 'checking the staged Android editor' "$tmp/setup.log"
 [ -f "$UNITY_ROOT/.install-complete" ]
 [ "$(readlink "$UNITY_ROOT/$android/NDK/sdk-tool")" = '../SDK//tool' ]
 grep -Fxq 'restored SDK payload' "$UNITY_ROOT/$android/NDK/sdk-tool"
+
+reject() {
+  local layout="$1" expected="$2" export_status="${3:-0}"
+  local root="$tmp/rejected-$layout-$export_status/unity" output="$tmp/rejected.log"
+  if FIXTURE_ARCHIVE="$tmp/$layout.tar" UNITY_ROOT="$root" FAKE_EXPORT_STATUS="$export_status" \
+      bash "$script" setup --no-creds --android > "$output" 2>&1; then
+    printf 'Android setup unexpectedly accepted %s (export status %s)\n' "$layout" "$export_status" >&2
+    exit 1
+  fi
+  grep -Fq "$renamed" "$output" && grep -Fq "$expected" "$output" && [ ! -e "$root" ] || {
+    cat "$output" >&2
+    exit 1
+  }
+}
+reject missing-editor 'editor or licensing client missing'
+reject missing-client 'editor or licensing client missing'
+reject missing-ndk 'no Android SDK/NDK'
+reject mixed-error 'Not a directory'
+reject complete "$renamed" 23
 
 # Base mode keeps the legacy extraction behavior on the same input.
 export UNITY_ROOT="$tmp/base/unity"
@@ -81,4 +109,4 @@ if bash "$script" setup --no-creds > "$tmp/base.log" 2>&1; then
 fi
 grep -Fq "$renamed" "$tmp/base.log"
 [ ! -e "$UNITY_ROOT" ]
-echo 'ok   Android setup installs the replaced SDK directory without changing base extraction'
+echo 'ok   Android setup accepts only the directory status error with a complete stage and successful export'
