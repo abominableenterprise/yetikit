@@ -83,6 +83,7 @@ namespace YetiKit.Playtest.Tests
             var post = sender.Requests[4];
             Assert.AreEqual("POST", post.Method);
             Assert.AreEqual(settings.Endpoint + "/done", post.Url);
+            Assert.AreEqual("application/json", post.Headers["Content-Type"]);
             Assert.AreEqual(post.Body, sender.Requests[5].Body);
             Assert.AreEqual(post.Headers["Idempotency-Key"], sender.Requests[5].Headers["Idempotency-Key"]);
             Assert.IsTrue(Directory.Exists(store.SessionOutbox(Id)));

@@ -33,11 +33,8 @@ namespace YetiKit.Playtest
 
         public async Task PollAsync(CancellationToken cancellationToken)
         {
-            while (true)
-            {
+            for (;; await Task.Delay(PollInterval, cancellationToken))
                 await RefreshAsync(cancellationToken);
-                await Task.Delay(PollInterval, cancellationToken);
-            }
         }
 
         public async Task RefreshAsync(CancellationToken cancellationToken = default)
@@ -54,24 +51,19 @@ namespace YetiKit.Playtest
                 var request = new HttpRequest("GET", target);
                 request.Headers["X-Upload-Key"] = token;
                 if (etag != null) request.Headers["If-None-Match"] = etag;
-                HttpResponse response;
+                HttpResponse response = null;
                 try { response = await sender.SendAsync(request, cancellationToken); }
-                catch (Exception) { cancellationToken.ThrowIfCancellationRequested(); return; }
+                catch (Exception) when (!cancellationToken.IsCancellationRequested) { }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (target != TuningUrl() || token != settings.UploadKey) { url = key = null; Update(null, null); }
                 else if (response?.StatusCode == 200) Update(response.Body, response.ETag);
-                else if (response?.StatusCode == 404) Update(null, null);
-                // 304 and transient failures leave the cached value intact.
+                else if (response?.StatusCode == 404) Update(null, null); // 304 and failures keep the cache.
             }
             finally { refreshing = false; }
         }
 
-        string TuningUrl()
-        {
-            if (!UploadValidation.TryGetEndpoint(settings, out var endpoint)) return null;
-            var player = settings.PlayerTag;
-            return UploadValidation.IsSegment(player) ? endpoint + "/t/" + player : null;
-        }
+        string TuningUrl() => UploadValidation.TryGetEndpoint(settings, out var endpoint) &&
+            UploadValidation.IsSegment(settings.PlayerTag) ? endpoint + "/t/" + settings.PlayerTag : null;
 
         void Update(string json, string tag)
         {

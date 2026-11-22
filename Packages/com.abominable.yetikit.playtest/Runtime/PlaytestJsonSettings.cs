@@ -9,11 +9,9 @@ namespace YetiKit.Playtest
     {
         public const string FileName = "playtest.json";
         public const string EnvEndpoint = "YETIKIT_PLAYTEST_ENDPOINT", EnvKey = "YETIKIT_PLAYTEST_KEY", EnvPlayer = "YETIKIT_PLAYTEST_PLAYER";
-        public const string DefaultPlayer = "unknown";
-
         public string Endpoint { get; private set; }
         public string UploadKey { get; private set; }
-        public string PlayerTag { get; private set; } = DefaultPlayer;
+        public string PlayerTag { get; private set; }
         public bool Enabled => Endpoint != null && UploadKey != null;
 
         [Serializable] sealed class Raw { public string endpoint, uploadKey, player; }
@@ -58,7 +56,7 @@ namespace YetiKit.Playtest
             }
             var player = editorEnvironment?.Invoke(EnvPlayer)?.Trim();
             if (string.IsNullOrEmpty(player)) player = raw?.player?.Trim();
-            var settings = new PlaytestJsonSettings { PlayerTag = string.IsNullOrEmpty(player) ? DefaultPlayer : player };
+            var settings = new PlaytestJsonSettings { PlayerTag = string.IsNullOrEmpty(player) ? "unknown" : player };
             settings.SetCredentials(raw?.endpoint, raw?.uploadKey);
             settings.SetCredentials(editorEnvironment?.Invoke(EnvEndpoint), editorEnvironment?.Invoke(EnvKey));
             return settings;

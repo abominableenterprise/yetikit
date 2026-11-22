@@ -7,7 +7,7 @@ using static YetiKit.Playtest.FileChunkStore;
 
 namespace YetiKit.Playtest
 {
-    /// <summary>A published done marker commits an immutable batch. No separate enqueue write can be lost.</summary>
+    // A published done marker commits an immutable batch.
     internal sealed class Outbox
     {
         const string Delivered = ".delivered";
@@ -82,11 +82,8 @@ namespace YetiKit.Playtest
             if (File.Exists(marker) || !File.Exists(meta) || IsLink(meta) || !CanRecover(meta)) return;
             var names = Names(dir);
             if (names.Any(IsPending)) return;
-            Checkpoint data;
-            try { data = JsonUtility.FromJson<Checkpoint>(File.ReadAllText(meta)); }
-            catch (ArgumentException) { return; }
-            if (data?.session != id || (!names.Any(name => ChunkIndex(name) > 0) &&
-                !SessionRules.Keep(data.seconds, data.events))) return;
+            var data = JsonUtility.FromJson<Checkpoint>(File.ReadAllText(meta));
+            if (data?.session != id || !(names.Any(name => ChunkIndex(name) > 0) || SessionRules.Keep(data.seconds, data.events))) return;
             var done = new DoneMarker { session = id, player = data.player, build = data.build,
                 context = new DoneContext { recovered = true, minutes = data.seconds / 60 } };
             store.PublishFinalFile(marker, Encoding.UTF8.GetBytes(done.ToJson()));
@@ -95,6 +92,5 @@ namespace YetiKit.Playtest
         static bool IsPending(string name) => name.EndsWith(TmpSuffix, StringComparison.Ordinal) ||
             name.EndsWith(ChunkJournal.Suffix, StringComparison.Ordinal) ||
             name.EndsWith(ChunkJournal.Suffix + JournalRollback.Suffix, StringComparison.Ordinal);
-
     }
 }

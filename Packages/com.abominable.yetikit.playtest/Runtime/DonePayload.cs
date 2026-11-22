@@ -4,8 +4,7 @@ using UnityEngine;
 
 namespace YetiKit.Playtest
 {
-    /// <summary>Wire manifest; paths are bucket-relative, not local file paths.</summary>
-    [Serializable]
+    [Serializable] // File paths in the manifest are bucket-relative.
     internal sealed class DonePayload
     {
         public string id, kind, session, player, build;

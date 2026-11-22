@@ -20,16 +20,9 @@ namespace YetiKit.Playtest
         string dir, destination;
         DonePayload manifest;
 
-        internal Uploader(Outbox outbox, IUploadSettings settings, IHttpSender sender, double spacing, Func<double> clock)
-        {
-            this.outbox = outbox;
-            this.settings = settings;
-            this.sender = sender;
-            this.spacing = spacing;
-            this.clock = clock;
-        }
+        internal Uploader(Outbox outbox, IUploadSettings settings, IHttpSender sender, double spacing, Func<double> clock) =>
+            (this.outbox, this.settings, this.sender, this.spacing, this.clock) = (outbox, settings, sender, spacing, clock);
 
-        /// <summary>Try at most one request; simultaneous ticks and ticks during backoff do no work.</summary>
         public async Task TickAsync(CancellationToken cancellationToken = default)
         {
             var now = clock();
@@ -50,6 +43,7 @@ namespace YetiKit.Playtest
                 var done = index == manifest.files.Length;
                 var request = new HttpRequest(done ? "POST" : "PUT", endpoint + (done ? "/done" : "/u/" + manifest.files[index]));
                 request.Headers["X-Upload-Key"] = settings.UploadKey;
+                request.Headers["Content-Type"] = "application/json";
                 if (done)
                 {
                     request.Body = manifest.ToJson();
@@ -59,7 +53,7 @@ namespace YetiKit.Playtest
                 {
                     var file = Path.GetFileName(manifest.files[index]);
                     request.FilePath = Path.Combine(dir, file);
-                    request.Headers["Content-Type"] = file == FileChunkStore.MetaFile ? "application/json" : "application/gzip";
+                    if (file != FileChunkStore.MetaFile) request.Headers["Content-Type"] = "application/gzip";
                 }
                 HttpResponse response;
                 try { response = await sender.SendAsync(request, cancellationToken); }
