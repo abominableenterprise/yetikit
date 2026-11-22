@@ -25,6 +25,7 @@ class MemoryBucket {
 const upload = { "X-Upload-Key": "fixture-upload" };
 const read = { "X-Read-Key": "fixture-read" };
 const origin = "https://inbox.example.invalid";
+const lineTerminators = ["\n", "\r\n", "\u2028", "\u2029"];
 
 function fixture(t) {
   const env = {
@@ -149,6 +150,24 @@ test("object routes require exactly two unescaped name segments", async t => {
   assert.equal((await request(`/u/A_1-2.3/${"x".repeat(121)}`, put())).status, 200);
 });
 
+test("PUT object routes reject trailing line terminators in either path segment without storing", async t => {
+  const { env, request } = fixture(t);
+  for (const suffix of lineTerminators) {
+    // Encode before building the request so URL parsing cannot strip literal CR/LF.
+    const encoded = encodeURIComponent(suffix);
+    for (const [route, prefix, file, init] of [
+      ["u", "session-1", "chunk.gz", put()],
+      ["f", "tuning", "player-1.json", put("{}", read, "application/json")],
+    ]) {
+      for (const key of [`${prefix}${encoded}/${file}`, `${prefix}/${file}${encoded}`]) {
+        const path = `/${route}/${key}`;
+        assert.equal((await request(path, init)).status, 400, path);
+        assert.equal(env.BUCKET.objects.size, 0, path);
+      }
+    }
+  }
+});
+
 test("only read-key PUT can write tuning; the reservation also covers /done", async t => {
   const { env, hub, request } = fixture(t);
   const path = "/f/tuning/player-1.json";
@@ -215,6 +234,20 @@ test("done stores the exact JSON before forwarding and reuses a supplied id", as
   }
   assert.equal(env.BUCKET.objects.size, 1);
   assert.equal(hub.mock.callCount(), 2);
+});
+
+test("done rejects trailing line terminators in session or id without storing or forwarding", async t => {
+  const { env, hub, request } = fixture(t);
+  for (const suffix of lineTerminators) {
+    for (const field of ["session", "id"]) {
+      const payload = { kind: "session", session: "session-1", id: "event-01" };
+      payload[field] += suffix;
+      const label = `${field} + ${encodeURIComponent(suffix)}`;
+      assert.equal((await request("/done", post(JSON.stringify(payload)))).status, 400, label);
+      assert.equal(env.BUCKET.objects.size, 0, label);
+      assert.equal(hub.mock.callCount(), 0, label);
+    }
+  }
 });
 
 test("done generates an id when omitted and accepts a 200 KiB JSON body", async t => {
