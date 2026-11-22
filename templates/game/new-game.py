@@ -15,7 +15,7 @@ TEMPLATE = Path(__file__).resolve().parent
 HOST = TEMPLATE.parents[1] / "Host"
 KIT_URL = "https://github.com/abominableenterprise/yetikit.git"
 # Keep all kit modules pinned to the same release tag.
-KIT_REVISION = "v0.3.1"
+KIT_REVISION = "v0.3.2"
 PLACEHOLDERS = {"changeme", "default", "placeholder", "replace", "template", "todo", "yourcompany", "yourgame"}
 
 

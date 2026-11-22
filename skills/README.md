@@ -22,7 +22,7 @@ task-brief tail, review checklist and playtest-inbox routine. Replace
 sources and permissions outside the public kit. For a fresh project, use the
 [new-game starter generator](../templates/game/README.md).
 
-Version 0.3.1 provides core, quality, hands, interaction, development-only
+Version 0.3.2 provides core, quality, hands, interaction, development-only
 playtest, playtest.xr and lab, plus Ship, vendoring and mesh checks; see the
 [release status](../README.md#modules). Analyzer integrations remain planned. See [the design](../docs/design.md). Skills must not be read as proof
 an unavailable command ran successfully; verify capabilities against the

@@ -8,18 +8,28 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-22
+
+Playtest snaps can capture the frame before recording a voice note. This patch
+also corrects retention guidance and gates releases on an Android consumer build.
+
 ### Added
-- Dev playtest snaps can capture a still on press and add a voice note on
-  release: `var snap = cam.BeginSnap(head, now);` then
-  `snap?.AttachNote(wav); snap?.Publish();`. Unfinished snaps publish without
-  audio on timeout or restart.
+- Capture a still with `BeginSnap`, then optionally call `AttachNote` before
+  `Publish`, or call `Cancel` to discard it
+  ([#357](https://github.com/abominableenterprise/yetikit/pull/357)).
+- Build a minimal Android development consumer from the advertised modules
+  as a release gate ([#352](https://github.com/abominableenterprise/yetikit/pull/352)).
 
 ### Fixed
-- Document R2 lifecycle prefixes that expire playtest session uploads and
-  notification copies without expiring live tuning.
+- Document one R2 lifecycle rule per UTC year for playtest session uploads,
+  plus a rule for notification copies, without matching `tuning/`
+  ([#356](https://github.com/abominableenterprise/yetikit/pull/356)).
+- Let Ship's Android setup recover from a tar directory metadata error without
+  ignoring other extraction errors ([#353](https://github.com/abominableenterprise/yetikit/pull/353)).
 
 ### Behaviour changes
-- None.
+- Unfinished deferred snaps publish without audio on timeout or restart
+  ([#357](https://github.com/abominableenterprise/yetikit/pull/357)).
 
 ### Adapter changes
 - None.
