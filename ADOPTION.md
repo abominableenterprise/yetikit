@@ -32,15 +32,13 @@ Ship copy, VERSION receipt and consumer manifest together. See
 and the debugging-only `file:` override.
 
 ## Ship
-See [Ship tooling](Tools/ship/README.md). Before setup on a fresh Linux VM,
-install Go and use the pinned crane install command:
+[Ship setup](Tools/ship/README.md#vendor-into-a-game) uses an existing `crane`
+on `PATH` or in `$BIN_DIR` first. Otherwise, on Linux x86-64 with the default
+`CRANE_VERSION`, setup automatically installs a pinned, SHA-256-verified `crane`
+into `$BIN_DIR`. No Go installation or crane configuration is needed.
 
-```sh
-GOBIN="$HOME/bin" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
-```
-
-Setup also accepts a preinstalled crane on PATH or a configured archive; see
-[Ship requirements](Tools/ship/README.md#vendor-into-a-game).
+On other architectures or with a non-default `CRANE_VERSION`, preinstall
+`crane` or set both `setup.craneArchive` and `setup.craneSha256`.
 
 - For Quest releases, set `QUEST_CERT_SHA256` to the expected APK signing
   certificate fingerprint in the environment, not in `yetikit.json`. Set
