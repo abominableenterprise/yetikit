@@ -46,7 +46,16 @@ setup_write() {
   worker="$(< "$SHIP_TOOL_DIR/lib/linux-unity-setup-worker.py")" || return
   as_root /usr/bin/python3 -I -c "$worker" "$control" "$protect_int" "$@"
 }
-extract_editor() { "$1" export "$UNITY_IMAGE" - | setup_write tar -x -C "$2" opt/unity; }
+extract_editor() {
+  local -a tar_args=()
+  if [ "$UNITY_MODULES" = android ]; then
+    # Use one spelling for each member so tar can discard stale directory
+    # metadata on replacement. Normalize hard link names too, but not symlink targets.
+    local normalize_path='s:/\{2,\}:/:rhS'
+    tar_args+=("--transform=$normalize_path")
+  fi
+  "$1" export "$UNITY_IMAGE" - | setup_write tar -x "${tar_args[@]}" -C "$2" opt/unity
+}
 
 # The image config records the build step that writes /opt/unity/version. Inspect
 # that metadata without downloading layers or trusting a version in a mutable tag.
