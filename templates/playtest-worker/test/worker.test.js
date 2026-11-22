@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import worker from "../src/index.js";
 
@@ -211,6 +212,40 @@ test("tuning needs upload auth, reports missing files and supports conditional r
   const changed = await request(path, { headers: { ...upload, "If-None-Match": etag } });
   assert.notEqual(changed.headers.get("etag"), etag);
   assert.deepEqual(await changed.json(), { value: 2 });
+});
+
+test("documented retention prefix matches client uploads and done copies but not tuning", async t => {
+  const { env, hub, request } = fixture(t);
+  hub.mock.mockImplementation(async () => new Response(null, { status: 204 }));
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const rule = readme.match(/^\| `expire-old-sessions` \| `([^`]+)` \|/m);
+  assert.ok(rule, "expected a lifecycle prefix in the Bucket layout table");
+  const [, prefix] = rule;
+
+  // Mirror the client contract from SamplerAndRulesTests.SessionIdIsUtcTimeAndFourHex
+  // and SnapDeliveryTests.SnapUploadsCompleteFileSetWithoutWaitingForSessionEnd.
+  const snap = "snap-00000000000000000000000000000001";
+  const recordedSession = "20261029-070503-abcd";
+  const snapSession = "20260101-010101-0001";
+  const uploads = [
+    { kind: "session", session: recordedSession, file: "chunk-0001.jsonl.gz", id: `session-${recordedSession}` },
+    { kind: "snap", session: snapSession, file: `${snap}.jpg`, id: `${snap}-${snapSession}` },
+  ];
+  const expected = [];
+  for (const { kind, session, file, id } of uploads) {
+    const key = `${session}/${file}`;
+    assert.equal((await request(`/u/${key}`, put())).status, 200);
+    assert.equal((await request("/done", post(JSON.stringify({ kind, session, id, files: [key] })))).status, 200);
+    expected.push(key, `${session}/done-${id}.json`);
+  }
+  const tuning = "tuning/player-1.json";
+  assert.equal((await request(`/f/${tuning}`, put("{}", read, "application/json"))).status, 200);
+
+  const keys = [...env.BUCKET.objects.keys()];
+  assert.deepEqual(new Set(keys), new Set([...expected, tuning]));
+  for (const key of keys) {
+    assert.equal(key.startsWith(prefix), key !== tuning, `Lifecycle prefix '${prefix}' on '${key}'`);
+  }
 });
 
 test("done stores the exact JSON before forwarding and reuses a supplied id", async t => {
