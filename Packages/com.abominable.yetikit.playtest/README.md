@@ -93,6 +93,23 @@ pending files are eligible, oldest session ID first. Protected sessions still
 count toward the budget, so it may be exceeded until they finish or are removed.
 Run recovery and recording exclusively for a recording root.
 
+## Snap capture (`YETIKIT_DEV`)
+
+Drive `SnitchCam` on the main thread with a camera, a monotonic clock, and
+host-owned input and consent. Pass `SnapDelivery` as the publication store
+for local capture or to queue a separate snap batch in the outbox. Acceptance
+by `TrySnap` is not a disk acknowledgment.
+
+Before allowing a controlled quit, call `TryShutdown(timeoutMs)` on the main
+thread **before** disposing the frame history. It stops new captures, finishes
+encoding the available strip frames, then waits up to the specified time for
+local publication, not network upload. If it returns `false`, keep the app
+alive and retry (for example, defer quit via `Application.wantsToQuit` and use
+`TryShutdown(0)` on subsequent updates). When it returns `true`, check
+`SnapOutcome` for the result: `Local` or `Queued` means stored; `Failed` means
+publication failed. `Dispose` alone starts publication but does not wait for
+it, and abrupt process termination can still interrupt an unfinished write.
+
 ## Optional delivery (`YETIKIT_DEV`)
 
 `PlaytestJsonSettings.LoadDefault()` reads the first readable `playtest.json`:
@@ -113,8 +130,9 @@ manifest with a stable idempotency key. Unacknowledged batches persist and are
 replayed after restart. A batch rejected with HTTP 400, 413, 415, or 422 is
 skipped across restarts while later batches continue. Its files stay on disk
 subject to the outbox budget; remove its `.rejected` marker to retry after
-correcting the cause. Successful batches are removed locally. Snap delivery is
-not included.
+correcting the cause. Successful batches are removed locally. With
+`SnapDelivery`, the uploader sends each snap as its own batch and posts
+`kind: snap` to `/done`.
 `NetWarmup.PingAsync` optionally checks the endpoint without the upload key.
 
 A consumer can pass `ILiveTuningSource` to its lab integration without linking

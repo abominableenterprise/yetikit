@@ -72,7 +72,7 @@ namespace YetiKit.Playtest.Tests
 
         [TestCase(false)]
         [TestCase(true)]
-        public void DisposePublishesAllAvailableStripFrames(bool encodingStarted)
+        public void ShutdownPublishesAllAvailableStripFrames(bool encodingStarted)
         {
             var go = new GameObject("Test capture view");
             try
@@ -83,7 +83,8 @@ namespace YetiKit.Playtest.Tests
                 head.cullingMask = 0;
                 using var frames = new SnitchFrames();
                 var store = new Publication();
-                using var cam = new SnitchCam(frames, store, store, new SnapOutcome());
+                var outcomes = new SnapOutcome();
+                using var cam = new SnitchCam(frames, store, store, outcomes);
                 cam.Tick(head, 6);
                 cam.Tick(head, 7);
                 cam.Tick(head, 10);
@@ -94,10 +95,16 @@ namespace YetiKit.Playtest.Tests
                     cam.Tick(head, 13.25); // Window closes and one frame is encoded.
                 }
 
-                cam.Dispose();
-                frames.Dispose(); // History may be released before the asynchronous store runs.
-
-                Assert.That(store.Batch.Task.Wait(5000), Is.True, "Snap did not reach the publication store");
+                try
+                {
+                    Assert.That(cam.TryShutdown(0), Is.False, "Shutdown must not acknowledge an unpublished snap");
+                    frames.Dispose(); // Shutdown has already finished using the frame history.
+                    Assert.That(store.Batch.Task.Wait(5000), Is.True, "Snap did not reach the publication store");
+                }
+                finally { store.Release(); }
+                Assert.That(cam.TryShutdown(5000), Is.True);
+                Assert.That(outcomes.TryTake(out var result), Is.True);
+                Assert.That(result.Status, Is.EqualTo(SnapStatus.Local));
                 var (context, files) = store.Batch.Task.Result;
                 var expected = encodingStarted ? new[] { 7d, 10d, 10.25d } : new[] { 7d, 10d };
                 Assert.That(context.strip.Select(frame => frame.t), Is.EqualTo(expected));
@@ -109,14 +116,51 @@ namespace YetiKit.Playtest.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        [Test]
+        public void ShutdownDrainsPublicationAlreadyRunningWhenDisposed()
+        {
+            var go = new GameObject("Test capture view");
+            var store = new Publication();
+            try
+            {
+                var head = go.AddComponent<Camera>();
+                head.enabled = false;
+                head.clearFlags = CameraClearFlags.SolidColor;
+                head.cullingMask = 0;
+                using var frames = new SnitchFrames();
+                var outcomes = new SnapOutcome();
+                using var cam = new SnitchCam(frames, store, store, outcomes);
+                cam.Tick(head, 10);
+                Assert.That(cam.TrySnap(head, 10, 10), Is.True);
+                cam.Tick(null, 14); // Window expired; the single history frame is enough to publish.
+                try
+                {
+                    Assert.That(store.Batch.Task.Wait(5000), Is.True, "Expected an in-flight publication before disposal");
+                    cam.Dispose();
+                    Assert.That(cam.TryShutdown(0), Is.False);
+                    Assert.That(outcomes.TryTake(out _), Is.False);
+                }
+                finally { store.Release(); }
+                Assert.That(cam.TryShutdown(5000), Is.True);
+                Assert.That(outcomes.TryTake(out var result), Is.True);
+                Assert.That(result.Snap, Is.EqualTo(store.Batch.Task.Result.Item1.snap));
+                Assert.That(result.Status, Is.EqualTo(SnapStatus.Local));
+                Assert.That(cam.TryShutdown(0), Is.True);
+                Assert.That(cam.TrySnap(head, 14, 14), Is.False);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         sealed class Publication : ISnapContextProvider, ISnapPublicationStore
         {
             public readonly TaskCompletionSource<(SnapContext, IReadOnlyDictionary<string, byte[]>)> Batch = new();
+            readonly TaskCompletionSource<bool> released = new();
+            public void Release() => released.TrySetResult(true);
             public SnapContext CaptureContext() => new() { session = "20260101-000000-0000" };
             public SnapStatus Publish(SnapContext context, IReadOnlyDictionary<string, byte[]> files)
             {
                 Batch.SetResult((context, files));
-                return SnapStatus.Local;
+                return released.Task.Wait(15000) ? SnapStatus.Local : SnapStatus.Failed;
             }
         }
 

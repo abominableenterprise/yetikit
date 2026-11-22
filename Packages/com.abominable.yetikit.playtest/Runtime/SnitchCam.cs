@@ -73,6 +73,15 @@ namespace YetiKit.Playtest
                 outcomes.Post((data.session, data.snap, status));
             });
         }
+        /// <summary>On the main thread, stop capture and finish encoding before waiting up to timeoutMs for local publication.
+        /// False means the host must defer quit and retry; true means the outcome, if any, has been posted (including failures).</summary>
+        public bool TryShutdown(int timeoutMs)
+        {
+            if (timeoutMs < 0) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
+            Dispose();
+            return publishing?.Wait(timeoutMs) ?? true;
+        }
+        /// <summary>Stop capture and start any remaining publication without waiting. Use TryShutdown before controlled quit.</summary>
         public void Dispose() { disposed = true; if (strip != null) { while (!strip.Finished) strip.Tick(closing: true); Publish(); } }
     }
 }
