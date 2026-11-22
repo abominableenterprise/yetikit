@@ -199,7 +199,7 @@ test("done stores the exact JSON before forwarding and reuses a supplied id", as
   hub.mock.mockImplementation(async (url, init) => {
     assert.equal(url, env.HUB_URL);
     assert.equal(init.method, "POST");
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     assert.equal(init.headers.authorization, `Bearer ${env.HUB_SECRET}`);
     assert.equal(init.headers["idempotency-key"], "event-01");
     assert.equal(init.body, notice);
@@ -232,16 +232,23 @@ test("done generates an id when omitted and accepts a 200 KiB JSON body", async 
   assert.equal((await request("/done", post(body))).status, 200);
 });
 
-test("done keeps the stored copy on HTTP or transport failure", async t => {
+test("done keeps the stored copy on redirect, HTTP error or transport failure", async t => {
   const { env, hub, request } = fixture(t);
+  hub.mock.mockImplementation(async (_url, init) => {
+    assert.equal(init.redirect, "manual");
+    return Response.redirect("https://redirect.example.invalid", 307);
+  });
+  const redirected = await request("/done", post());
+  assert.equal(redirected.status, 502);
+  assert.deepEqual(await redirected.json(), { ok: false, hub: 307 });
   hub.mock.mockImplementation(async () => new Response("failure", { status: 503 }));
   assert.equal((await request("/done", post())).status, 502);
   hub.mock.mockImplementation(async () => { throw new TypeError("network failure"); });
   assert.equal((await request("/done", post())).status, 502);
-  assert.equal(hub.mock.callCount(), 2);
+  assert.equal(hub.mock.callCount(), 3);
   delete env.HUB_SECRET;
   assert.equal((await request("/done", post())).status, 502);
-  assert.equal(hub.mock.callCount(), 2);
+  assert.equal(hub.mock.callCount(), 3);
   const saved = await env.BUCKET.get("session-1/done-event-01.json");
   assert.equal(await new Response(saved.body).text(), notice);
 });

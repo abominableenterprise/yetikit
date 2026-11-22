@@ -87,7 +87,8 @@ async function done(req, env) {
       method: "POST",
       headers: { authorization: `Bearer ${env.HUB_SECRET}`, "content-type": "application/json", "idempotency-key": id },
       body: text,
-      redirect: "error",
+      // Never follow a redirect with the webhook bearer token.
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
     if (result.body) await result.body.cancel().catch(() => {});
