@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -11,6 +12,15 @@ namespace YetiKit.Playtest.Tests
     {
         const string BaseUrl = "https://example.invalid";
         const string FixtureKey = "synthetic-test-key";
+
+        [Test]
+        public void AndroidSettingsLoaderDeclaresAndResolvesJniModule()
+        {
+            const string jniModule = "com.unity.modules.androidjni";
+            var playtest = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(PlaytestJsonSettings).Assembly);
+            Assert.That(playtest.dependencies.Select(dependency => dependency.name), Does.Contain(jniModule));
+            Assert.That(playtest.resolvedDependencies.Select(dependency => dependency.name), Does.Contain(jniModule));
+        }
 
         [Test]
         public async Task MissingConfigDisablesNetwork()

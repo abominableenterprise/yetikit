@@ -33,13 +33,13 @@ namespace YetiKit.Playtest.Tests
             }
         }
 
-        static void Seed(FileChunkStore store, bool complete = true)
+        static void Seed(FileChunkStore store, bool complete = true, string id = Id)
         {
-            store.CreateSession(Id);
-            var dir = store.SessionOutbox(Id);
-            File.WriteAllText(Path.Combine(dir, "meta.json"), new SessionMeta { Session = Id, Build = "b1", Seconds = 33 }.ToJson(null));
+            store.CreateSession(id);
+            var dir = store.SessionOutbox(id);
+            File.WriteAllText(Path.Combine(dir, "meta.json"), new SessionMeta { Session = id, Build = "b1", Seconds = 33 }.ToJson(null));
             File.WriteAllBytes(Path.Combine(dir, Chunk), new byte[] { 1, 2 });
-            if (complete) File.WriteAllText(Path.Combine(dir, DoneMarker.FileName), new DoneMarker { session = Id, build = "b1" }.ToJson());
+            if (complete) File.WriteAllText(Path.Combine(dir, DoneMarker.FileName), new DoneMarker { session = id, build = "b1" }.ToJson());
         }
 
         [Test]
@@ -108,6 +108,67 @@ namespace YetiKit.Playtest.Tests
             Assert.IsFalse(post.Body.Contains(Key));
             Assert.IsFalse(Directory.Exists(store.SessionOutbox(Id)));
             LogAssert.NoUnexpectedReceived();
+        }
+
+        [TestCase(413, false)]
+        [TestCase(400, true)]
+        public async Task PermanentRejectionKeepsFilesAndDoesNotBlockLaterBatches(int status, bool rejectDone)
+        {
+            const string later = "20260101-010101-0002";
+            using var temp = new TempDir();
+            var store = new FileChunkStore(temp.Path);
+            Seed(store);
+            Seed(store, id: later);
+            var settings = new Settings();
+            var sender = new Sender();
+            double now = 0;
+            var upload = new Uploader(new Outbox(store), settings, sender, 1, () => now);
+            if (rejectDone)
+            {
+                await upload.TickAsync();
+                now++;
+                await upload.TickAsync();
+                now++;
+            }
+            sender.Respond = () => Task.FromResult(new HttpResponse(status));
+            await upload.TickAsync();
+            Assert.AreEqual(rejectDone ? "POST" : "PUT", sender.Requests[^1].Method);
+
+            sender.Respond = () => Task.FromResult(new HttpResponse(200));
+            now++;
+            await upload.TickAsync();
+            Assert.AreEqual(settings.Endpoint + "/u/" + later + "/meta.json", sender.Requests[^1].Url);
+
+            store = new FileChunkStore(temp.Path);
+            var recovered = new Outbox(store);
+            recovered.Recover();
+            sender.Requests.Clear();
+            upload = new Uploader(recovered, settings, sender, 1, () => now);
+            for (var i = 0; i < 4; i++, now++) await upload.TickAsync();
+            Assert.AreEqual(3, sender.Requests.Count);
+            Assert.AreEqual(settings.Endpoint + "/u/" + later + "/meta.json", sender.Requests[0].Url);
+            Assert.IsFalse(Directory.Exists(store.SessionOutbox(later)));
+            Assert.IsTrue(File.Exists(Path.Combine(store.SessionOutbox(Id), Chunk)));
+        }
+
+        [TestCase(403)]
+        [TestCase(429)]
+        public async Task ConfigurationAndRateLimitErrorsDoNotQuarantineBatches(int status)
+        {
+            using var temp = new TempDir();
+            var store = new FileChunkStore(temp.Path);
+            Seed(store);
+            var sender = new Sender { Respond = () => Task.FromResult(new HttpResponse(status)) };
+            var outbox = new Outbox(store);
+            double now = 0;
+            var upload = new Uploader(outbox, new Settings(), sender, 1, () => now);
+            await upload.TickAsync();
+            Assert.IsNotNull(outbox.Next("p1").manifest);
+            sender.Respond = () => Task.FromResult(new HttpResponse(200));
+            now = 5;
+            await upload.TickAsync();
+            Assert.AreEqual(2, sender.Requests.Count);
+            Assert.AreEqual(sender.Requests[0].Url, sender.Requests[1].Url);
         }
 
         [Test]

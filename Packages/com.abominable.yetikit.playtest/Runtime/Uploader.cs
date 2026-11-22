@@ -59,6 +59,14 @@ namespace YetiKit.Playtest
                 try { response = await sender.SendAsync(request, cancellationToken); }
                 catch (Exception) when (!cancellationToken.IsCancellationRequested) { response = null; }
                 cancellationToken.ThrowIfCancellationRequested();
+                // Only per-request validation failures; auth, routing, throttling and server errors still retry.
+                if (response?.StatusCode is 400 or 413 or 415 or 422)
+                {
+                    outbox.Reject(dir);
+                    manifest = null;
+                    failures = 0;
+                    return;
+                }
                 if (response?.Success != true) { Retry(); return; }
                 if (done) { outbox.Complete(dir); manifest = null; }
                 else index++;

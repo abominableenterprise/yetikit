@@ -10,7 +10,7 @@ namespace YetiKit.Playtest
     // A published done marker commits an immutable batch.
     internal sealed class Outbox
     {
-        const string Delivered = ".delivered";
+        const string Delivered = ".delivered", Rejected = ".rejected";
         readonly FileChunkStore store;
 
         internal Outbox(FileChunkStore store) => this.store = store;
@@ -39,7 +39,7 @@ namespace YetiKit.Playtest
                 var marker = DoneMarker.Parse(File.ReadAllText(markerPath));
                 if (marker?.session != id) continue;
                 var names = Names(dir);
-                if (names.Any(IsPending)) continue;
+                if (names.Contains(Rejected) || names.Any(IsPending)) continue;
                 var files = names.Where(name => name == MetaFile || ChunkIndex(name) > 0)
                     .OrderBy(ChunkIndex).ThenBy(name => name, StringComparer.Ordinal).ToArray();
                 if (files.Length == 0 || files[0] != MetaFile ||
@@ -49,6 +49,9 @@ namespace YetiKit.Playtest
             }
             return default;
         }
+
+        // Marker existence is enough; keep the original files and ID for inspection or manual retry.
+        internal void Reject(string dir) { using var marker = new FileStream(Path.Combine(dir, Rejected), FileMode.CreateNew); }
 
         internal void Complete(string dir)
         {

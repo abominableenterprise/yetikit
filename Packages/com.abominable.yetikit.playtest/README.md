@@ -66,8 +66,11 @@ access, including publishing recoverable abandoned sessions. Reuse the returned
 main-thread update; pass a lifetime cancellation token. Only completed batches
 are sent: the uploader PUTs metadata and chunks serially, then posts the
 manifest with a stable idempotency key. Unacknowledged batches persist and are
-replayed after restart. Successful batches are removed locally. The disk budget
-can evict older completed batches before delivery; snap delivery is not included.
+replayed after restart. A batch rejected with HTTP 400, 413, 415, or 422 is
+skipped across restarts while later batches continue. Its files stay on disk
+subject to the outbox budget; remove its `.rejected` marker to retry after
+correcting the cause. Successful batches are removed locally. Snap delivery is
+not included.
 `NetWarmup.PingAsync` optionally checks the endpoint without the upload key.
 
 A consumer can pass `ILiveTuningSource` to its lab integration without linking
