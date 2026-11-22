@@ -8,10 +8,24 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-22
+
+Playtest enrollment now targets the foreground Android profile.
+
 ### Added
-- Let `playtest-enroll.sh` target the foreground Android user, with an optional
-  `--user N` check. Secondary-user enrollment is experimental (mock-tested;
-  not yet verified on a headset) ([#360](https://github.com/abominableenterprise/yetikit/issues/360)).
+- Pass `--user N` to `playtest-enroll.sh` to require that profile to be in the
+  foreground before enrolling ([#361](https://github.com/abominableenterprise/yetikit/pull/361)).
+
+### Fixed
+- None.
+
+### Behaviour changes
+- Enrollment uses the foreground profile instead of requiring user 0. Secondary
+  profiles are experimental: mock-tested, not yet verified on a headset. If
+  enrollment fails on a secondary profile, switch to user 0 and retry.
+
+### Adapter changes
+- None.
 
 ## [0.3.2] - 2026-11-22
 
