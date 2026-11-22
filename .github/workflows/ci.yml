@@ -28,6 +28,7 @@ jobs:
       - name: Validate Unity package dependency closure
         run: |
           python3 -B Tools/ci/test-package-closure.py
+          python3 -B Tools/ci/test-release-consumer-manifest.py
           python3 -B Tools/ci/check-package-closure.py
       - name: Validate package JSON
         shell: bash

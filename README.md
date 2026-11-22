@@ -77,3 +77,4 @@ See the [design](docs/design.md), [adoption playbook](ADOPTION.md),
 [contribution rules](AGENTS.md) and [changelog](CHANGELOG.md).
 CI checks shell syntax, package JSON, skill metadata, script metadata, GUID
 uniqueness and assembly definitions. Run Unity tests with the [Host](Host/README.md).
+Before tagging, follow the [kit release checklist](docs/release.md).
