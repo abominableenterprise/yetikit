@@ -73,7 +73,7 @@ namespace YetiKit.Playtest
                 outcomes.Post((data.session, data.snap, status));
             });
         }
-        public void Dispose() { disposed = true; if (strip != null) { strip.Cut(); Publish(); } }
+        public void Dispose() { disposed = true; if (strip != null) { while (!strip.Finished) strip.Tick(closing: true); Publish(); } }
     }
 }
 #endif

@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -64,6 +67,56 @@ namespace YetiKit.Playtest.Tests
                 Object.DestroyImmediate(decoded);
                 Object.DestroyImmediate(go);
                 RenderTexture.ReleaseTemporary(original);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void DisposePublishesAllAvailableStripFrames(bool encodingStarted)
+        {
+            var go = new GameObject("Test capture view");
+            try
+            {
+                var head = go.AddComponent<Camera>();
+                head.enabled = false;
+                head.clearFlags = CameraClearFlags.SolidColor;
+                head.cullingMask = 0;
+                using var frames = new SnitchFrames();
+                var store = new Publication();
+                using var cam = new SnitchCam(frames, store, store, new SnapOutcome());
+                cam.Tick(head, 6);
+                cam.Tick(head, 7);
+                cam.Tick(head, 10);
+                Assert.That(cam.TrySnap(head, 10, 10), Is.True);
+                if (encodingStarted)
+                {
+                    cam.Tick(head, 10.25);
+                    cam.Tick(head, 13.25); // Window closes and one frame is encoded.
+                }
+
+                cam.Dispose();
+                frames.Dispose(); // History may be released before the asynchronous store runs.
+
+                Assert.That(store.Batch.Task.Wait(5000), Is.True, "Snap did not reach the publication store");
+                var (context, files) = store.Batch.Task.Result;
+                var expected = encodingStarted ? new[] { 7d, 10d, 10.25d } : new[] { 7d, 10d };
+                Assert.That(context.strip.Select(frame => frame.t), Is.EqualTo(expected));
+                Assert.That(context.stripMain, Is.EqualTo(1));
+                Assert.That(files.Keys, Is.EquivalentTo(new[] { context.snap + ".jpg", context.snap + ".json" }
+                    .Concat(expected.Select((_, i) => context.snap + "-s0" + i + ".jpg"))));
+                foreach (var frame in context.strip) Assert.That(files[frame.file], Is.Not.Empty);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        sealed class Publication : ISnapContextProvider, ISnapPublicationStore
+        {
+            public readonly TaskCompletionSource<(SnapContext, IReadOnlyDictionary<string, byte[]>)> Batch = new();
+            public SnapContext CaptureContext() => new() { session = "20260101-000000-0000" };
+            public SnapStatus Publish(SnapContext context, IReadOnlyDictionary<string, byte[]> files)
+            {
+                Batch.SetResult((context, files));
+                return SnapStatus.Local;
             }
         }
 
