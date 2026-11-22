@@ -14,7 +14,21 @@ lcdir="$tmp/unity/Editor/Data/Resources/Licensing/Client"; mkdir -p "$lcdir"
 cat > "$lcdir/Unity.Licensing.Client" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >> "$tmp/lc-calls"; echo "client called with \$*"
-case "\$1" in
+command="\$1"; shift
+case "\$command" in
+  --activate-ulf|--return-ulf)
+    while [ "\$#" -gt 0 ]; do
+      case "\$1" in
+        --username=*|--password=*) ;;
+        --username|--password)
+          if [[ "\${2:-}" = -* ]]; then echo 'UnknownOptionError'; exit 1; fi
+          shift ;;
+        *) echo 'UnknownOptionError'; exit 1 ;;
+      esac
+      shift
+    done ;;
+esac
+case "\$command" in
   --activate-ulf) printf '%s\n' '$good_ulf' > "\$ULF" ;;
   --return-ulf) exit "\${FAKE_RETURN_RC:-0}" ;;
 esac

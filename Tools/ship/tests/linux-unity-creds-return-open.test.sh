@@ -16,7 +16,7 @@ check "UNITY_RETURN_ON_EXIT=1: the pidfile is gone afterwards" '[ ! -f "$OUT_DIR
 rm -f "$ULF"
 lu USERNAME=hubuser@x.io PASSWORD=hub-secret UNITY_RETURN_ON_EXIT=1
 check "UNITY_RETURN_ON_EXIT=1 with the USERNAME/PASSWORD fallback: an open that activated returns, printing neither" \
-  '[ "$rc" = 0 ] && grep -qx -- "--return-ulf --username hubuser@x.io --password hub-secret" "$tmp/lc-calls" && ! leaks'
+  '[ "$rc" = 0 ] && grep -qx -- "--return-ulf --username=hubuser@x.io --password=hub-secret" "$tmp/lc-calls" && ! leaks'
 rm -f "$ULF"
 lu "${creds[@]}" FAKE_UNITY_RC=1
 check "without UNITY_RETURN_ON_EXIT: an open that activated keeps the licence" \
