@@ -8,13 +8,13 @@ The offline developer test suite also runs the package dependency linter and nee
 ## Adopting / upgrading
 
 ```sh
-/path/to/yetikit/Tools/vendor/kit-bump.sh v0.3.4 --project /path/to/consumer --modules core,quality
+/path/to/yetikit/Tools/vendor/kit-bump.sh v0.3.5 --project /path/to/consumer --modules core,quality
 /path/to/yetikit/Tools/vendor/kit-check.sh --project /path/to/consumer
 ```
 
 Without `--project`, both commands use the current directory. Existing kit modules
 are always retained and repinned; `--modules` adds comma-separated module suffixes.
-Version 0.3.4 supports `core`, `quality`, `hands`, `interaction`, `playtest`,
+Version 0.3.5 supports `core`, `quality`, `hands`, `interaction`, `playtest`,
 `playtest.xr` and `lab`; playtest, playtest.xr and lab are development-only.
 Kit dependencies are read recursively from the tagged package manifests, including cycles. Every
 package in that closure gets an explicit Git URL at the same tag in the consumer
@@ -25,7 +25,7 @@ By default bump shallow-fetches the exact public kit tag ref, even if a branch
 has the same name. For offline use:
 
 ```sh
-/path/to/yetikit/Tools/vendor/kit-bump.sh v0.3.4 --project /path/to/consumer --modules core,quality --source /path/to/local/kit
+/path/to/yetikit/Tools/vendor/kit-bump.sh v0.3.5 --project /path/to/consumer --modules core,quality --source /path/to/local/kit
 ```
 
 `--source` must be a Git checkout containing that tag; it is read-only. The tag's
@@ -46,7 +46,7 @@ removed or changed vendored files (including VERSION).
 The generated `Tools/yetikit/VERSION` has four ordered lines:
 
 ```text
-tag=v0.3.4
+tag=v0.3.5
 commit=<40-character SHA-1 or 64-character SHA-256 Git commit ID>
 sha256=<64-character SHA-256 tree digest>
 dependencies=<compact JSON object of full kit package names to direct kit dependency arrays>
