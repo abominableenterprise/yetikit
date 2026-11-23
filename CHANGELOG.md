@@ -8,6 +8,10 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+### Added
+- Playtest snaps can use a speech-onset timestamp to select a recent frame,
+  falling back to a fresh still when that timestamp is unavailable or out of range.
+
 ## [0.3.6] - 2026-11-23
 
 Playtest recorders report which configuration loaded, and in-app enrollment is verified for secondary Android profiles.

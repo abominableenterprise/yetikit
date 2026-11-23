@@ -12,6 +12,8 @@ namespace YetiKit.Playtest
         public double t, triggerT;
         public StripFrame[] strip;
         public int stripMain;
+        public string anchor;
+        public double anchorOffsetMs;
     }
     public interface ISnapContextProvider { SnapContext CaptureContext(); }
     /// <summary>Anchor uses the same monotonic clock as Tick. The host owns input and consent.</summary>
@@ -56,35 +58,50 @@ namespace YetiKit.Playtest
             if (strip?.Finished == true) Publish();
             if (trigger != null && trigger.TryTake(out var anchor, out var phrase)) TrySnap(head, now, anchor, phrase);
         }
-        /// <summary>Optional WAV must be fully encoded by the host before handoff; do not mutate it after acceptance.</summary>
-        public bool TrySnap(Camera head, double now, double anchor, string phrase = null, byte[] wave = null)
+        public bool TrySnap(Camera head, double now, double anchor, string phrase = null, byte[] wave = null) =>
+            TrySnap(head, now, (double?)anchor, phrase, wave);
+
+        /// <summary>Capture a still and a strip around the optional frame-clock anchor. Falls back to now
+        /// if the anchor cannot be resolved. Do not mutate the optional encoded WAV after acceptance.</summary>
+        public bool TrySnap(Camera head, double now, double? anchor = null, string phrase = null, byte[] wave = null)
         {
-            if (Busy || !head || double.IsNaN(anchor) || double.IsInfinity(anchor) || anchor > now) return false;
+            if (Busy || !head || !SnapAnchor.IsFinite(now)) return false;
             snap = context.CaptureContext();
             if (!SessionRules.IsId(snap.session)) return false;
-            (snap.snap, snap.phrase, snap.triggerT) = ("snap-" + Guid.NewGuid().ToString("N"), phrase, now);
-            var photo = frames.Capture(anchor, out snap.t, preview => { if (feedback) feedback.Begin(snap.snap, head.transform, preview); });
+            var photo = TakeStill(head, now, phrase, anchor, ref snap, out var stripAnchor);
             if (photo == null) { outcomes.Post((snap.session, snap.snap, SnapStatus.Failed)); return false; }
             files = new() { [snap.snap + ".jpg"] = photo };
             if (wave?.Length > 0) files[snap.snap + ".wav"] = wave;
-            strip = new StripCapture(frames, snap.snap, anchor, snap.t);
+            strip = new StripCapture(frames, snap.snap, stripAnchor, snap.t);
             return true;
         }
-        /// <summary>Render and persist a still now, without a frame strip. Requires SnapDelivery.
-        /// Returns null when busy, unavailable or not staged. Advance Tick with the same clock to enforce expiry.</summary>
-        public PendingSnap BeginSnap(Camera head, double now, string phrase = null)
+        /// <summary>Stage a still at the optional frame-clock anchor, falling back to a fresh render.
+        /// Requires SnapDelivery. Returns null if not staged. Advance Tick with the same clock to enforce expiry.</summary>
+        public PendingSnap BeginSnap(Camera head, double now, string phrase = null, double? anchor = null)
         {
             var deadline = now + noteTimeoutSeconds;
-            if (Busy || !head || double.IsNaN(deadline) || double.IsInfinity(deadline) || store is not SnapDelivery delivery) return null;
+            if (Busy || !head || !SnapAnchor.IsFinite(deadline) || store is not SnapDelivery delivery) return null;
             var data = context.CaptureContext();
             if (!SessionRules.IsId(data.session)) return null;
-            (data.snap, data.phrase, data.triggerT, data.t) = ("snap-" + Guid.NewGuid().ToString("N"), phrase, now, now);
             (data.strip, data.stripMain) = (Array.Empty<StripFrame>(), -1);
-            var photo = frames.CaptureNow(head, preview => { if (feedback) feedback.Begin(data.snap, head.transform, preview); });
+            var photo = TakeStill(head, now, phrase, anchor, ref data, out _);
             var batch = delivery.Stage(data, photo);
             if (batch != null) return pending = new PendingSnap(this, batch, data.snap, deadline);
             outcomes.Post((data.session, data.snap, SnapStatus.Failed));
             return null;
+        }
+
+        byte[] TakeStill(Camera head, double now, string phrase, double? anchor, ref SnapContext data, out double stripAnchor)
+        {
+            var id = "snap-" + Guid.NewGuid().ToString("N");
+            (data.snap, data.phrase, data.triggerT) = (id, phrase, now);
+            var photo = frames.CaptureStill(head, now, anchor,
+                preview => { if (feedback) feedback.Begin(id, head.transform, preview); }, out data.t, out var usedAnchor);
+            stripAnchor = usedAnchor ? anchor.Value : now;
+            data.anchor = usedAnchor ? "onset" : "fresh";
+            var offsetMs = (data.t - (anchor ?? data.t)) * 1000;
+            data.anchorOffsetMs = SnapAnchor.IsFinite(offsetMs) ? offsetMs : 0;
+            return photo;
         }
 
         internal bool PublishPending(bool withNote)
