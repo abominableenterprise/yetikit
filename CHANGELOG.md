@@ -8,9 +8,26 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-11-23
+
+In-app playtest enrollment now stops within a fixed deadline and reports why delivery failed.
+
+### Added
+- None.
+
 ### Fixed
-- Bound in-app playtest enrollment and report blocked headset launches with a
-  retry hint instead of hanging ([#370](https://github.com/abominableenterprise/yetikit/issues/370)).
+- Launch the app without `am start -W` so a blocked launch can fail promptly
+  with a retry hint ([#370](https://github.com/abominableenterprise/yetikit/issues/370),
+  [#371](https://github.com/abominableenterprise/yetikit/pull/371)).
+
+### Behaviour changes
+- In-app delivery and optional recorder confirmation share one 60-second
+  deadline after the enrollment response is validated. Exit codes distinguish
+  a blocked launch (`2`), a missing app process (`3`), and incomplete relay
+  delivery (`4`).
+
+### Adapter changes
+- None.
 
 ## [0.3.4] - 2026-11-22
 
