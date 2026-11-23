@@ -407,6 +407,23 @@ for that user.
   on trusted development devices: the nonce protects the relay from other
   clients, but does not authenticate the sender of the Android launch intent.
 
+The in-app delivery and optional recorder check share a 60-second deadline
+after the enrollment response has been validated. If the app does not appear
+for the selected user within 10 seconds after the launch request returns,
+the helper stops early. Exit codes:
+
+| Code | Meaning |
+| ---- | ------- |
+| 0 | Enrollment succeeded (including recorder confirmation if requested). |
+| 1 | Other failure, such as invalid input, an adb error or timeout, or missing recorder confirmation. |
+| 2 | The headset blocked the app launch (in-app only). |
+| 3 | The app process did not appear for the selected Android user (in-app only). |
+| 4 | The app process appeared, but delivery through the relay did not complete (in-app only). |
+
+For exit 2, the helper reports: the headset blocked the app launch (an OS
+dialog is showing or the headset is not worn): put the headset on, dismiss
+any system dialog, and retry.
+
 The helper removes the private host copy on exit and never prints the upload
 key. On failure it attempts to remove any staged file or reverse mapping.
 

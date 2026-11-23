@@ -12,7 +12,7 @@ MAX_CONFIG_BYTES = 16 * 1024
 CLIENT_TIMEOUT_SECONDS = 2
 
 
-def serve(directory, timeout):
+def serve(directory, deadline):
     with (directory / 'playtest.json').open('rb') as config:
         payload = config.read(MAX_CONFIG_BYTES + 1)
     if not 0 < len(payload) <= MAX_CONFIG_BYTES:
@@ -22,7 +22,6 @@ def serve(directory, timeout):
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         listener.listen(1)
-        deadline = time.monotonic() + timeout
         ready = directory / 'relay-starting'
         ready.write_text(f'{listener.getsockname()[1]} {nonce}\n', encoding='ascii')
         ready.replace(directory / 'relay-ready')
@@ -62,6 +61,6 @@ def serve(directory, timeout):
 
 if __name__ == '__main__':
     try:
-        sys.exit(0 if serve(Path(sys.argv[1]), int(sys.argv[2])) else 1)
+        sys.exit(0 if serve(Path(sys.argv[1]), float(sys.argv[2])) else 1)
     except OSError:
         sys.exit(1)

@@ -9,6 +9,8 @@ mkdir "$work/bin" "$work/tmp"
 export PATH="$work/bin:$PATH" TMPDIR="$work/tmp" PROJECT="$work"
 export calls="$work/calls" failure="$work/fake-failed" remote_files="$work/device"
 export reverse_state="$work/reverse" real_python="$(command -v python3)"
+export relay_pid_file="$work/relay.pid" nonce_file="$work/nonce"
+export YETIKIT_TEST_ENROLL_TIMEOUT_SECONDS=3 YETIKIT_TEST_ENROLL_LAUNCH_SECONDS=1
 mkdir "$remote_files"
 export test_key='synthetic-key-not-for-output' test_code='synthetic code+&%?'
 unset YETIKIT_CONFIG QUEST_SERIAL ANDROID_SERIAL
@@ -35,9 +37,8 @@ EOF
 
 cat > "$work/bin/python3" <<'EOF'
 #!/usr/bin/env bash
-# Shorten only the relay's timeout in the no-client fixture.
-if [[ ${relay_timeout:-0} == 1 && "$1" == */playtest-enroll-relay.py ]]; then
-  exec "$real_python" "$1" "$2" 1
+if [[ "$1" == */playtest-enroll-relay.py ]]; then
+  printf '%s\n' "$$" > "$relay_pid_file"
 fi
 exec "$real_python" "$@"
 EOF
@@ -102,13 +103,20 @@ case "$*" in
     rm -f -- "$reverse_state" ;;
   "shell cmd package resolve-activity --brief --user $expected_user org.example.dev")
     printf 'priority=0 matched\r\n%s\r\n' "${component:-org.example.dev/.Launcher}" ;;
-  "shell am start --user $expected_user -S -W -n 'org.example.dev/.Launcher' --ei yetikit_enroll_port "*)
-    check test "${11}" = yetikit_enroll_port
-    check test "${12}" = "$(< "$reverse_state")"
-    check test "${13} ${14}" = '--es yetikit_enroll_nonce'
+  "shell am start --user $expected_user -S "*)
+    shift 6
+    blocking=0
+    if [[ "$1" == -W ]]; then blocking=1; shift; fi
+    check test "$1 $2 $3 $4" = "-n 'org.example.dev/.Launcher' --ei yetikit_enroll_port"
+    check test "$5" = "$(< "$reverse_state")"
+    check test "$6 $7" = '--es yetikit_enroll_nonce'
+    printf '%s\n' "$8" > "$nonce_file"
     [[ ${start_rc:-0} == 0 ]] || exit "$start_rc"
-    if [[ ${relay_timeout:-0} == 0 ]]; then
-      check "$real_python" - "${12}" "${15}" <<'PY'
+    if [[ ${launch_case:-} == stalled_start || ( ${launch_case:-} == blocked && $blocking == 1 ) ]]; then
+      exec sleep 60
+    fi
+    if [[ -z ${launch_case:-} ]]; then
+      check "$real_python" - "$5" "$8" <<'PY'
 import json, os, re, socket, sys
 port, nonce = int(sys.argv[1]), sys.argv[2]
 assert re.fullmatch('[0-9a-f]{32}', nonce)
@@ -130,13 +138,18 @@ else:
     assert not second, 'relay served more than once'
 PY
     fi
-    printf 'Status: ok\n' ;;
+    if [[ $blocking == 1 ]]; then printf 'Status: ok\n'; else printf 'Starting: Intent\n'; fi ;;
   'shell date +%s.%N') printf '1700000000.321987654\n' ;;
   "shell am start --user $expected_user -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p org.example.dev")
     printf 'Status: ok\n' ;;
   'shell pidof -s org.example.dev') printf '123\n' ;; # unscoped PID lookup finds the primary user
   'shell ps -A -o UID,PID,NAME')
-    printf 'UID PID NAME\n10123 123 org.example.dev\n1010123 456 org.example.dev\n' ;;
+    printf 'UID PID NAME\n10123 123 org.example.dev\n'
+    case "${launch_case:-}" in no_pid|blocked) ;; *) printf '1010123 456 org.example.dev\n' ;; esac ;;
+  'logcat -d -T 1700000000.321 -v raw')
+    if [[ ${launch_case:-} == blocked ]]; then
+      printf 'Launch is blocked because: synthetic private detail %s %s\n' "$test_key" "$(< "$nonce_file")"
+    fi ;;
   'logcat -d -T 1700000000.321 --pid=123 -v raw -s Unity:V'|'logcat -d -T 1700000000.321 --pid=456 -v raw -s Unity:V')
     if [[ "$expected_user" == 10 ]]; then check test "$5" = --pid=456; else check test "$5" = --pid=123; fi
     printf 'Playtest recorder on (%s)\n' "$test_key" ;;
@@ -149,20 +162,29 @@ run() {
   local expected="$1" rc=0
   shift
   : > "$calls"
-  bash -x "$ship/playtest-enroll.sh" --endpoint https://enroll.example.invalid/ \
+  rm -f "$relay_pid_file" "$nonce_file"
+  timeout --kill-after=1 6 bash -x "$ship/playtest-enroll.sh" --endpoint https://enroll.example.invalid/ \
     --code "$work/private code" --player fixture-player "$@" > "$work/out" 2> "$work/err" || rc=$?
   if grep -Fq -e "$test_key" -e "$test_code" "$work/out" "$work/err" "$calls"; then
     echo 'FAIL: credential printed' >&2
     exit 1
   fi
-  [[ ! -e "$failure" ]]
-  if [[ "$rc" != "$expected" ]]; then
-    printf 'FAIL: foreground user %s: expected exit %s, got %s\n' "${active_user-0}" "$expected" "$rc" >&2
-    grep '^\[playtest-enroll\]' "$work/err" >&2 || true
+  if [[ -s "$nonce_file" ]] && grep -Fq -f "$nonce_file" "$work/out" "$work/err"; then
+    echo 'FAIL: nonce printed' >&2
     exit 1
   fi
+  [[ ! -e "$failure" ]] || { echo 'FAIL: unexpected fake command' >&2; exit 1; }
   [[ -z "$(find "$TMPDIR" -mindepth 1 -print)" ]] || { echo 'FAIL: temp files left behind' >&2; exit 1; }
   [[ ! -e "$reverse_state" ]] || { echo 'FAIL: reverse left behind' >&2; exit 1; }
+  if [[ -s "$relay_pid_file" ]] && kill -0 "$(< "$relay_pid_file")" 2>/dev/null; then
+    echo 'FAIL: relay still running' >&2
+    exit 1
+  fi
+  if [[ "$rc" != "$expected" ]]; then
+    printf 'FAIL: %s: expected exit %s, got %s\n' "${launch_case:-foreground user ${active_user-0}}" "$expected" "$rc" >&2
+    grep '^\[playtest-enroll\]' "$work/err" >&2 || true
+    return 1
+  fi
 }
 
 no_exchange() {
@@ -210,9 +232,23 @@ active_user=10 start_rc=1 run 1
 assert_in_app
 grep -q 'could not launch' "$work/err"
 
-active_user=10 relay_timeout=1 run 1
-assert_in_app
-grep -q 'did not receive' "$work/err"
+failed=0
+for fixture in no_pid blocked no_relay stalled_start; do
+  case "$fixture" in
+    no_pid) expected=3; message='app process did not appear for the selected Android user' ;;
+    blocked) expected=2; message='the headset blocked the app launch (an OS dialog is showing or the headset is not worn): put the headset on, dismiss any system dialog, and retry.' ;;
+    no_relay) expected=4; message='did not receive the configuration from the enrollment relay' ;;
+    stalled_start) expected=1; message='in-app enrollment timed out waiting for adb' ;;
+  esac
+  active_user=10 launch_case="$fixture" run "$expected" || failed=1
+  assert_in_app
+  [[ -s "$relay_pid_file" ]]
+  if ! grep -Fq "$message" "$work/err"; then
+    printf 'FAIL: %s: missing fixed diagnostic\n' "$fixture" >&2
+    failed=1
+  fi
+done
+[[ "$failed" == 0 ]]
 
 active_user=10 active_user_after_reverse=0 run 1
 assert_in_app
