@@ -22,6 +22,7 @@ namespace YetiKit.Playtest
         readonly IChunkStore paths;
         readonly Func<DateTime> utcNow;
         readonly Action<string> createDir;
+        string startupConfig;
         public readonly SessionMeta Meta;
         double lastRotate, lastHandoff;
         long frameOrigin;
@@ -57,6 +58,13 @@ namespace YetiKit.Playtest
         double Elapsed => (Paused ? pausedSeconds : log.Now) - pausedTotal;
         double pausedSeconds, pausedTotal;
 
+        internal void SetStartupConfig(IUploadSettings settings, string endpoint)
+        {
+            var source = settings is PlaytestJsonSettings json ? json.Source :
+                settings != null ? PlaytestConfigSource.Custom : PlaytestConfigSource.Default;
+            startupConfig = PlaytestConfigLog.Format(endpoint, settings?.PlayerTag ?? Meta.Player, source);
+        }
+
         /// <summary>
         /// Start: the directory, then t = 0, meta.json and a <c>start</c> line. All or nothing: when the directory
         /// cannot be made (IO error), nothing has changed (no clock restart, no pump job) and it returns false; call it
@@ -91,6 +99,7 @@ namespace YetiKit.Playtest
                 JsonLine.Field(data, "scene", Meta.Scene);
                 log.Append("start", data.Append('}').ToString(), EventClass.Bookkeeping);
             }
+            pump.LogStartupConfig(startupConfig ?? PlaytestConfigLog.Format(null, Meta.Player, PlaytestConfigSource.Default));
             return true;
         }
 

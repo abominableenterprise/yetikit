@@ -99,10 +99,15 @@ Configure lifecycle rules on the bucket, not in the Worker configuration.
    the app. For secondary users (or with `--in-app` on user 0), it uses `python3`
    and `adb reverse` to deliver the settings once and cold-starts the development
    app so it can save them in its own storage. Use a development build that
-   includes in-app enrolment and has Android network access. This route is
-   **experimental until verified on a real headset with a secondary user**.
-   If it fails, switch to user 0 and retry without `--in-app`. Add `--launch`
-   on either route to verify the recorder startup in logcat.
+   includes in-app enrolment and has Android network access. This route was
+   verified on a real headset with a secondary user. If it fails, switch to
+   user 0 and retry without `--in-app`. Add `--launch` on either route to verify
+   the recorder startup in logcat.
+
+   After a force-stop, use `adb shell am start --user N -n <activity>` to
+   relaunch for a specific user (`monkey` rejects `--user` on the verified
+   headset OS). Check the `YetiKitPlaytest: config` line in Unity logcat for
+   the endpoint host, player tag, and config source.
 4. Run `wrangler secret delete ENROLL_CODE` manually and remove the private code
    file, even if enrolment failed. The code is reusable until removed, not single-use.
 

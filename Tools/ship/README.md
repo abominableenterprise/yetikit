@@ -401,8 +401,8 @@ for that user.
   even without `--launch`. The build must include in-app enrollment and have
   Android network access. The app writes `playtest/playtest.json` under
   `Application.persistentDataPath`. The helper confirms delivery, not that
-  the app saved the file. In-app enrollment is **experimental until verified
-  on a real headset with a secondary user**. If it fails, switch to the
+  the app saved the file. In-app enrollment was verified on a real headset
+  with a secondary user. If it fails, switch to the
   primary profile (user 0) and retry without `--in-app`. Use this route only
   on trusted development devices: the nonce protects the relay from other
   clients, but does not authenticate the sender of the Android launch intent.
@@ -431,6 +431,12 @@ With `--launch`, the development app must log
 `Playtest recorder on` to the `Unity` logcat tag when recording is enabled.
 Only a fresh line from the app process counts, and the helper never prints
 raw logcat. A failed launch check does not undo the configuration replacement.
+
+After a force-stop, relaunch for the intended user with
+`adb shell am start --user N -n <activity>` (`monkey` rejects `--user` on the
+verified headset OS). Check the `YetiKitPlaytest: config` line in the `Unity`
+logcat tag for the endpoint host (or `endpoint=none`), player tag, and config
+source. `source=persistent` identifies the copy in `Application.persistentDataPath`.
 
 Delete the Worker `ENROLL_CODE` secret manually when finished, including if
 enrollment fails, and remove the local code file. The helper does not run
