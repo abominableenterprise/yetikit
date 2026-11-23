@@ -8,13 +8,23 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-11-23
+
+Playtest recorders report which configuration loaded, and in-app enrollment is verified for secondary Android profiles.
+
 ### Added
 - Development playtest recorders log the endpoint host (or local-only status),
   player tag, and config source at startup without logging the upload key.
 
+### Fixed
+- None.
+
 ### Behaviour changes
-- In-app playtest enrolment is no longer experimental; it was verified on a
-  real headset with a secondary user.
+- In-app playtest enrollment is no longer experimental; it was verified on a
+  real headset with a secondary user ([#375](https://github.com/abominableenterprise/yetikit/pull/375)).
+
+### Adapter changes
+- None.
 
 ## [0.3.5] - 2026-11-23
 
