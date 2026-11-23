@@ -5,6 +5,7 @@ namespace YetiKit.Playtest
 {
     public sealed class FrameSelection<T>
     {
+        const double FutureToleranceSeconds = 0.25;
         readonly (double time, T frame)[] slots;
         int next;
         public int Count { get; private set; }
@@ -20,6 +21,15 @@ namespace YetiKit.Playtest
         (double time, T frame) AtAge(int age) => slots[(next - 1 - age + slots.Length) % slots.Length];
         public bool TryNewest(out double time) { time = Count == 0 ? 0 : AtAge(0).time; return Count != 0; }
         public bool WouldEvict(double from) => Count == slots.Length && slots[next].time >= from;
+        /// <summary>Selects the nearest frame in a chronologically inserted history, allowing
+        /// one capture interval beyond the newest frame but never before the oldest.</summary>
+        public bool TryClosestInRange(double timestamp, out T frame, out double frameTime)
+        {
+            if (Count != 0 && timestamp >= AtAge(Count - 1).time && timestamp <= AtAge(0).time + FutureToleranceSeconds)
+                return TryClosest(timestamp, out frame, out frameTime);
+            frame = default; frameTime = 0;
+            return false;
+        }
         public bool TryClosest(double timestamp, out T frame, out double frameTime)
         {
             frameTime = 0; frame = default;

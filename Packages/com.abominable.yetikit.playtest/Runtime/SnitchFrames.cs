@@ -10,6 +10,7 @@ namespace YetiKit.Playtest
     public sealed class SnitchFrames : IStripFrames, IDisposable
     {
         public const int Size = 512;
+        const int StillJpegQuality = 85;
         readonly FrameSelection<RenderTexture> history = new(26);
         readonly IRecorderMetrics metrics;
         readonly LayerMask excludedLayers;
@@ -26,16 +27,25 @@ namespace YetiKit.Playtest
             catch { if (slot != history.NextFrame) Kill(slot); throw; }
             history.Add(now, slot); last = now;
         }
-        internal byte[] CaptureNow(Camera head, Action<Texture> preview)
+        internal byte[] CaptureStill(Camera head, double now, double? anchor, Action<Texture> preview,
+            out double time, out bool usedAnchor)
+        {
+            if (anchor.HasValue && history.TryClosestInRange(anchor.Value, out var historical, out time))
+            {
+                var jpeg = EncodeStill(historical, preview);
+                if (jpeg != null) { usedAnchor = true; return jpeg; }
+            }
+            (time, usedAnchor) = (now, false);
+            return CaptureNow(head, preview);
+        }
+        byte[] CaptureNow(Camera head, Action<Texture> preview)
         {
             if (double.IsPositiveInfinity(last)) return null;
             var frame = RenderTexture.GetTemporary(Size, Size, 16, RenderTextureFormat.ARGB32);
             try
             {
                 Render(head, frame, null);
-                var jpeg = ReadJpeg(frame, 85);
-                if (jpeg != null) preview?.Invoke(frame);
-                return jpeg;
+                return EncodeStill(frame, preview);
             }
             finally { RenderTexture.ReleaseTemporary(frame); }
         }
@@ -53,8 +63,14 @@ namespace YetiKit.Playtest
         }
         public byte[] Capture(double at, out double time, Action<Texture> preview = null)
         {
-            var jpeg = history.TryClosest(at, out var frame, out time) ? ReadJpeg(frame, 85) : null;
-            if (jpeg == null) time = double.NaN; else preview?.Invoke(frame);
+            var jpeg = history.TryClosest(at, out var frame, out time) ? EncodeStill(frame, preview) : null;
+            if (jpeg == null) time = double.NaN;
+            return jpeg;
+        }
+        byte[] EncodeStill(RenderTexture frame, Action<Texture> preview)
+        {
+            var jpeg = ReadJpeg(frame, StillJpegQuality);
+            if (jpeg != null) preview?.Invoke(frame);
             return jpeg;
         }
         bool IStripFrames.TryNewest(out double time) => history.TryNewest(out time);
