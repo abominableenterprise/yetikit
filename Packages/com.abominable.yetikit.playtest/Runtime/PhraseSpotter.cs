@@ -11,8 +11,12 @@ namespace YetiKit.Playtest
         void Accept(short[] pcm, int count);
     }
 
+    /// <summary>Opt in to block-level VAD bounds. Each Accept assigns the whole block to
+    /// one utterance and emits at most one result, after consuming the block.</summary>
+    public interface IBlockBoundaryPhraseSpotter : IPhraseSpotter { }
+
     /// <summary>Bind a key press in the host input system. The next Accept emits its final.</summary>
-    public sealed class KeyboardPhraseSpotter : IPhraseSpotter
+    public sealed class KeyboardPhraseSpotter : IBlockBoundaryPhraseSpotter
     {
         string pending;
         public event Action<string, bool> Phrase;

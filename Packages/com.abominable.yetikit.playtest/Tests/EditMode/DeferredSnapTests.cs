@@ -82,6 +82,35 @@ namespace YetiKit.Playtest.Tests
             Assert.That(JsonUtility.FromJson<SnapContext>(File.ReadAllText(Path.Combine(published, pending.Id + ".json"))).t, Is.EqualTo(Now));
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void PublishesTrimmedPcmAndRecordsOnlyAppliedCuts(bool replaceWithUntrimmed)
+        {
+            cam.Tick(head, Now - 0.25);
+            var pending = cam.BeginSnap(head, Now, anchor: Now - 0.25);
+            var pcm = new short[16000];
+            for (int i = 0; i < pcm.Length; i++) pcm[i] = (short)i;
+            Assert.That(pending.AttachNotePcm(pcm, new NoteTriggerRange(0, 3200), new NoteTriggerRange(12800, 16000)), Is.True);
+            var expected = WaveEncoder.Encode(pcm, 4000, 8000);
+            var trimMs = 250d;
+            if (replaceWithUntrimmed)
+            {
+                expected = WaveEncoder.Encode(pcm);
+                Assert.That(pending.AttachNote(expected), Is.True);
+                trimMs = 0;
+            }
+            Assert.That(pending.Publish(), Is.True);
+            Assert.That(cam.TryShutdown(WaitMs), Is.True);
+            var (published, manifest) = new Outbox(store).Next("p1");
+            Assert.That(File.ReadAllBytes(Path.Combine(published, pending.Id + ".wav")), Is.EqualTo(expected));
+            var context = JsonUtility.FromJson<SnapContext>(File.ReadAllText(Path.Combine(published, pending.Id + ".json")));
+            var marker = JsonUtility.FromJson<SnapDelivery.Manifest>(File.ReadAllText(Path.Combine(published, SnapDelivery.Marker)));
+            Assert.That((context.noteTrimLeadMs, context.noteTrimTailMs), Is.EqualTo((trimMs, trimMs)));
+            Assert.That((marker.context.noteTrimLeadMs, marker.context.noteTrimTailMs), Is.EqualTo((trimMs, trimMs)));
+            Assert.That((context.anchor, context.anchorOffsetMs), Is.EqualTo(("onset", 0d)));
+            Assert.That(manifest.files.Length, Is.EqualTo(3));
+        }
+
         [TestCase(9.125, 9.25, "onset", 125)]
         [TestCase(8.5, Now, "fresh", 1500)]
         [TestCase(11, Now, "fresh", -1000)]
@@ -136,13 +165,16 @@ namespace YetiKit.Playtest.Tests
         public void TimeoutPublishesWithoutAnUnsubmittedNote()
         {
             var pending = cam.BeginSnap(head, Now);
-            Assert.That(pending.AttachNote(WaveEncoder.Encode(new short[] { 1 })), Is.True);
+            Assert.That(pending.AttachNotePcm(new short[16000], leading: new NoteTriggerRange(0, 3200)), Is.True);
             cam.Tick(null, Now + Timeout - 0.1);
             Assert.That(new Outbox(store).Next("p1").manifest, Is.Null);
             cam.Tick(null, Now + Timeout);
             Assert.That(pending.Publish(), Is.False);
             Assert.That(cam.TryShutdown(WaitMs), Is.True);
-            Assert.That(new Outbox(store).Next("p1").manifest.files.Length, Is.EqualTo(2));
+            var (published, manifest) = new Outbox(store).Next("p1");
+            Assert.That(manifest.files.Length, Is.EqualTo(2));
+            var context = JsonUtility.FromJson<SnapContext>(File.ReadAllText(Path.Combine(published, pending.Id + ".json")));
+            Assert.That((context.noteTrimLeadMs, context.noteTrimTailMs), Is.EqualTo((0d, 0d)));
         }
 
         [Test]
@@ -166,6 +198,10 @@ namespace YetiKit.Playtest.Tests
             var dir = Directory.GetDirectories(store.Outbox).Single();
             var wave = Path.Combine(dir, pending.Id + ".wav");
             File.WriteAllBytes(wave, WaveEncoder.Encode(new short[] { 1 }));
+            var contextPath = Path.Combine(dir, pending.Id + ".json");
+            var context = JsonUtility.FromJson<SnapContext>(File.ReadAllText(contextPath));
+            context.noteTrimLeadMs = 250;
+            File.WriteAllText(contextPath, JsonUtility.ToJson(context));
             File.WriteAllText(Path.Combine(dir, "snap.done.tmp"), "torn marker");
             var outbox = new Outbox(new FileChunkStore(temp.Path));
             Assert.That(outbox.Next("p1").manifest, Is.Null);
@@ -174,6 +210,8 @@ namespace YetiKit.Playtest.Tests
             var (published, manifest) = outbox.Next("p1");
             Assert.That(manifest.files, Is.EqualTo(new[] { ".jpg", ".json" }.Select(ext => Session + "/" + pending.Id + ext)));
             Assert.That(File.Exists(Path.Combine(published, pending.Id + ".wav")), Is.False);
+            var recovered = JsonUtility.FromJson<SnapContext>(File.ReadAllText(Path.Combine(published, pending.Id + ".json")));
+            Assert.That(recovered.noteTrimLeadMs, Is.Zero);
             Assert.That(Directory.GetDirectories(store.Outbox), Is.EqualTo(new[] { published }));
         }
 

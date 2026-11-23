@@ -14,6 +14,7 @@ namespace YetiKit.Playtest
         public int stripMain;
         public string anchor;
         public double anchorOffsetMs;
+        public double noteTrimLeadMs, noteTrimTailMs;
     }
     public interface ISnapContextProvider { SnapContext CaptureContext(); }
     /// <summary>Anchor uses the same monotonic clock as Tick. The host owns input and consent.</summary>
@@ -84,6 +85,7 @@ namespace YetiKit.Playtest
             var data = context.CaptureContext();
             if (!SessionRules.IsId(data.session)) return null;
             (data.strip, data.stripMain) = (Array.Empty<StripFrame>(), -1);
+            data.noteTrimLeadMs = data.noteTrimTailMs = 0;
             var photo = TakeStill(head, now, phrase, anchor, ref data, out _);
             var batch = delivery.Stage(data, photo);
             if (batch != null) return pending = new PendingSnap(this, batch, data.snap, deadline);
@@ -109,9 +111,10 @@ namespace YetiKit.Playtest
             if (pending == null) return false;
             var handle = pending;
             var note = withNote ? handle.Note : null;
+            var (lead, tail) = (handle.NoteTrimLeadMs, handle.NoteTrimTailMs);
             pending = null;
             handle.Close();
-            StartPublication(handle.Batch.Context, () => handle.Batch.Publish(note));
+            StartPublication(handle.Batch.Context, () => handle.Batch.Publish(note, lead, tail));
             return true;
         }
 
