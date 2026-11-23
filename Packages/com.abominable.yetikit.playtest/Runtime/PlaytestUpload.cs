@@ -12,8 +12,9 @@ namespace YetiKit.Playtest
             if (session == null) throw new ArgumentNullException(nameof(session));
             if (session.Begun) throw new InvalidOperationException("Attach before recording starts.");
             if (!(spacingSeconds > 0) || double.IsInfinity(spacingSeconds)) throw new ArgumentOutOfRangeException(nameof(spacingSeconds));
-            var outbox = UploadValidation.TryGetEndpoint(settings, out _) ? new Outbox(session.UploadStore) : null;
+            var outbox = UploadValidation.TryGetEndpoint(settings, out var endpoint) ? new Outbox(session.UploadStore) : null;
             outbox?.Recover();
+            session.SetStartupConfig(settings, endpoint);
             return new Uploader(outbox, settings, sender ?? new UnityHttpSender(), spacingSeconds,
                 clock ?? (() => Time.realtimeSinceStartupAsDouble));
         }

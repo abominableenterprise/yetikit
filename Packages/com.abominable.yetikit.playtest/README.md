@@ -153,7 +153,14 @@ No config means no network. Use HTTPS except for local loopback testing.
 
 Call `PlaytestUpload.Attach(session, settings)` on the main thread **before**
 `Begin`, once per `FileChunkStore`. It does startup recovery without network
-access, including publishing recoverable abandoned sessions. Reuse the returned
+access, including publishing recoverable abandoned sessions. The first successful
+`Begin` per `ChunkPump` logs `YetiKitPlaytest: config` with the endpoint host (or
+`endpoint=none`), the player tag, and the source. `persistent` means the file in
+`Application.persistentDataPath`; `app-private` means the Android fallback;
+`default` means no file, `editor-env` means an Editor environment credential
+pair (or an Editor-only player tag with no file), and `custom` means that the
+consumer supplied other settings. A recorder without attached upload settings
+reports `endpoint=none` and `source=default`. Reuse the returned
 `Uploader` for subsequent sessions on that store and call `TickAsync` from the
 main-thread update; pass a lifetime cancellation token. Only completed batches
 are sent: the uploader PUTs metadata and chunks serially, then posts the

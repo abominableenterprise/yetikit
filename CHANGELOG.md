@@ -8,6 +8,14 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+### Added
+- Development playtest recorders log the endpoint host (or local-only status),
+  player tag, and config source at startup without logging the upload key.
+
+### Behaviour changes
+- In-app playtest enrolment is no longer experimental; it was verified on a
+  real headset with a secondary user.
+
 ## [0.3.5] - 2026-11-23
 
 In-app playtest enrollment now stops within a fixed deadline and reports why delivery failed.

@@ -6,7 +6,10 @@ set -euo pipefail
 fail() { printf '[playtest-enroll] %s\n' "$1" >&2; exit 1; }
 usage() {
   printf 'Usage: playtest-enroll.sh --endpoint <Worker HTTPS origin> --code <private file> [--player <tag>] [--user N] [--in-app] [--launch]\n'
-  printf '%s\n' 'Targets the foreground Android user. Secondary profiles are experimental; switch to the primary profile (user 0) if enrollment fails.'
+  printf '%s\n' 'Targets the foreground Android user. In-app enrollment was verified on a real headset with a secondary user.'
+  printf '%s\n' 'If enrollment fails, switch to the primary profile (user 0) and retry without --in-app.'
+  printf '%s\n' 'To relaunch for a specific user: adb shell am start --user N -n <activity> (monkey rejects --user on the verified headset OS).'
+  printf '%s\n' 'Check the YetiKitPlaytest: config line in Unity logcat to confirm which config loaded.'
 }
 
 endpoint='' code_file='' player=test-device launch=0 requested_user='' in_app=0

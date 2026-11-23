@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace YetiKit.Playtest.Tests
 {
@@ -22,11 +23,68 @@ namespace YetiKit.Playtest.Tests
             Assert.That(playtest.resolvedDependencies.Select(dependency => dependency.name), Does.Contain(jniModule));
         }
 
+        [TestCase("https://example.invalid:8443/" + FixtureKey)]
+        [TestCase("https://example.invalid/" + FixtureKey + "?key=" + FixtureKey)]
+        public void StartupConfigLogOnlyShowsEndpointHost(string endpoint)
+        {
+            var line = PlaytestConfigLog.Format(endpoint, "p1", PlaytestConfigSource.Persistent);
+            Assert.That(line, Is.EqualTo("YetiKitPlaytest: config endpoint host=example.invalid player=p1 source=persistent"));
+            Assert.That(line, Does.Not.Contain(FixtureKey));
+        }
+
+        [Test]
+        public void StartupConfigLogShowsLocalOnlyAndRejectsMultilineTags()
+        {
+            var line = PlaytestConfigLog.Format(null, "p1\n" + FixtureKey, PlaytestConfigSource.Default);
+            Assert.That(line, Is.EqualTo("YetiKitPlaytest: config endpoint=none player=unknown source=default"));
+        }
+
+        [Test]
+        public void StartupConfigLogEmitsOnceAfterTheRecorderStarts()
+        {
+            using var dir = new TempDir();
+            var store = new FileChunkStore(dir.Path);
+            using var pump = new ChunkPump(store: store);
+            var retry = false;
+            using var sessionLog = new StartupLogCapture();
+            var session = new RecordingSession(new FlightLog(() => 0), pump, store,
+                new SessionMeta(SessionRules.NewId(DateTime.UtcNow, 1)), () => DateTime.UtcNow,
+                _ => { if (!retry) throw new IOException("synthetic startup failure"); });
+            PlaytestUpload.Attach(session, new Settings { Endpoint = BaseUrl + "/" + FixtureKey });
+
+            Assert.IsFalse(session.Begin(0));
+            Assert.That(sessionLog.Lines, Is.Empty);
+            retry = true;
+            Assert.IsTrue(session.Begin(0));
+            Assert.IsTrue(session.Begin(0));
+            session.End(0);
+            var next = new RecordingSession(new FlightLog(() => 0), pump, store,
+                new SessionMeta(SessionRules.NewId(DateTime.UtcNow, 2)), () => DateTime.UtcNow);
+            Assert.IsTrue(next.Begin(0));
+            next.End(0);
+            Assert.That(sessionLog.Lines, Is.EqualTo(new[]
+            {
+                "YetiKitPlaytest: config endpoint host=example.invalid player=p1 source=custom"
+            }));
+        }
+
+        sealed class StartupLogCapture : IDisposable
+        {
+            internal readonly List<string> Lines = new();
+            internal StartupLogCapture() => Application.logMessageReceived += Receive;
+            void Receive(string line, string stack, LogType type)
+            {
+                if (line.StartsWith("YetiKitPlaytest: config ", StringComparison.Ordinal)) Lines.Add(line);
+            }
+            public void Dispose() => Application.logMessageReceived -= Receive;
+        }
+
         [Test]
         public async Task MissingConfigDisablesNetwork()
         {
             using var dir = new TempDir();
-            var settings = PlaytestJsonSettings.LoadPaths(new[] { Path.Combine(dir.Path, "missing") });
+            var settings = PlaytestJsonSettings.LoadPaths(new[] { (Path.Combine(dir.Path, "missing"), PlaytestConfigSource.Persistent) });
+            Assert.That(settings.Source, Is.EqualTo(PlaytestConfigSource.Default));
             var sender = new FakeSender();
             Assert.IsFalse(settings.Enabled);
             Assert.IsNull(settings.UploadKey);
@@ -42,18 +100,22 @@ namespace YetiKit.Playtest.Tests
             var primary = Path.Combine(dir.Path, "primary");
             var fallback = Path.Combine(dir.Path, "fallback");
             File.WriteAllText(fallback, "{\"endpoint\":\"" + BaseUrl + "/\",\"uploadKey\":\"" + FixtureKey + "\",\"player\":\"p1\"}");
-            var paths = new[] { primary, fallback };
+            var paths = new[] { (primary, PlaytestConfigSource.Persistent), (fallback, PlaytestConfigSource.AppPrivate) };
             var settings = PlaytestJsonSettings.LoadPaths(paths, name => name == PlaytestJsonSettings.EnvKey ? "unpaired" : null);
             Assert.IsTrue(settings.Enabled);
             Assert.AreEqual(BaseUrl, settings.Endpoint);
             Assert.AreEqual(FixtureKey, settings.UploadKey);
+            Assert.That(settings.Source, Is.EqualTo(PlaytestConfigSource.AppPrivate));
             settings = PlaytestJsonSettings.LoadPaths(paths, name => name == PlaytestJsonSettings.EnvEndpoint ? BaseUrl + "/dev/" :
                 name == PlaytestJsonSettings.EnvKey ? "override" : "p2");
             Assert.AreEqual(BaseUrl + "/dev", settings.Endpoint);
             Assert.AreEqual("override", settings.UploadKey);
             Assert.AreEqual("p2", settings.PlayerTag);
+            Assert.That(settings.Source, Is.EqualTo(PlaytestConfigSource.EditorEnvironment));
             File.WriteAllText(primary, "{");
-            Assert.IsFalse(PlaytestJsonSettings.LoadPaths(paths).Enabled);
+            var localOnly = PlaytestJsonSettings.LoadPaths(paths);
+            Assert.IsFalse(localOnly.Enabled);
+            Assert.That(localOnly.Source, Is.EqualTo(PlaytestConfigSource.Persistent));
             Assert.IsFalse(settings.ToString().Contains(settings.UploadKey));
         }
 

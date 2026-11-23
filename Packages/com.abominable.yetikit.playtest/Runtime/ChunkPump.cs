@@ -49,6 +49,7 @@ namespace YetiKit.Playtest
         readonly AutoResetEvent wake = new AutoResetEvent(false);
         readonly Thread thread;
         volatile bool stopping;
+        bool startupConfigLogged;
         ChunkWriter writer;
         string sessionDir; // pump thread only: the session a failed writer start is retried for
         LostRecords dropped; // pump thread only
@@ -90,6 +91,14 @@ namespace YetiKit.Playtest
             for (var i = 0; i < PooledBuilders; i++) pool.Add(new System.Text.StringBuilder(FlightLog.InitialChars));
             thread = new Thread(Run) { IsBackground = true, Name = "FlightRecorder", Priority = ThreadPriority.BelowNormal };
             thread.Start();
+        }
+
+        // Main thread, once per recorder even when it rotates through multiple sessions.
+        internal void LogStartupConfig(string line)
+        {
+            if (startupConfigLogged) return;
+            startupConfigLogged = true;
+            UnityEngine.Debug.Log(line);
         }
 
         /// <summary>Following text goes to chunks in <paramref name="dir"/> (the open chunk is finished first).</summary>

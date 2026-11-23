@@ -13,6 +13,7 @@ namespace YetiKit.Playtest
         public string UploadKey { get; private set; }
         public string PlayerTag { get; private set; }
         public bool Enabled => Endpoint != null && UploadKey != null;
+        internal PlaytestConfigSource Source { get; private set; }
 
         [Serializable] sealed class Raw { public string endpoint, uploadKey, player; }
 
@@ -33,9 +34,9 @@ namespace YetiKit.Playtest
 
         internal static string ExternalPath() => Path.Combine(Application.persistentDataPath, "playtest", FileName);
 
-        static IEnumerable<string> DefaultPaths()
+        static IEnumerable<(string Path, PlaytestConfigSource Source)> DefaultPaths()
         {
-            yield return ExternalPath();
+            yield return (ExternalPath(), PlaytestConfigSource.Persistent);
 #if UNITY_ANDROID && !UNITY_EDITOR
             string privateDir = null;
             try
@@ -46,27 +47,36 @@ namespace YetiKit.Playtest
                 privateDir = files?.Call<string>("getAbsolutePath");
             }
             catch (AndroidJavaException) { }
-            if (!string.IsNullOrEmpty(privateDir)) yield return Path.Combine(privateDir, FileName);
+            if (!string.IsNullOrEmpty(privateDir)) yield return (Path.Combine(privateDir, FileName), PlaytestConfigSource.AppPrivate);
 #endif
         }
 
-        internal static PlaytestJsonSettings LoadPaths(IEnumerable<string> paths, Func<string, string> editorEnvironment = null)
+        internal static PlaytestJsonSettings LoadPaths(IEnumerable<(string Path, PlaytestConfigSource Source)> paths,
+            Func<string, string> editorEnvironment = null)
         {
             Raw raw = null;
-            foreach (var path in paths)
+            var source = PlaytestConfigSource.Default;
+            foreach (var (path, fileSource) in paths)
             {
                 string text;
                 try { text = File.ReadAllText(path); }
                 catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { continue; }
                 try { raw = JsonUtility.FromJson<Raw>(text); }
                 catch (ArgumentException) { }
+                source = fileSource;
                 break; // Readable wins, even if empty or invalid.
             }
-            var player = editorEnvironment?.Invoke(EnvPlayer)?.Trim();
-            if (string.IsNullOrEmpty(player)) player = raw?.player?.Trim();
-            var settings = new PlaytestJsonSettings { PlayerTag = string.IsNullOrEmpty(player) ? "unknown" : player };
+            var editorPlayer = editorEnvironment?.Invoke(EnvPlayer)?.Trim();
+            var player = string.IsNullOrEmpty(editorPlayer) ? raw?.player?.Trim() : editorPlayer;
+            var settings = new PlaytestJsonSettings
+            {
+                PlayerTag = string.IsNullOrEmpty(player) ? "unknown" : player,
+                Source = source
+            };
             settings.SetCredentials(raw?.endpoint, raw?.uploadKey);
-            settings.SetCredentials(editorEnvironment?.Invoke(EnvEndpoint), editorEnvironment?.Invoke(EnvKey));
+            if (settings.SetCredentials(editorEnvironment?.Invoke(EnvEndpoint), editorEnvironment?.Invoke(EnvKey)) ||
+                (source == PlaytestConfigSource.Default && !string.IsNullOrEmpty(editorPlayer)))
+                settings.Source = PlaytestConfigSource.EditorEnvironment;
             return settings;
         }
 
@@ -79,13 +89,14 @@ namespace YetiKit.Playtest
                 UploadValidation.IsValidKey(raw.uploadKey) && UploadValidation.IsSegment(raw.player);
         }
 
-        void SetCredentials(string endpoint, string key)
+        bool SetCredentials(string endpoint, string key)
         {
             endpoint = UploadValidation.NormalizeEndpoint(endpoint);
             key = key?.Trim();
-            if (endpoint == null || !UploadValidation.IsValidKey(key)) return;
+            if (endpoint == null || !UploadValidation.IsValidKey(key)) return false;
             Endpoint = endpoint;
             UploadKey = key;
+            return true;
         }
     }
 }
