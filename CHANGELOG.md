@@ -8,11 +8,29 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-11-23
+
+Voice-triggered playtest snaps can capture the speech-onset frame and omit spoken commands from voice notes.
+
 ### Added
-- Playtest snaps can use a speech-onset timestamp to select a recent frame,
-  falling back to a fresh still when that timestamp is unavailable or out of range.
-- Playtest voice notes can optionally trim spoken snap and send commands using
-  recognition sample bounds. Snap context records the actual trim durations.
+- Pass a `SnapAnchor.FromSample` anchor to `BeginSnap` or `TrySnap` to select
+  a recent frame at speech onset. If no usable frame matches, capture a fresh
+  still. Snap context records `anchor` and `anchorOffsetMs`
+  ([#379](https://github.com/abominableenterprise/yetikit/pull/379)).
+- Use `RecognitionPhrase` sample bounds to pass optional trigger ranges to
+  `PendingSnap.AttachNotePcm` and trim spoken snap and send commands. An
+  unknown or unsafe end is reported as `EndSample = -1`; leave that trigger
+  untrimmed to preserve narration. Snap context records `noteTrimLeadMs` and
+  `noteTrimTailMs` ([#380](https://github.com/abominableenterprise/yetikit/pull/380)).
+
+### Fixed
+- None.
+
+### Behaviour changes
+- None.
+
+### Adapter changes
+- None.
 
 ## [0.3.6] - 2026-11-23
 
