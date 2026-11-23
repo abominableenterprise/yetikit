@@ -105,7 +105,7 @@ as Git packages at their manifest pins. Both modes reject local paths and
 embedded packages; even the pre-import check validates an existing lock. This
 is a package-source check, not an editor, device or signing doctor.
 
-The generator pins all seven starter modules to the public `v0.3.5` tag.
+The generator pins all seven starter modules to the public `v0.3.6` tag.
 The starter scripts themselves are copied into `Assets`, not fetched as a package.
 For a cold import, start with a new project (no lock or `Library`), an empty
 `UPM_CACHE_ROOT`, and no per-cache overrides (`UPM_CACHE_PATH`,
