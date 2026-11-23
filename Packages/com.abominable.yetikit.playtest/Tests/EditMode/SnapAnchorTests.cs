@@ -23,7 +23,7 @@ namespace YetiKit.Playtest.Tests
         }
 
         [TestCase(1, "oldest", 1)]
-        [TestCase(1.2, "oldest", 1)]
+        [TestCase(1.2, "middle", 1.25)]
         [TestCase(1.375, "newest", 1.5)]
         [TestCase(1.75, "newest", 1.5)]
         public void SelectsNearestRetainedFrame(double anchor, string expectedFrame, double expectedTime)
