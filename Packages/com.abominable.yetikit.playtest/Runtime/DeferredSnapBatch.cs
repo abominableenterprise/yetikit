@@ -50,8 +50,10 @@ namespace YetiKit.Playtest
             catch (Exception error) when (IsStorageError(error)) { return null; }
         }
 
-        internal SnapStatus Publish(byte[] note)
+        internal SnapStatus Publish(byte[] note, double trimLeadMs = 0, double trimTailMs = 0)
         {
+            var context = Context;
+            (context.noteTrimLeadMs, context.noteTrimTailMs) = note == null ? (0d, 0d) : (trimLeadMs, trimTailMs);
             try
             {
                 var names = new List<string> { jpeg, json };
@@ -63,7 +65,9 @@ namespace YetiKit.Playtest
                 }
                 else File.Delete(wavePath);
                 File.Delete(wavePath + TmpSuffix);
-                SnapDelivery.WriteMarker(store, dir, Context, player, names);
+                // Rewrite while still pending so recovery can also clear trim metadata from an interrupted note.
+                store.PublishFinalFile(Path.Combine(dir, json), Encoding.UTF8.GetBytes(JsonUtility.ToJson(context)));
+                SnapDelivery.WriteMarker(store, dir, context, player, names);
                 var queued = UploadValidation.IsSegment(player);
                 Move(dir, Path.Combine(store.Outbox, batchName + (queued ? "" : ".local")));
                 return queued ? SnapStatus.Queued : SnapStatus.Local;

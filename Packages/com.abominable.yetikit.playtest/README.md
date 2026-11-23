@@ -131,6 +131,33 @@ paths publish the JPEG and JSON without a WAV. On startup, call `RecoverChunks`
 on that root, to finish orphaned snaps. Recovery keeps the local/queued routing
 chosen at capture time.
 
+To remove spoken commands, retain the recognition results for the start and
+send utterances, preferably their matching finals. `OnsetSample` and `EndSample`
+are absolute 16 kHz stream positions estimated from voice activity, not exact
+word boundaries. `EndSample` is exclusive and independent of the worker's
+`SamplesProcessed` cursor, which may include trailing silence. Use the same
+continuous stream for recognition and note capture. Subtract the stream
+position of the first retained PCM sample, including pre-roll, to get note-relative
+ranges. Omit a range if either boundary is unknown or the utterance isn't a command.
+
+```csharp
+NoteTriggerRange? RelativeRange(RecognitionPhrase phrase) =>
+    phrase.OnsetSample >= 0 && phrase.EndSample > phrase.OnsetSample
+        ? new NoteTriggerRange(phrase.OnsetSample - pcmStartSample,
+                               phrase.EndSample - pcmStartSample)
+        : null;
+
+if (pending != null && pending.AttachNotePcm(pcm, RelativeRange(startCommand), RelativeRange(sendCommand)))
+    pending.Publish();
+```
+
+`AttachNotePcm` takes 16 kHz mono PCM16 and uses `VoiceNoteTrim.Select` before
+WAV encoding. The pure helper also supports interleaved multichannel PCM and
+other rates. It removes 50 ms beyond each selected trigger edge (clamped to
+the note), but keeps the original audio if less than 250 ms would remain.
+Omitted ranges leave WAV bytes unchanged. `noteTrimLeadMs` and `noteTrimTailMs`
+in snap context report the actual cuts, or zero when no cut was applied.
+
 Before allowing a controlled quit, call `TryShutdown(timeoutMs)` on the main
 thread **before** disposing the frame history. It stops new captures, finishes
 encoding the available strip frames, then waits up to the specified time for

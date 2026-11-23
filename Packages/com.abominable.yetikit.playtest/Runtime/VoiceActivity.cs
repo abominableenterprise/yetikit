@@ -11,6 +11,7 @@ namespace YetiKit.Playtest
         long sumSquares;
         long frameOnset = -1;
         public long SamplesProcessed { get; private set; }
+        internal long LastVoicedEndSample { get; private set; } = -1;
 
         /// <summary>Returns true if a complete voiced frame occurred. Reports the first voiced frame's onset after
         /// 300 ms of observed quiet, or -1 if that boundary was not observed.</summary>
@@ -30,6 +31,7 @@ namespace YetiKit.Playtest
                 {
                     if (!voiced && quiet == QuietFrames) onsetSample = frameOnset;
                     voiced = true;
+                    LastVoicedEndSample = SamplesProcessed;
                     quiet = 0;
                 }
                 else if (quiet < QuietFrames) quiet++;

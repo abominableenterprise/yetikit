@@ -11,14 +11,21 @@ namespace YetiKit.Playtest
         public readonly long UtteranceId, SamplesProcessed;
         /// <summary>Absolute PCM sample offset, or -1 if no initial quiet boundary was observed.</summary>
         public readonly long OnsetSample;
+        /// <summary>Exclusive end of the last voiced VAD frame for this utterance, or -1 if unobserved.
+        /// Approximate, especially for partial results; use the matching final to refine the estimate.</summary>
+        public readonly long EndSample;
 
         public RecognitionPhrase(string text, bool isFinal, long utteranceId, long onsetSample, long samplesProcessed)
+            : this(text, isFinal, utteranceId, onsetSample, samplesProcessed, -1) { }
+
+        public RecognitionPhrase(string text, bool isFinal, long utteranceId, long onsetSample, long samplesProcessed, long endSample)
         {
             Text = text;
             IsFinal = isFinal;
             UtteranceId = utteranceId;
             OnsetSample = onsetSample;
             SamplesProcessed = samplesProcessed;
+            EndSample = endSample;
         }
     }
 
@@ -32,7 +39,7 @@ namespace YetiKit.Playtest
         readonly Thread thread;
         bool stopping, onsetLatched;
         int queuedSamples;
-        long utteranceId, onset = -1;
+        long utteranceId, onset = -1, end = -1;
         volatile Exception failure;
         public event Action<RecognitionPhrase> Phrase;
         public Exception Failure => failure;
@@ -85,7 +92,11 @@ namespace YetiKit.Playtest
                         queuedSamples -= block.Length;
                     }
                     var voiced = vad.Process(block, 0, block.Length, out var boundary);
-                    if (!onsetLatched && voiced) { onset = boundary; onsetLatched = true; }
+                    if (voiced)
+                    {
+                        if (!onsetLatched) { onset = boundary; onsetLatched = true; }
+                        end = vad.LastVoicedEndSample;
+                    }
                     spotter.Accept(block, block.Length);
                 }
             }
@@ -100,9 +111,9 @@ namespace YetiKit.Playtest
 
         void OnPhrase(string text, bool final)
         {
-            var phrase = new RecognitionPhrase(text, final, utteranceId, onset, vad.SamplesProcessed);
+            var phrase = new RecognitionPhrase(text, final, utteranceId, onset, vad.SamplesProcessed, end);
             if (!string.IsNullOrEmpty(text)) onsetLatched = true;
-            if (final) { utteranceId++; onset = -1; onsetLatched = false; }
+            if (final) { utteranceId++; onset = end = -1; onsetLatched = false; }
             Phrase?.Invoke(phrase);
         }
     }

@@ -8,6 +8,8 @@ namespace YetiKit.Playtest
         internal readonly DeferredSnapBatch Batch;
         internal readonly double Deadline;
         internal byte[] Note { get; private set; }
+        internal double NoteTrimLeadMs { get; private set; }
+        internal double NoteTrimTailMs { get; private set; }
         public string Id { get; }
 
         internal PendingSnap(SnitchCam owner, DeferredSnapBatch batch, string id, double deadline) =>
@@ -18,6 +20,20 @@ namespace YetiKit.Playtest
         {
             if (owner == null || !SnapDelivery.ValidBytes(wave)) return false;
             Note = (byte[])wave.Clone();
+            NoteTrimLeadMs = NoteTrimTailMs = 0;
+            return true;
+        }
+
+        /// <summary>Encode 16 kHz mono PCM16, optionally removing triggers at either edge.
+        /// Ranges are relative to the start of this PCM, including any retained pre-roll.</summary>
+        public bool AttachNotePcm(short[] pcm, NoteTriggerRange? leading = null, NoteTriggerRange? trailing = null)
+        {
+            if (owner == null || pcm == null || pcm.Length == 0) return false;
+            const int rate = VoiceActivity.SampleRate;
+            var (offset, count, _) = VoiceNoteTrim.Select(pcm, rate, 1, leading, trailing);
+            Note = WaveEncoder.Encode(pcm, offset, count);
+            NoteTrimLeadMs = VoiceNoteTrim.ToMilliseconds(offset, rate);
+            NoteTrimTailMs = VoiceNoteTrim.ToMilliseconds(pcm.Length - offset - count, rate);
             return true;
         }
 

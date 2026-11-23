@@ -8,6 +8,10 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+### Added
+- Playtest voice notes can optionally trim spoken snap and send commands using
+  recognition sample bounds. Snap context records the actual trim durations.
+
 ## [0.3.6] - 2026-11-23
 
 Playtest recorders report which configuration loaded, and in-app enrollment is verified for secondary Android profiles.

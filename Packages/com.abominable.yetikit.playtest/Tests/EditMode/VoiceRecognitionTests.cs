@@ -61,7 +61,7 @@ namespace YetiKit.Playtest.Tests
             Assert.That(new PhraseRules(new CustomGrammar()).Match(Phrase("start", 0, true), 0), Is.EqualTo(PhraseTrigger.None));
             // Include 300 ms of quiet and one voiced frame in a single submission.
             Assert.That(keyboard.TryFire("begin note"), Is.True);
-            var pcm = new short[4800 + VoiceActivity.FrameSamples];
+            var pcm = new short[4800 + 4 * VoiceActivity.FrameSamples];
             Array.Fill(pcm, (short)2000, 4800, VoiceActivity.FrameSamples);
             Assert.That(worker.TryEnqueue(pcm), Is.True);
             Array.Clear(pcm, 0, pcm.Length);
@@ -72,6 +72,7 @@ namespace YetiKit.Playtest.Tests
             Assert.That(observed.IsFinal, Is.True);
             Assert.That(observed.UtteranceId, Is.Zero);
             Assert.That(observed.OnsetSample, Is.EqualTo(4800));
+            Assert.That(observed.EndSample, Is.EqualTo(4800 + VoiceActivity.FrameSamples));
             Assert.That(observed.SamplesProcessed, Is.EqualTo(pcm.Length));
             Assert.That(new PhraseRules(new CustomGrammar()).Match(observed, 0), Is.EqualTo(PhraseTrigger.Start));
         }
