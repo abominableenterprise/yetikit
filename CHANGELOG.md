@@ -14,8 +14,8 @@ Voice-triggered playtest snaps can capture the speech-onset frame and omit spoke
 
 ### Added
 - Pass a `SnapAnchor.FromSample` anchor to `BeginSnap` or `TrySnap` to select
-  a recent frame at speech onset. If no usable frame matches, capture a fresh
-  still. Snap context records `anchor` and `anchorOffsetMs`
+  a recent frame at speech onset. `BeginSnap` falls back to a fresh still if
+  no usable frame matches. Snap context records `anchor` and `anchorOffsetMs`
   ([#379](https://github.com/abominableenterprise/yetikit/pull/379)).
 - Use `RecognitionPhrase` sample bounds to pass optional trigger ranges to
   `PendingSnap.AttachNotePcm` and trim spoken snap and send commands. An
@@ -27,7 +27,11 @@ Voice-triggered playtest snaps can capture the speech-onset frame and omit spoke
 - None.
 
 ### Behaviour changes
-- None.
+- `TrySnap` now captures a fresh still and centers the strip on the current
+  time when it cannot resolve the anchor. Previously it rejected invalid or
+  future anchors and could use the oldest retained frame for a stale anchor.
+  Callers that use anchor validity to suppress capture should check it before
+  calling `TrySnap` ([#379](https://github.com/abominableenterprise/yetikit/pull/379)).
 
 ### Adapter changes
 - None.
