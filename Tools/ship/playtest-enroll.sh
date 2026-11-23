@@ -75,15 +75,11 @@ installed="$("${device[@]}" shell cmd package path --user "$user" "$package" 2>/
 [[ "$installed" == package:/* ]] || fail 'configured applicationId (quest.package) is not installed on the selected device'
 
 umask 077
-tmp='' remote_stage='' relay_pid='' reverse_port=''
+tmp='' remote_stage='' app_helper_pid=''
 cleanup() {
-  if [[ -n "$relay_pid" ]]; then
-    kill "$relay_pid" 2>/dev/null || true
-    wait "$relay_pid" 2>/dev/null || true
-  fi
-  if [[ -n "$reverse_port" ]]; then
-    "${device[@]}" reverse --remove "tcp:$reverse_port" >/dev/null 2>&1 \
-      || printf '[playtest-enroll] could not remove the adb reverse mapping; reconnect the device and clear the mapping\n' >&2
+  if [[ -n "$app_helper_pid" ]]; then
+    kill "$app_helper_pid" 2>/dev/null || true
+    wait "$app_helper_pid" 2>/dev/null || true
   fi
   if [[ -n "$remote_stage" ]]; then
     "${device[@]}" shell rm -f "$remote_stage" >/dev/null 2>&1 \
@@ -140,42 +136,13 @@ read_device_clock() {
 }
 
 install_in_app() {
-  local -r ENROLL_TIMEOUT_SECONDS=60 RELAY_START_ATTEMPTS=50
-  local attempt port nonce resolved activity started component_pattern
-  python3 "$ship_dir/playtest-enroll-relay.py" "$tmp" "$ENROLL_TIMEOUT_SECONDS" >/dev/null 2>&1 &
-  relay_pid=$!
-  for ((attempt = 0; attempt < RELAY_START_ATTEMPTS; attempt++)); do
-    [[ ! -f "$tmp/relay-ready" ]] || break
-    kill -0 "$relay_pid" 2>/dev/null || break
-    sleep 0.1
-  done
-  [[ -f "$tmp/relay-ready" ]] && read -r port nonce < "$tmp/relay-ready" \
-    && [[ "$port" =~ ^[0-9]{1,5}$ && "$nonce" =~ ^[0-9a-f]{32}$ ]] \
-    || fail 'could not initialize the local enrollment relay (configuration must fit in 16 KiB)'
-  # Do not replace a reverse mapping that belongs to another adb client.
-  "${device[@]}" reverse --no-rebind "tcp:$port" "tcp:$port" >/dev/null 2>&1 || fail 'could not set up adb reverse; check device connectivity and retry'
-  reverse_port="$port"
-  resolved="$("${device[@]}" shell cmd package resolve-activity --brief --user "$user" "$package" 2>/dev/null)" \
-    || fail 'could not resolve the configured app launcher activity'
-  activity="${resolved##*$'\n'}"
-  activity="${activity%$'\r'}"
-  component_pattern='^[A-Za-z0-9_.$]+$'
-  [[ "$activity" == "$package/"* && "${activity#*/}" =~ $component_pattern ]] \
-    || fail 'could not resolve the configured app launcher activity'
-  # adb shell joins argv into a remote command; quote the validated component
-  # so a nested Java class name containing $ reaches the device unchanged.
-  [[ "$launch" != 1 ]] || read_device_clock
-  recheck_user
-  started="$("${device[@]}" shell am start --user "$user" -S -W -n "'$activity'" \
-    --ei yetikit_enroll_port "$port" --es yetikit_enroll_nonce "$nonce" 2>/dev/null)" || fail 'could not launch the configured app'
-  [[ "$started" == *'Status: ok'* ]] || fail 'Android did not confirm launch of the configured app'
-  # The relay exits successfully only after it has served the config once.
-  local served=0
-  wait "$relay_pid" && served=1
-  relay_pid=''
-  [[ "$served" == 1 ]] || fail 'the app did not receive the configuration from the enrollment relay; check the development build and retry'
-  rm -f -- "$tmp/playtest.json"
-  printf 'Playtest configuration delivered to the app.\n'
+  local result=0
+  # Use an interruptible shell wait so EXIT cleanup can forward signals to the helper.
+  python3 "$ship_dir/playtest-enroll-app.py" "$serial" "$user" "$package" "$tmp" "$launch" &
+  app_helper_pid=$!
+  wait "$app_helper_pid" || result=$?
+  app_helper_pid=''
+  return "$result"
 }
 
 install_by_push() {
@@ -192,16 +159,18 @@ install_by_push() {
   printf 'Playtest configuration installed on the selected device.\n'
 }
 
-if [[ "$in_app" == 1 ]]; then install_in_app; else install_by_push; fi
+if [[ "$in_app" == 1 ]]; then
+  install_in_app
+  exit 0
+fi
+install_by_push
 
 if [[ "$launch" == 1 ]]; then
   # Use the device clock and the selected app PID; do not clear or print logcat.
-  if [[ "$in_app" == 0 ]]; then
-    read_device_clock
-    started="$("${device[@]}" shell am start --user "$user" -W -a android.intent.action.MAIN \
-      -c android.intent.category.LAUNCHER -p "$package" 2>/dev/null)" || fail 'could not launch the configured app'
-    [[ "$started" == *'Status: ok'* ]] || fail 'Android did not confirm launch of the configured app'
-  fi
+  read_device_clock
+  started="$("${device[@]}" shell am start --user "$user" -W -a android.intent.action.MAIN \
+    -c android.intent.category.LAUNCHER -p "$package" 2>/dev/null)" || fail 'could not launch the configured app'
+  [[ "$started" == *'Status: ok'* ]] || fail 'Android did not confirm launch of the configured app'
   for ((attempt = 0; attempt < 10; attempt++)); do
     # Android encodes the user in the UID (PER_USER_RANGE = 100000).
     # pidof has no user filter and could find the same app in another profile.

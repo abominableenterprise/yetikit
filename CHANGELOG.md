@@ -8,6 +8,10 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 
 ## [Unreleased]
 
+### Fixed
+- Bound in-app playtest enrollment and report blocked headset launches with a
+  retry hint instead of hanging ([#370](https://github.com/abominableenterprise/yetikit/issues/370)).
+
 ## [0.3.4] - 2026-11-22
 
 Development builds can now enroll secondary Android profiles from inside the app.
