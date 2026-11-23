@@ -101,11 +101,11 @@ Run recovery and recording exclusively for a recording root.
 Drive `SnitchCam` on the main thread with a camera, a monotonic clock, and
 host-owned input and consent. Pass `SnapDelivery` as the publication store
 for local capture or to queue a separate snap batch in the outbox. Acceptance
-by `TrySnap` is not a disk acknowledgment. Keep using it for a history-based
-snap with a frame strip and, optionally, a WAV already encoded by the host.
+by `TrySnap` is not a disk acknowledgment. Use it to publish a snap with a frame
+strip and, optionally, a WAV already encoded by the host.
 
-For hold-to-talk, `BeginSnap` renders a fresh still and stages its JPEG and
-context on disk before returning. It shows the same Polaroid at capture time
+For hold-to-talk, `BeginSnap` defaults to rendering a fresh still and stages its
+JPEG and context on disk before returning. It shows the same Polaroid at capture time
 and does not collect a strip. Call it with a `SnapDelivery` store. A null handle
 means the snap wasn't accepted (for example, the camera is busy or staging
 failed). Only one snap per `SnitchCam` can wait for a note, encode a strip, or
@@ -122,6 +122,23 @@ if (pending != null)
 }
 ```
 
+For a recognized voice command, record the frame-clock timestamp of the first
+PCM sample fed to the worker (`micStartOnFrameClock`). Reset it whenever you
+restart that stream. On the main thread, after the host accepts the command:
+
+```csharp
+var onset = SnapAnchor.FromSample(phrase.OnsetSample, VoiceActivity.SampleRate, micStartOnFrameClock);
+var pending = cam.BeginSnap(head, now, phrase.Text, anchor: onset);
+```
+
+`BeginSnap` and `TrySnap` use the closest retained frame for an in-range anchor.
+An absent or invalid anchor, an empty ring, an anchor older than the oldest
+frame, or an anchor more than 250 ms ahead of the newest frame uses a fresh
+still. `TrySnap` still collects a strip; on fallback it centers the strip on
+`now`. Snap JSON reports `anchor` (`onset` or `fresh`) and `anchorOffsetMs`
+(the still timestamp `t` minus the requested anchor, in milliseconds; zero if
+no usable anchor timestamp was supplied). `triggerT` is when capture was requested.
+
 `AttachNote` copies the WAV into memory. `Publish` submits it and starts local
 publication; observe `SnapOutcome` for the result. A successful `Cancel`
 discards the snap. Unsubmitted notes are dropped on timeout (30 seconds by
@@ -135,8 +152,11 @@ To remove spoken commands, retain the recognition results for the start and
 send utterances, preferably their matching finals. `OnsetSample` and `EndSample`
 are absolute 16 kHz stream positions estimated from voice activity, not exact
 word boundaries. `EndSample` is exclusive and independent of the worker's
-`SamplesProcessed` cursor, which may include trailing silence. Use the same
-continuous stream for recognition and note capture. Subtract the stream
+`SamplesProcessed` cursor, which may include trailing silence. The worker only
+reports `EndSample` for `IBlockBoundaryPhraseSpotter` implementations. A custom
+spotter that can emit an endpoint within a block must not opt in: later samples
+in that block may contain narration. Use the same continuous stream for
+recognition and note capture. Subtract the stream
 position of the first retained PCM sample, including pre-roll, to get note-relative
 ranges. Omit a range if either boundary is unknown or the utterance isn't a command.
 

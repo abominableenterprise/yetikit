@@ -38,6 +38,42 @@ namespace YetiKit.Playtest.Tests
             Assert.That(rules.Match(Phrase("start", 3), 1), Is.EqualTo(PhraseTrigger.Start));
         }
 
+        sealed class IncrementalSpotter : IPhraseSpotter
+        {
+            readonly int endpoint;
+            public IncrementalSpotter(int endpoint) => this.endpoint = endpoint;
+            public event Action<string, bool> Phrase;
+            public void Accept(short[] pcm, int count)
+            {
+                // Emit a final as soon as the endpoint is reached, not at the end of the block.
+                for (int i = 0; i < count; i++)
+                    if (i + 1 == endpoint) Phrase?.Invoke("start", true);
+            }
+            public void Dispose() { }
+        }
+
+        [Test]
+        public void IncrementalFinalDoesNotExposeNoteSpeechAsCommandEnd()
+        {
+            const int quiet = VoiceActivity.SampleRate * 3 / 10;
+            const int endpoint = quiet * 2 + VoiceActivity.FrameSamples;
+            var pcm = new short[endpoint + quiet * 2];
+            Array.Fill(pcm, (short)2000, quiet, VoiceActivity.FrameSamples);
+            Array.Fill(pcm, (short)2000, endpoint, pcm.Length - endpoint);
+            using var ready = new ManualResetEventSlim();
+            using var worker = new RecognitionWorker(new IncrementalSpotter(endpoint));
+            var observed = default(RecognitionPhrase);
+            worker.Phrase += phrase => { observed = phrase; ready.Set(); };
+
+            Assert.That(worker.TryEnqueue(pcm), Is.True);
+            Assert.That(ready.Wait(3000), Is.True, "No phrase from worker");
+            Assert.That(worker.Stop(3000), Is.True);
+            Assert.That(worker.Failure, Is.Null);
+            Assert.That(observed.IsFinal, Is.True);
+            Assert.That(observed.OnsetSample, Is.EqualTo(quiet));
+            Assert.That(observed.EndSample, Is.EqualTo(-1), "The rest of the block belongs to the note");
+        }
+
         sealed class CustomGrammar : IPhraseGrammar
         {
             public System.Collections.Generic.IReadOnlyList<string> StartPhrases { get; } = new[] { "begin note" };

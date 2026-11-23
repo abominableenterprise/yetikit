@@ -8,7 +8,7 @@ using UnityEngine;
 namespace YetiKit.Playtest
 {
     /// <summary>Android player adapter for the Vosk C API. No Java or managed wrapper required.</summary>
-    public sealed class VoskPhraseSpotter : IPhraseSpotter
+    public sealed class VoskPhraseSpotter : IBlockBoundaryPhraseSpotter
     {
         const string Lib = "vosk";
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] static extern IntPtr vosk_model_new([MarshalAs(UnmanagedType.LPUTF8Str)] string path);

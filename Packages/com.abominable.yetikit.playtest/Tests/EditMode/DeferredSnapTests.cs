@@ -86,7 +86,8 @@ namespace YetiKit.Playtest.Tests
         [TestCase(true)]
         public void PublishesTrimmedPcmAndRecordsOnlyAppliedCuts(bool replaceWithUntrimmed)
         {
-            var pending = cam.BeginSnap(head, Now);
+            cam.Tick(head, Now - 0.25);
+            var pending = cam.BeginSnap(head, Now, anchor: Now - 0.25);
             var pcm = new short[16000];
             for (int i = 0; i < pcm.Length; i++) pcm[i] = (short)i;
             Assert.That(pending.AttachNotePcm(pcm, new NoteTriggerRange(0, 3200), new NoteTriggerRange(12800, 16000)), Is.True);
@@ -106,7 +107,58 @@ namespace YetiKit.Playtest.Tests
             var marker = JsonUtility.FromJson<SnapDelivery.Manifest>(File.ReadAllText(Path.Combine(published, SnapDelivery.Marker)));
             Assert.That((context.noteTrimLeadMs, context.noteTrimTailMs), Is.EqualTo((trimMs, trimMs)));
             Assert.That((marker.context.noteTrimLeadMs, marker.context.noteTrimTailMs), Is.EqualTo((trimMs, trimMs)));
+            Assert.That((context.anchor, context.anchorOffsetMs), Is.EqualTo(("onset", 0d)));
             Assert.That(manifest.files.Length, Is.EqualTo(3));
+        }
+
+        [TestCase(9.125, 9.25, "onset", 125)]
+        [TestCase(8.5, Now, "fresh", 1500)]
+        [TestCase(11, Now, "fresh", -1000)]
+        [TestCase(null, Now, "fresh", 0)]
+        public void StagesAnchoredStillOrFallsBackToFresh(double? anchor, double frameTime, string source, double offsetMs)
+        {
+            head.backgroundColor = Color.green;
+            cam.Tick(head, 9);
+            head.backgroundColor = Color.red;
+            cam.Tick(head, 9.25);
+            head.backgroundColor = Color.blue;
+            var pending = cam.BeginSnap(head, Now, "capture", anchor: anchor);
+            Assert.That(pending, Is.Not.Null);
+            var dir = Directory.GetDirectories(store.Outbox).Single();
+            var image = new Texture2D(2, 2);
+            try
+            {
+                Assert.That(image.LoadImage(File.ReadAllBytes(Path.Combine(dir, pending.Id + ".jpg"))), Is.True);
+                var pixel = image.GetPixel(0, 0);
+                Assert.That(source == "onset" ? pixel.r : pixel.b, Is.GreaterThan(0.8f));
+            }
+            finally { Object.DestroyImmediate(image); }
+            var data = JsonUtility.FromJson<SnapContext>(File.ReadAllText(Path.Combine(dir, pending.Id + ".json")));
+            Assert.That((data.t, data.triggerT, data.anchor, data.anchorOffsetMs), Is.EqualTo((frameTime, Now, source, offsetMs)));
+        }
+
+        [TestCase(9.125, 9.25, "onset", 125)]
+        [TestCase(8.5, Now, "fresh", 1500)]
+        [TestCase(null, Now, "fresh", 0)]
+        public void OneShotPublishesAnchorMetadata(double? anchor, double frameTime, string source, double offsetMs)
+        {
+            cam.Tick(head, 9);
+            cam.Tick(head, 9.25);
+            Assert.That(cam.TrySnap(head, Now, anchor: anchor), Is.True);
+            Assert.That(cam.TryShutdown(WaitMs), Is.True);
+            var (dir, _) = new Outbox(store).Next("p1");
+            var data = JsonUtility.FromJson<SnapContext>(File.ReadAllText(Directory.GetFiles(dir, "*.json").Single()));
+            Assert.That((data.t, data.triggerT, data.anchor, data.anchorOffsetMs), Is.EqualTo((frameTime, Now, source, offsetMs)));
+        }
+
+        [Test]
+        public void AnchorFallsBackToFreshWithNoHistory()
+        {
+            var pending = cam.BeginSnap(head, Now, anchor: Now - 1);
+            Assert.That(pending, Is.Not.Null);
+            var dir = Directory.GetDirectories(store.Outbox).Single();
+            var data = JsonUtility.FromJson<SnapContext>(File.ReadAllText(Path.Combine(dir, pending.Id + ".json")));
+            Assert.That((data.t, data.anchor, data.anchorOffsetMs), Is.EqualTo((Now, "fresh", 1000d)));
         }
 
         [Test]

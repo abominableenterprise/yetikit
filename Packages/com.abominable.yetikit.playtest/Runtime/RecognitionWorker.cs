@@ -11,8 +11,8 @@ namespace YetiKit.Playtest
         public readonly long UtteranceId, SamplesProcessed;
         /// <summary>Absolute PCM sample offset, or -1 if no initial quiet boundary was observed.</summary>
         public readonly long OnsetSample;
-        /// <summary>Exclusive end of the last voiced VAD frame for this utterance, or -1 if unobserved.
-        /// Approximate, especially for partial results; use the matching final to refine the estimate.</summary>
+        /// <summary>Exclusive end of the last voiced VAD frame for this utterance, or -1 if unobserved
+        /// or the spotter does not guarantee block-aligned endpoints. Use the matching final to refine the estimate.</summary>
         public readonly long EndSample;
 
         public RecognitionPhrase(string text, bool isFinal, long utteranceId, long onsetSample, long samplesProcessed)
@@ -33,6 +33,7 @@ namespace YetiKit.Playtest
     public sealed class RecognitionWorker : IDisposable
     {
         readonly IPhraseSpotter spotter;
+        readonly bool hasBlockBounds;
         readonly Queue<short[]> audio = new Queue<short[]>();
         readonly object gate = new object();
         readonly VoiceActivity vad = new VoiceActivity();
@@ -47,6 +48,7 @@ namespace YetiKit.Playtest
         public RecognitionWorker(IPhraseSpotter spotter)
         {
             this.spotter = spotter ?? throw new ArgumentNullException(nameof(spotter));
+            hasBlockBounds = spotter is IBlockBoundaryPhraseSpotter;
             thread = new Thread(Run) { IsBackground = true };
             thread.Start();
         }
@@ -111,7 +113,7 @@ namespace YetiKit.Playtest
 
         void OnPhrase(string text, bool final)
         {
-            var phrase = new RecognitionPhrase(text, final, utteranceId, onset, vad.SamplesProcessed, end);
+            var phrase = new RecognitionPhrase(text, final, utteranceId, onset, vad.SamplesProcessed, hasBlockBounds ? end : -1);
             if (!string.IsNullOrEmpty(text)) onsetLatched = true;
             if (final) { utteranceId++; onset = end = -1; onsetLatched = false; }
             Phrase?.Invoke(phrase);

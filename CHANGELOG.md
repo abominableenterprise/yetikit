@@ -9,6 +9,8 @@ notes. Chunk and tuning schema changes count as breaking changes too.
 ## [Unreleased]
 
 ### Added
+- Playtest snaps can use a speech-onset timestamp to select a recent frame,
+  falling back to a fresh still when that timestamp is unavailable or out of range.
 - Playtest voice notes can optionally trim spoken snap and send commands using
   recognition sample bounds. Snap context records the actual trim durations.
 
